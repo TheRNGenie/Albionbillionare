@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Albion Billionaire</title>
+<meta name="description" content="A year-long plan to reach 1 billion silver in Albion Online, with live market prices, profit calculators and a wiki reference.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral+SC:wght@500;700&family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap top-inner">
+    <div class="brand">
+      <span class="coin" aria-hidden="true"></span>
+      <div>
+        <h1>Albion Billionaire</h1>
+        <p class="sub">One billion silver in 365 days</p>
+      </div>
+    </div>
+    <div class="goal" id="goalMeter" aria-live="polite"></div>
+  </div>
+  <nav class="tabs wrap" role="tablist" aria-label="Sections">
+    <button role="tab" data-tab="plan" id="tab-plan">Plan</button>
+    <button role="tab" data-tab="methods" id="tab-methods">Methods</button>
+    <button role="tab" data-tab="market" id="tab-market">Market</button>
+    <button role="tab" data-tab="calc" id="tab-calc">Calculators</button>
+    <button role="tab" data-tab="wiki" id="tab-wiki">Wiki</button>
+    <button role="tab" data-tab="progress" id="tab-progress">Progress</button>
+  </nav>
+</header>
+
+<main class="wrap">
+  <section class="panel" id="panel-plan" role="tabpanel" aria-labelledby="tab-plan"></section>
+  <section class="panel" id="panel-methods" role="tabpanel" aria-labelledby="tab-methods" hidden></section>
+  <section class="panel" id="panel-market" role="tabpanel" aria-labelledby="tab-market" hidden></section>
+  <section class="panel" id="panel-calc" role="tabpanel" aria-labelledby="tab-calc" hidden></section>
+  <section class="panel" id="panel-wiki" role="tabpanel" aria-labelledby="tab-wiki" hidden></section>
+  <section class="panel" id="panel-progress" role="tabpanel" aria-labelledby="tab-progress" hidden></section>
+</main>
+
+<footer class="wrap foot">
+  <p>Prices from the <a href="https://www.albion-online-data.com/" target="_blank" rel="noopener">Albion Online Data Project</a>. Item names from <a href="https://github.com/ao-data/ao-bin-dumps" target="_blank" rel="noopener">ao-bin-dumps</a>. Income figures are estimates; check prices before you commit silver. Not affiliated with Sandbox Interactive.</p>
+</footer>
+
+<script src="assets/js/data.js"></script>
+<script src="assets/js/api.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>
