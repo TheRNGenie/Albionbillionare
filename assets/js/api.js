@@ -103,6 +103,13 @@ ABP.api = (() => {
     return rows.map((r) => ({ city: r.location, data: (r.data || []).slice(-7) }));
   }
 
+  /* Hourly sales history (about the last week): [{t: Date, price, count}] for one item and market. */
+  async function hourly(id, city, quality = 1) {
+    const rows = await getJSON(`${host()}/api/v2/stats/history/${encodeURIComponent(id)}.json?locations=${encodeURIComponent(city)}&qualities=${quality}&time-scale=1`);
+    const r = rows.find((x) => x.location === city) || rows[0];
+    return (r?.data || []).map((p) => ({ t: new Date(p.timestamp + (p.timestamp.endsWith("Z") ? "" : "Z")), price: p.avg_price, count: p.item_count }));
+  }
+
   /* 7-day sales per item and market: map[id][city] = { sold, perDay, avg }. */
   async function volumes(ids, locations, quality = 1) {
     const loc = encodeURIComponent(locations.join(","));
@@ -121,8 +128,8 @@ ABP.api = (() => {
     return out;
   }
 
-  async function gold() {
-    const rows = await getJSON(`${host()}/api/v2/stats/gold.json?count=24`);
+  async function gold(count = 24) {
+    const rows = await getJSON(`${host()}/api/v2/stats/gold.json?count=${count}`);
     return rows;
   }
 
@@ -150,6 +157,7 @@ ABP.api = (() => {
 
   return {
     character,
+    hourly,
     get server() { return server; },
     set server(v) { server = v; cache.clear(); try { localStorage.setItem("abp.server", v); } catch (e) {} },
     host, prices, index, history, volumes, gold, itemNames, nameOf,

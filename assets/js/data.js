@@ -13,9 +13,9 @@ ABP.FEES = {
 };
 
 ABP.SERVERS = [
-  { id: "west", label: "Americas", host: "https://west.albion-online-data.com", gameinfo: "https://gameinfo.albiononline.com" },
-  { id: "europe", label: "Europe", host: "https://europe.albion-online-data.com", gameinfo: "https://gameinfo-ams.albiononline.com" },
-  { id: "east", label: "Asia", host: "https://east.albion-online-data.com", gameinfo: "https://gameinfo-sgp.albiononline.com" },
+  { id: "west", label: "Americas", host: "https://west.albion-online-data.com", gameinfo: "https://gameinfo.albiononline.com", resetUTC: 10 },
+  { id: "europe", label: "Europe", host: "https://europe.albion-online-data.com", gameinfo: "https://gameinfo-ams.albiononline.com", resetUTC: 10 },
+  { id: "east", label: "Asia", host: "https://east.albion-online-data.com", gameinfo: "https://gameinfo-sgp.albiononline.com", resetUTC: 23 },
 ];
 
 ABP.CITIES = ["Caerleon", "Bridgewatch", "Fort Sterling", "Lymhurst", "Martlock", "Thetford", "Brecilien"];
@@ -658,4 +658,21 @@ ABP.PACE = {
   gathering: { length: "An afternoon", hook: "Outdoors and relaxing: gather in a black zone with a podcast on, and every node pays straight away.", plan: ["Pick the resource you have the most gathering spec in.", "Gather in a zone one tier above your usual and bank each full bag, so you never carry too much.", "Refine it with focus or sell it raw, whichever the Market tab says pays more."] },
   pve: { length: "Two or three sessions", hook: "Action instead of spreadsheets: fight for loot, and the fame raises your combat spec too.", plan: ["Run solo dungeons or Mists in a cheap set you can afford to lose five times.", "Sell all loot into buy orders right away, and value any equipment you keep in the Wealth tab.", "Count silver per hour after gear losses before making it a habit."] },
   fishing: { length: "A lazy evening", hook: "The most relaxed income in the game: fish by a quiet lake, with almost nothing at risk.", plan: ["Grab a rod and bait and fish the highest-tier water your spec allows.", "Chop the fish for chopped fish, or sell the rare catches as they are.", "Keep anything that makes seafood meals for your own island or crafting."] },
+};
+
+/* ---------- Time ----------
+   All times show in Vancouver time (America/Vancouver, PST/PDT handled by the browser).
+   Daily maintenance: 10:00 UTC on Americas and Europe (Albion Online announcement, about an hour of downtime);
+   Asia goes down around 23:00 UTC (observed by the AlbionZVZ downtime monitor). The server day, daily
+   challenges and the daily production bonus roll over at maintenance. */
+ABP.TZ = "America/Vancouver";
+ABP.TIMES = {
+  maintenanceMinutes: 60,
+  cropHours: 22,
+  focusPerDay: 10000,
+  focusMax: 30000,
+  sources: [
+    { label: "Albion Online on X: Asia extra maintenance at 10:00 UTC alongside the regular Europe and Americas maintenance", url: "https://x.com/albiononline/status/2043973647207936472" },
+    { label: "AlbionZVZ downtime monitor (Asia downtime starts about 23:00 UTC)", url: "https://www.albionzvz.com/albion-downtime" },
+  ],
 };

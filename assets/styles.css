@@ -399,3 +399,14 @@ details.how summary { font-size: 0.9rem; }
 .pace-steps li::marker { color: #7a4f10; font-weight: 700; }
 .welcome .stat { border-left-color: #a8844a; text-align: left; }
 .welcome .stat .small { color: #2e2114; }
+.clock { font-size: 0.8rem; color: var(--accent); }
+tr.on td { background: var(--gold-soft); }
+.hourbars { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 2px; height: 160px; padding-bottom: 20px; border-bottom: 0; }
+.hb { position: relative; height: 100%; border-radius: 2px; }
+.hb:focus-visible { outline: 2px solid var(--accent); }
+.hb::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid var(--chart-grid); }
+.hb .bar { position: absolute; left: 1px; right: 1px; }
+.hb .bar.up { bottom: 50%; background: var(--s2); border-radius: 3px 3px 0 0; }
+.hb .bar.down { top: 50%; background: var(--s1); border-radius: 0 0 3px 3px; }
+.hb .hl { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); font-size: 0.68rem; color: var(--muted); white-space: nowrap; padding-top: 4px; }
+.hb:hover .bar, .hb:focus .bar { filter: brightness(1.15); }

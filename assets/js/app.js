@@ -31,7 +31,7 @@
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
   /* ---------- Tabs ---------- */
-  const TABS = ["plan", "picks", "methods", "market", "calc", "wiki", "wealth", "progress"];
+  const TABS = ["plan", "picks", "methods", "market", "calc", "wiki", "wealth", "progress", "times"];
   const rendered = {};
   function show(tab) {
     if (!TABS.includes(tab)) tab = "plan";
@@ -1657,6 +1657,223 @@
   $("#wheel").addEventListener("click", (e) => { if (e.target.id === "wheel") closeWheel(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#wheel").hidden) closeWheel(); });
 
+  /* ---------- Times: everything shown in Vancouver time ---------- */
+  const TZ = ABP.TZ;
+  const van = (d, o) => d.toLocaleString("en-US", Object.assign({ timeZone: TZ }, o));
+  const vanTime = (d) => van(d, { hour: "numeric", minute: "2-digit" });
+  const vanDay = (d) => van(d, { weekday: "short", month: "short", day: "numeric" });
+  const vanDate = (d) => van(d, { month: "short", day: "numeric", year: "numeric" });
+  const vanKey = (d) => d.toLocaleDateString("en-CA", { timeZone: TZ });
+  const vanHour = (d) => +d.toLocaleString("en-US", { timeZone: TZ, hour: "numeric", hourCycle: "h23" }) % 24;
+  const tzName = (d = new Date()) => (d.toLocaleString("en-US", { timeZone: TZ, timeZoneName: "short" }).split(" ").pop());
+  const hourLabel = (h) => `${h % 12 || 12} ${h < 12 ? "AM" : "PM"}`;
+  function until(ms) {
+    if (ms <= 0) return "now";
+    const m = Math.round(ms / 6e4), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mm = m % 60;
+    return d ? `${d}d ${h}h` : h ? `${h}h ${String(mm).padStart(2, "0")}m` : `${mm}m`;
+  }
+  /* Next daily maintenance for a server; "down" while inside the maintenance window. */
+  function resetInfo(srv, now = new Date()) {
+    const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), srv.resetUTC));
+    const win = ABP.TIMES.maintenanceMinutes * 6e4;
+    if (now >= t && now < t.getTime() + win) return { down: true, at: t, back: new Date(t.getTime() + win) };
+    if (now >= t) t.setUTCDate(t.getUTCDate() + 1);
+    return { down: false, at: t, back: new Date(t.getTime() + win) };
+  }
+  const serverNow = () => ABP.SERVERS.find((s) => s.id === ABP.api.server) || ABP.SERVERS[0];
+  function tickClock() {
+    const now = new Date(), srv = serverNow(), r = resetInfo(srv, now);
+    const el = $("#clock");
+    if (el) el.textContent = `Vancouver ${vanTime(now)} ${tzName(now)} · ${srv.label} ${r.down ? "in daily maintenance, back about " + vanTime(r.back) : "reset in " + until(r.at - now)}`;
+    if (!$("#panel-times")?.hidden) drawTimes(false);
+  }
+  setInterval(tickClock, 30000);
+
+  const timers = Object.assign({ planted: null, focus: null, focusAt: null, premiumStart: null }, store.get("timers", {}));
+  const saveTimers = () => store.set("timers", timers);
+  const bh = Object.assign({ preset: "crop", custom: "", city: "Caerleon" }, store.get("besthours", {}));
+
+  function renderTimes() {
+    const p = $("#panel-times");
+    p.innerHTML = `
+      <div class="panel-head">
+        <span class="label">Clock</span>
+        <h2>Times</h2>
+        <p>Server resets, your timers and your plan's milestones, all in Vancouver time (${tzName()}). Daylight saving is handled for you.</p>
+      </div>
+      <div class="box stack">
+        <div class="row spread"><h3>Server resets</h3><span class="small muted" id="tm-now"></span></div>
+        <p class="small muted">Each server goes down once a day for maintenance, for about an hour. The server day rolls over then: daily challenges and the daily production bonus reset, and you get disconnected, so don't start a long transport or a dungeon in the half hour before.</p>
+        <div id="tm-resets"></div>
+        <p class="small muted">Sources: ${ABP.TIMES.sources.map((s) => `<a href="${s.url}" target="_blank" rel="noopener">${esc(s.label)}</a>`).join("; ")}.</p>
+      </div>
+      <div class="grid-2">
+        <div class="box stack">
+          <h3>Your timers</h3>
+          <div class="controls">
+            <label class="field"><span>Island planted (hours ago)</span><input type="number" id="tm-planted" min="0" max="72" step="0.25" placeholder="0 = just now"></label>
+            <div class="field"><span>&nbsp;</span><button class="btn ghost" type="button" id="tm-plant-now">Planted just now</button></div>
+            <label class="field"><span>Focus you have now</span><input type="number" id="tm-focus" min="0" max="30000" step="100"></label>
+          </div>
+          <div class="stats" id="tm-timers"></div>
+          <p class="small muted">Crops and herbs are ready about ${ABP.TIMES.cropHours} hours after planting. Premium refills ${full(ABP.TIMES.focusPerDay)} focus a day up to ${full(ABP.TIMES.focusMax)}; focus that would go past the cap is wasted, so spend it before it fills.</p>
+        </div>
+        <div class="box stack">
+          <h3>Milestones</h3>
+          <div class="controls">
+            <label class="field"><span>Premium started</span><input type="date" id="tm-prem"></label>
+          </div>
+          <div id="tm-miles"></div>
+        </div>
+      </div>
+      <div class="box stack" id="besthours">
+        <h3>Best hours to buy and sell</h3>
+        <p class="small muted">This checks whether the time of day really changes the price. It takes the last week of hourly sales, compares each hour with that day's average so a rising or falling market doesn't skew it, and only calls an hour better when the gap is bigger than the day-to-day noise and shows up on most days.</p>
+        <div class="controls">
+          <label class="field"><span>Strategy</span><select id="bh-preset">
+            <option value="crop">Island: selling your crop</option>
+            <option value="refine">Refining: selling refined output</option>
+            <option value="bm">Black Market: selling into BM orders</option>
+            <option value="gold">Buying or selling gold</option>
+            <option value="custom">Any item (type its id)</option>
+          </select></label>
+          <label class="field" id="bh-custom-f"><span>Item id</span><input type="text" id="bh-custom" placeholder="e.g. T6_BAG"></label>
+          <label class="field" id="bh-city-f"><span>Market</span><select id="bh-city">${ABP.CITIES.concat(ABP.BM).map((c) => `<option>${c}</option>`).join("")}</select></label>
+          <div class="field"><span>&nbsp;</span><button class="btn" type="button" id="bh-go">Check</button></div>
+        </div>
+        <div id="bh-out"></div>
+      </div>`;
+    $("#tm-planted").value = timers.planted ? +((Date.now() - timers.planted) / 36e5).toFixed(2) : "";
+    $("#tm-planted").addEventListener("change", (e) => { timers.planted = e.target.value === "" ? null : Date.now() - (+e.target.value || 0) * 36e5; saveTimers(); drawTimes(); });
+    $("#tm-plant-now").addEventListener("click", () => { timers.planted = Date.now(); $("#tm-planted").value = 0; saveTimers(); drawTimes(); });
+    $("#tm-focus").value = timers.focus != null ? Math.round(focusNow()) : "";
+    $("#tm-focus").addEventListener("change", (e) => { timers.focus = e.target.value === "" ? null : Math.max(0, Math.min(ABP.TIMES.focusMax, +e.target.value || 0)); timers.focusAt = Date.now(); saveTimers(); drawTimes(); });
+    $("#tm-prem").value = timers.premiumStart || plan.date;
+    $("#tm-prem").addEventListener("change", (e) => { timers.premiumStart = e.target.value || null; saveTimers(); drawTimes(); });
+    $("#bh-preset").value = bh.preset; $("#bh-custom").value = bh.custom; $("#bh-city").value = bh.city;
+    const syncBh = () => {
+      $("#bh-custom-f").hidden = bh.preset !== "custom";
+      $("#bh-city-f").hidden = bh.preset === "gold";
+    };
+    $("#bh-preset").addEventListener("change", (e) => {
+      bh.preset = e.target.value;
+      const def = bhTarget();
+      if (def.city) { bh.city = def.city; $("#bh-city").value = def.city; }
+      store.set("besthours", bh); syncBh();
+    });
+    $("#bh-custom").addEventListener("change", (e) => { bh.custom = e.target.value.trim().toUpperCase(); store.set("besthours", bh); });
+    $("#bh-city").addEventListener("change", (e) => { bh.city = e.target.value; store.set("besthours", bh); });
+    $("#bh-go").addEventListener("click", bestHours);
+    syncBh();
+    drawTimes();
+  }
+  function focusNow() {
+    if (timers.focus == null) return null;
+    return Math.min(ABP.TIMES.focusMax, timers.focus + ((Date.now() - timers.focusAt) / 864e5) * ABP.TIMES.focusPerDay);
+  }
+  function drawTimes() {
+    const now = new Date();
+    if (!$("#tm-resets")) return;
+    $("#tm-now").textContent = `${van(now, { weekday: "long", month: "short", day: "numeric" })}, ${vanTime(now)} ${tzName(now)}`;
+    const cur = serverNow().id;
+    $("#tm-resets").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Server</th><th>Next maintenance (Vancouver)</th><th>Starts in</th><th>Back about</th></tr></thead><tbody>${ABP.SERVERS.map((s) => {
+      const r = resetInfo(s, now);
+      return `<tr${s.id === cur ? ' class="on"' : ""}><td>${esc(s.label)}${s.id === cur ? " <small class=\"muted\">(your market server)</small>" : ""}</td><td>${r.down ? "Down now" : `${vanDay(r.at)}, ${vanTime(r.at)}`}</td><td class="num">${r.down ? "–" : until(r.at - now)}</td><td>${vanTime(r.back)}</td></tr>`;
+    }).join("")}</tbody></table></div>`;
+    const cards = [];
+    if (timers.planted) {
+      const ready = new Date(timers.planted + ABP.TIMES.cropHours * 36e5);
+      cards.push(`<div class="stat ${ready <= now ? "key" : ""}"><span class="label">Island harvest</span><span class="v">${ready <= now ? "Ready" : until(ready - now)}</span><span class="small muted">${ready <= now ? "since " : ""}${vanDay(ready)}, ${vanTime(ready)}</span></div>`);
+    }
+    const f = focusNow();
+    if (f != null) {
+      const full_ = new Date(Date.now() + ((ABP.TIMES.focusMax - f) / ABP.TIMES.focusPerDay) * 864e5);
+      cards.push(`<div class="stat ${f >= ABP.TIMES.focusMax ? "key" : ""}"><span class="label">Focus now</span><span class="v">${full(f)}</span><span class="small muted">${f >= ABP.TIMES.focusMax ? "Full: you are wasting regen" : `full ${vanDay(full_)}, ${vanTime(full_)}`}</span></div>`);
+    }
+    $("#tm-timers").innerHTML = cards.join("") || `<p class="small muted">Enter when you planted or how much focus you have and the countdowns appear here.</p>`;
+    const prof = profileOf(plan.profile);
+    const sim = simulate(prof, plan.start, plan.hours ?? prof.hours, plan.skill);
+    const start = new Date(plan.date + "T12:00:00");
+    const premStart = new Date((timers.premiumStart || plan.date) + "T12:00:00");
+    const premEnd = addDays(premStart, 365);
+    const dayNo = Math.floor((now - new Date(plan.date + "T00:00:00")) / 864e5) + 1;
+    const rows = [
+      ["Plan day", dayNo >= 1 ? `Day ${Math.min(dayNo, 365)} of 365` : `Starts ${vanDate(start)}`, ""],
+      ...ABP.PHASES.slice(1).map((ph, i) => { const d = sim.phaseDays[i + 1]; return [`Phase ${i + 2}: ${ph.name}`, d == null ? "Not this year" : vanDate(addDays(start, d)), d == null ? "" : until(addDays(start, d) - now)]; }),
+      ["1 billion silver (projected)", sim.hit ? vanDate(addDays(start, sim.hit)) : "Not this year", sim.hit ? until(addDays(start, sim.hit) - now) : ""],
+      ["Plan year ends", vanDate(addDays(start, 365)), until(addDays(start, 365) - now)],
+      ["Premium runs out", vanDate(premEnd), until(premEnd - now)],
+    ];
+    $("#tm-miles").innerHTML = `<div class="table-wrap"><table><tbody>${rows.map(([a, b, c]) => `<tr><td>${esc(a)}</td><td>${esc(b)}</td><td class="num muted">${c && c !== "now" ? "in " + c : c === "now" ? "reached" : ""}</td></tr>`).join("")}</tbody></table></div>
+      <p class="small muted">Phase and billion dates come from your plan's projection on the Plan tab.</p>`;
+  }
+
+  function bhTarget() {
+    const rfc = store.get("calc.refine", {});
+    if (bh.preset === "crop") { const c = ABP.CROPS.concat(ABP.HERBS)[wi.crop] || ABP.CROPS[4]; return { id: c.crop, name: `T${c.tier} ${c.name}`, city: null }; }
+    if (bh.preset === "refine") { const r = ABP.RESOURCES.find((x) => x.key === (rfc.res || wi.res)) || ABP.RESOURCES[0]; return { id: `T${wi.tier}_${r.refined}`, name: `T${wi.tier} ${r.refinedName}`, city: r.city }; }
+    if (bh.preset === "bm") return { id: `T6_${ABP.BM_GEAR[0][0]}`, name: `T6 ${ABP.BM_GEAR[0][1]}`, city: ABP.BM };
+    if (bh.preset === "gold") return { gold: true, name: "Gold" };
+    return { id: bh.custom, name: bh.custom, city: null };
+  }
+  /* Hour-of-day effect: each sale price divided by its own day's average, grouped by Vancouver hour. */
+  function hourEffect(points) {
+    const byDay = new Map();
+    for (const p of points) { if (!(p.price > 0)) continue; const k = vanKey(p.t); (byDay.get(k) || byDay.set(k, []).get(k)).push(p); }
+    const hours = Array.from({ length: 24 }, () => ({ r: [], vol: 0, above: 0, days: 0 }));
+    let days = 0, totalVol = 0;
+    for (const pts of byDay.values()) {
+      if (pts.length < 6) continue;
+      days++;
+      const w = pts.reduce((a, p) => a + (p.count || 1), 0);
+      const mean = pts.reduce((a, p) => a + p.price * (p.count || 1), 0) / w;
+      for (const p of pts) {
+        const h = hours[vanHour(p.t)], r = p.price / mean;
+        h.r.push(r); h.vol += p.count || 0; h.days++; if (r > 1) h.above++;
+        totalVol += p.count || 0;
+      }
+    }
+    const stats = hours.map((h, i) => {
+      const n = h.r.length;
+      if (n < 3) return { h: i, n, mean: null, vol: h.vol };
+      const m = h.r.reduce((a, x) => a + x, 0) / n;
+      const sd = Math.sqrt(h.r.reduce((a, x) => a + (x - m) ** 2, 0) / (n - 1));
+      return { h: i, n, mean: m, se: sd / Math.sqrt(n), vol: h.vol, aboveShare: h.above / n };
+    });
+    const ok = stats.filter((s) => s.mean != null);
+    const sig = (s, dir) => s && (dir > 0 ? s.mean - 1 > 2 * s.se && s.aboveShare >= 0.6 : 1 - s.mean > 2 * s.se && s.aboveShare <= 0.4);
+    const high = ok.slice().sort((a, b) => b.mean - a.mean)[0], low = ok.slice().sort((a, b) => a.mean - b.mean)[0];
+    return { stats, days, totalVol, high, low, highSig: sig(high, 1) && high.mean - 1 >= 0.01, lowSig: sig(low, -1) && 1 - low.mean >= 0.01 };
+  }
+  async function bestHours() {
+    const t = bhTarget(), out = $("#bh-out");
+    if (!t.gold && !/^T\d_[A-Z0-9_@]+$/i.test(t.id || "")) { out.innerHTML = `<p class="small">Type an item id such as T6_BAG. The Market tab's search shows ids.</p>`; return; }
+    out.innerHTML = `<p class="small muted">Loading a week of hourly sales for ${esc(t.name)}…</p>`;
+    let pts;
+    try {
+      pts = t.gold ? (await ABP.api.gold(24 * 14)).map((r) => ({ t: new Date(r.timestamp + (r.timestamp.endsWith("Z") ? "" : "Z")), price: r.price, count: 1 }))
+                   : await ABP.api.hourly(t.id, bh.city);
+    } catch (e) { out.innerHTML = `<p class="small">${esc(e.message)}</p>`; return; }
+    const eff = hourEffect(pts);
+    if (eff.days < 3) { out.innerHTML = `<p class="small">Not enough hourly sales for ${esc(t.name)}${t.gold ? "" : " in " + esc(bh.city)} (${eff.days} usable days). Pick a busier item or market; with this little data no time of day can be shown to help.</p>`; return; }
+    const pctOf = (m) => ((m - 1) * 100).toFixed(1) + "%";
+    const verdict = [];
+    if (eff.highSig) verdict.push(`<strong>Sell around ${hourLabel(eff.high.h)}:</strong> prices then average ${pctOf(eff.high.mean)} versus the day's average, above average on ${Math.round(eff.high.aboveShare * 100)}% of days.`);
+    if (eff.lowSig) verdict.push(`<strong>Buy around ${hourLabel(eff.low.h)}:</strong> prices then average ${pctOf(eff.low.mean)} versus the day's average, below average on ${Math.round((1 - eff.low.aboveShare) * 100)}% of days.`);
+    const busiest = eff.stats.slice().sort((a, b) => b.vol - a.vol).slice(0, 3).filter((s) => s.vol > 0).sort((a, b) => a.h - b.h);
+    const max = Math.max(0.005, ...eff.stats.filter((s) => s.mean != null).map((s) => Math.abs(s.mean - 1)));
+    out.innerHTML = `
+      <div class="notice"><p>${verdict.length ? verdict.join("<br>") : `<strong>No reliable best time for ${esc(t.name)}.</strong> Over ${eff.days} days the hour-to-hour differences stay inside normal day-to-day noise, so timing your trades here would not reliably earn more. Trade whenever suits you.`}</p></div>
+      ${!t.gold && busiest.length ? `<p class="small">Most sales happen around ${busiest.map((s) => hourLabel(s.h)).join(", ")}${eff.totalVol ? "" : ""}. Sell orders fill fastest when they are already up before then.</p>` : ""}
+      <div class="legend"><span><i style="background:var(--s2)"></i>Above the day's average</span><span><i style="background:var(--s1)"></i>Below the day's average</span><span class="muted">Hours in Vancouver time · ${eff.days} days of data</span></div>
+      <div class="hourbars" role="img" aria-label="Price by hour compared with each day's average">${eff.stats.map((s) => {
+        if (s.mean == null) return `<div class="hb" title="${hourLabel(s.h)}: too few sales"><span class="bar none"></span><span class="hl">${s.h % 3 ? "" : hourLabel(s.h)}</span></div>`;
+        const d = s.mean - 1, hgt = Math.max(2, (Math.abs(d) / max) * 50);
+        return `<div class="hb" tabindex="0" title="${hourLabel(s.h)}: ${pctOf(s.mean)} vs day average (${s.n} samples${t.gold ? "" : ", " + full(s.vol) + " sold"})"><span class="bar ${d >= 0 ? "up" : "down"}" style="height:${hgt.toFixed(1)}%"></span><span class="hl">${s.h % 3 ? "" : hourLabel(s.h)}</span></div>`;
+      }).join("")}</div>
+      <details><summary class="small">Table view</summary><div class="table-wrap"><table><thead><tr><th>Hour</th><th>Vs day average</th><th>± noise</th><th>Days above</th><th>Samples</th>${t.gold ? "" : "<th>Sold</th>"}</tr></thead><tbody>${eff.stats.filter((s) => s.mean != null).map((s) => `<tr><td>${hourLabel(s.h)}</td><td class="num">${pctOf(s.mean)}</td><td class="num">${(2 * s.se * 100).toFixed(1)}%</td><td class="num">${Math.round(s.aboveShare * 100)}%</td><td class="num">${s.n}</td>${t.gold ? "" : `<td class="num">${full(s.vol)}</td>`}</tr>`).join("")}</tbody></table></div></details>`;
+  }
+
   /* ---------- Change of pace: a method outside your path, for a short stint ---------- */
   let paceLast = null, paceReturn = null;
   function pickPace() {
@@ -1697,7 +1914,8 @@
   $("#pace").addEventListener("click", (e) => { if (e.target.id === "pace") closePace(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#pace").hidden) closePace(); });
 
-  const RENDER = { plan: renderPlan, picks: renderPicks, methods: renderMethods, market: renderMarket, calc: renderCalc, wiki: renderWiki, wealth: renderWealth, progress: renderProgress };
+  const RENDER = { plan: renderPlan, picks: renderPicks, methods: renderMethods, market: renderMarket, calc: renderCalc, wiki: renderWiki, wealth: renderWealth, progress: renderProgress, times: renderTimes };
+  tickClock();
 
   let rz;
   window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { drawPlanChart(); if (!$("#panel-progress").hidden) renderProgress(); }, 150); });
