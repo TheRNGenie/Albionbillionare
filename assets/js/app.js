@@ -1091,6 +1091,81 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#welcome").hidden) closeWelcome(); });
   $("#welcomeOpen").addEventListener("click", () => openWelcome(false));
 
+
+  /* ---------- Spend real money wheel ---------- */
+  const WHEEL_SLICES = 30;
+  const NO_LINES = [
+    "NO. Farm it in silver.", "NO. Buy premium with gold instead.", "NO. Your island says hi.",
+    "NO. Go refine something.", "NO. That money is a T8 bag in disguise.", "NO. The Black Market will provide.",
+  ];
+  const wheel = { rot: 0, spinning: false, tally: Object.assign({ yes: 0, no: 0 }, store.get("wheel", {})) };
+  function drawWheel() {
+    const c = $("#wh-canvas"); const dpr = window.devicePixelRatio || 1;
+    const size = c.clientWidth || 300;
+    c.width = size * dpr; c.height = size * dpr;
+    const ctx = c.getContext("2d"); ctx.scale(dpr, dpr);
+    const r = size / 2, step = (Math.PI * 2) / WHEEL_SLICES;
+    ctx.translate(r, r); ctx.rotate(wheel.rot);
+    for (let i = 0; i < WHEEL_SLICES; i++) {
+      const a0 = -Math.PI / 2 - step / 2 + i * step;
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, r, a0, a0 + step); ctx.closePath();
+      ctx.fillStyle = i === 0 ? "#e0b04f" : i % 2 ? "#3a2a1a" : "#5a3f24"; ctx.fill();
+      ctx.strokeStyle = "#a8844a"; ctx.lineWidth = 1; ctx.stroke();
+      const mid = a0 + step / 2, flip = Math.cos(mid + wheel.rot) < 0;
+      ctx.save(); ctx.rotate(mid); ctx.textBaseline = "middle";
+      ctx.fillStyle = i === 0 ? "#2e2114" : "#ecdfc4";
+      ctx.font = `700 ${i === 0 ? 13 : 10}px ${css("--font-display") || "serif"}`;
+      if (flip) { ctx.translate(r - 8, 0); ctx.rotate(Math.PI); ctx.textAlign = "left"; ctx.fillText(i === 0 ? "YES" : "NO", 0, 0); }
+      else { ctx.textAlign = "right"; ctx.fillText(i === 0 ? "YES" : "NO", r - 8, 0); }
+      ctx.restore();
+    }
+    ctx.beginPath(); ctx.arc(0, 0, r * 0.14, 0, Math.PI * 2); ctx.fillStyle = "#c3ccd3"; ctx.fill();
+    ctx.strokeStyle = "#a8844a"; ctx.lineWidth = 3; ctx.stroke();
+  }
+  function wheelTally() {
+    const t = wheel.tally;
+    $("#wh-tally").textContent = t.yes + t.no ? `Your spins so far: ${t.yes} yes, ${t.no} no.` : "";
+  }
+  function spinWheel() {
+    if (wheel.spinning) return;
+    /* Pick the slice first with a fair random draw: slice 0 is YES (1 in 30), the other 29 are NO. */
+    const buf = new Uint32Array(1); let pick;
+    do { crypto.getRandomValues(buf); } while (buf[0] >= Math.floor(2 ** 32 / WHEEL_SLICES) * WHEEL_SLICES);
+    pick = buf[0] % WHEEL_SLICES;
+    const yes = pick === 0;
+    const step = (Math.PI * 2) / WHEEL_SLICES;
+    const jitter = (Math.random() - 0.5) * step * 0.7;
+    const current = ((wheel.rot % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+    const target = ((Math.PI * 2 - pick * step + jitter) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    const delta = (target - current + Math.PI * 2) % (Math.PI * 2) + Math.PI * 2 * 6;
+    const from = wheel.rot, dur = matchMedia("(prefers-reduced-motion: reduce)").matches ? 1 : 4200, t0 = performance.now();
+    const out = $("#wh-result");
+    out.className = "wheel-result"; out.innerHTML = "&nbsp;";
+    wheel.spinning = true; $("#wh-spin").disabled = true;
+    const tick = (now) => {
+      const k = Math.min(1, (now - t0) / dur);
+      wheel.rot = from + delta * (1 - Math.pow(1 - k, 4));
+      drawWheel();
+      if (k < 1) return requestAnimationFrame(tick);
+      wheel.spinning = false; $("#wh-spin").disabled = false;
+      wheel.tally[yes ? "yes" : "no"]++; store.set("wheel", wheel.tally); wheelTally();
+      out.className = "wheel-result " + (yes ? "yes" : "no");
+      out.textContent = yes ? "YES. The wheel has spoken." : NO_LINES[Math.floor(Math.random() * NO_LINES.length)];
+    };
+    requestAnimationFrame(tick);
+  }
+  let wheelReturn = null;
+  function openWheel() {
+    wheelReturn = document.activeElement;
+    $("#wheel").hidden = false; drawWheel(); wheelTally(); $("#wh-spin").focus();
+  }
+  function closeWheel() { if (wheel.spinning) return; $("#wheel").hidden = true; wheelReturn?.focus?.(); }
+  $("#wheelOpen").addEventListener("click", openWheel);
+  $("#wh-spin").addEventListener("click", spinWheel);
+  $("#wh-close").addEventListener("click", closeWheel);
+  $("#wheel").addEventListener("click", (e) => { if (e.target.id === "wheel") closeWheel(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#wheel").hidden) closeWheel(); });
+
   const RENDER = { plan: renderPlan, picks: renderPicks, methods: renderMethods, market: renderMarket, calc: renderCalc, wiki: renderWiki, progress: renderProgress };
 
   let rz;

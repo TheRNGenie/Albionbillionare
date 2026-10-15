@@ -30,7 +30,8 @@
     <button role="tab" data-tab="calc" id="tab-calc">Calculators</button>
     <button role="tab" data-tab="wiki" id="tab-wiki">Wiki</button>
     <button role="tab" data-tab="progress" id="tab-progress">Progress</button>
-    <button class="chip welcome-btn" id="welcomeOpen" type="button">Welcome</button>
+    <button class="chip welcome-btn" id="wheelOpen" type="button">Spend real money?</button>
+    <button class="chip" id="welcomeOpen" type="button">Welcome</button>
   </nav>
 </header>
 
@@ -48,6 +49,16 @@
   <p>Prices from the <a href="https://www.albion-online-data.com/" target="_blank" rel="noopener">Albion Online Data Project</a>. Item names from <a href="https://github.com/ao-data/ao-bin-dumps" target="_blank" rel="noopener">ao-bin-dumps</a>. Income figures are estimates; check prices before you commit silver. Not affiliated with Sandbox Interactive.</p>
 </footer>
 
+<div class="welcome-back" id="wheel" role="dialog" aria-modal="true" aria-labelledby="wh-title" hidden>
+  <div class="welcome wheel-card">
+    <h2 id="wh-title">Should I spend real money?</h2>
+    <p class="small">One spin, one answer. The wheel has 30 slices: 1 says YES, 29 say NO.</p>
+    <div class="wheel-wrap"><canvas id="wh-canvas" width="300" height="300" aria-hidden="true"></canvas><span class="wheel-pointer" aria-hidden="true"></span></div>
+    <p class="wheel-result" id="wh-result" aria-live="polite">&nbsp;</p>
+    <div class="row"><button class="btn" type="button" id="wh-spin">Spin</button><button class="btn ghost" type="button" id="wh-close">Close</button></div>
+    <p class="small" id="wh-tally"></p>
+  </div>
+</div>
 <div class="welcome-back" id="welcome" role="dialog" aria-modal="true" aria-labelledby="wl-title" hidden></div>
 
 <script src="assets/js/data.js"></script>
