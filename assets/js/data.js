@@ -554,3 +554,44 @@ ABP.WIKI = [
     link: "https://www.albion-online-data.com/",
   },
 ];
+
+/* ---------- Specialization ----------
+   Focus cost = base × 0.5^(efficiency / 10,000) (official wiki: halved per 10,000 points).
+   Refining and crafting: every spec level under the same mastery adds 30 efficiency,
+   and the spec for the exact item or tier you make adds another 250 per level. */
+ABP.REFINE_FOCUS = {
+  4: [48, 89, 143, 239], 5: [89, 160, 269, 461], 6: [160, 284, 487, 844],
+  7: [284, 500, 866, 1508], 8: [500, 877, 1527, 2666],
+};
+ABP.focusCost = (base, efficiency) => base * Math.pow(0.5, efficiency / 10000);
+ABP.refineEfficiency = (specs, tier) => specs.reduce((s, v) => s + (+v || 0), 0) * 30 + (+specs[tier - 4] || 0) * 250;
+
+ABP.SPEC_DEFAULT = {
+  refine: { wood: [0, 0, 0, 0, 0], ore: [0, 0, 0, 0, 0], hide: [0, 0, 0, 0, 0], fiber: [0, 0, 0, 0, 0], rock: [0, 0, 0, 0, 0] },
+  craft: { mastery: 0, item: 0, others: 0, base: 1286 },
+  farm: { crop: 8, herb: 8 },
+  gather: 0,
+};
+ABP.spec = (() => {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem("abp.spec") || "null"); } catch (e) {}
+  const d = JSON.parse(JSON.stringify(ABP.SPEC_DEFAULT));
+  if (!s) return d;
+  return { refine: Object.assign(d.refine, s.refine || {}), craft: Object.assign(d.craft, s.craft || {}), farm: Object.assign(d.farm, s.farm || {}), gather: s.gather ?? 0 };
+})();
+ABP.saveSpec = () => { try { localStorage.setItem("abp.spec", JSON.stringify(ABP.spec)); } catch (e) {} };
+
+ABP.WIKI.splice(3, 0, {
+  id: "spec",
+  title: "Specialization",
+  body: [
+    "Focus cost is halved for every 10,000 focus cost efficiency. With every relevant node maxed it falls to 6.25% of the base cost.",
+    "Refining: each spec level in any tier of that refining line adds 30 efficiency, and each level in the tier you are refining adds 250 more. Five tiers at 100 plus the refined tier at 100 is 40,000 efficiency, a 93.75% discount.",
+    "Crafting: the family node (for example Sword Crafter) adds 30 per level, each other item spec in the family adds 30 per level, and the exact item's spec adds 280 per level (30 shared plus 250 specific).",
+    "Spec does not change the resource return rate. Return rate comes only from the city, focus and the daily bonus.",
+    "Higher crafting spec also raises your chance of better item quality, which sells for more.",
+    "Gathering: each level adds +0.5% gathering yield and faster gathering for that resource and tier.",
+    "Farming: crop, herb and animal tiers unlock in order on the Destiny Board, so your spec decides the highest tier you can plant or raise.",
+  ],
+  link: "https://wiki.albiononline.com/wiki/Specializations",
+});

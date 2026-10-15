@@ -143,14 +143,23 @@
   const profileOf = (id) => ABP.PROFILES.find((p) => p.id === id) || ABP.PROFILES[0];
   const phaseIdx = (cap) => ABP.PHASES.findIndex((p) => cap < p.until);
 
+  /* Focus income scales with refining spec. Rates assume about 10,000 focus efficiency at T6
+     (focus cost halved); an empty spec is treated as that baseline until the player enters theirs. */
+  function focusFactor() {
+    const effs = Object.values(ABP.spec.refine).map((sp) => ABP.refineEfficiency(sp, 6));
+    const best = Math.max(...effs);
+    if (best === 0) return { factor: 1, set: false, eff: 0 };
+    return { factor: Math.max(0.5, Math.min(2, Math.pow(2, (best - 10000) / 10000))), set: true, eff: best };
+  }
   function simulate(prof, start, hours, skill, days = ABP.DAYS) {
+    const ff = focusFactor().factor;
     let cap = start;
     const pts = [{ x: 0, y: cap }];
     const phaseDays = [0, null, null, null];
     let hit = null;
     for (let d = 1; d <= days; d++) {
       const P = prof.phases[phaseIdx(cap)];
-      cap += hours * P.active * skill + Math.min(cap, P.cap) * P.roi * skill + P.passive;
+      cap += hours * P.active * skill + Math.min(cap, P.cap) * P.roi * skill + P.passive * (0.5 + 0.5 * ff);
       const pi = phaseIdx(cap);
       if (pi > 0 && phaseDays[pi] == null) for (let i = 1; i <= pi; i++) if (phaseDays[i] == null) phaseDays[i] = d;
       if (hit == null && cap >= ABP.GOAL) hit = d;
@@ -236,7 +245,7 @@
       <div class="stat"><span class="label">Silver after 365 days</span><span class="v money">${fmt(sim.end)}</span></div>
       <div class="stat"><span class="label">Average needed a day</span><span class="v">${fmt(perDay)}</span><span class="small muted">${fmt(perDay * 7)} a week</span></div>
       <div class="stat"><span class="label">Day 30 target</span><span class="v">${fmt(sim.pts[30].y)}</span><span class="small muted">day 90: ${fmt(sim.pts[90].y)}</span></div>`;
-    $("#pl-note").textContent = `${prof.name}: ${hours} active hours a day plus daily island and focus income. The projection counts the silver you actually keep per hour after travel, order setup, quiet markets and losses, which runs well below the peak per-hour figures quoted on each method. A strong week can beat it and a bad patch can miss it.`;
+    $("#pl-note").textContent = `${prof.name}: ${hours} active hours a day plus daily island and focus income. The projection counts the silver you actually keep per hour after travel, order setup, quiet markets and losses, which runs well below the peak per-hour figures quoted on each method. A strong week can beat it and a bad patch can miss it. ${(() => { const f = focusFactor(); return f.set ? `Your best refining spec (${full(f.eff)} efficiency at T6) makes your daily focus worth ${f.factor >= 1 ? "" : "only "}${f.factor.toFixed(2)}× the baseline, which the projection includes.` : "Enter your refining spec under Calculators → Your spec to adjust focus income to your character."; })()}`;
     $("#pl-phases").innerHTML = ABP.PHASES.map((ph, i) => {
       const d = sim.phaseDays[i];
       const when = d == null ? "after this year" : i === 0 ? "from " + dateText(start) : "from " + dateText(addDays(start, d)) + " (day " + d + ")";
@@ -575,6 +584,39 @@
         <h2>Calculators</h2>
         <p>Every calculator uses premium fees: 4% sales tax and a 2.5% setup fee per order. Live prices fill in automatically and you can overwrite any of them.</p>
       </div>
+      <div class="box stack" id="spec-box">
+        <div class="row spread"><h3>Your spec</h3><span class="small muted">Saved in this browser. Best picks and your plan use it too.</span></div>
+        <p class="small muted">Copy the levels from your Destiny Board. Focus cost halves for every 10,000 focus cost efficiency: each level in a refining line adds 30, and each level in the tier you refine adds 250 more.</p>
+        <div class="grid-2">
+          <div class="stack" style="grid-column: 1 / -1">
+            <h4>Refining</h4>
+            <div class="controls">
+              <label class="field"><span>Refining line</span><select id="sp-res">${ABP.RESOURCES.map((r) => `<option value="${r.key}">${r.refinedName}</option>`).join("")}</select></label>
+              ${[4, 5, 6, 7, 8].map((t) => `<label class="field"><span>T${t} spec</span><input type="number" min="0" max="100" step="1" id="sp-r${t}"></label>`).join("")}
+            </div>
+            <div id="sp-refine-out" class="small"></div>
+          </div>
+          <div class="stack">
+            <h4>Crafting one item</h4>
+            <div class="controls">
+              <label class="field"><span>Family node (e.g. Sword Crafter)</span><input type="number" min="0" max="100" step="1" id="sp-cm"></label>
+              <label class="field"><span>This item's spec</span><input type="number" min="0" max="100" step="1" id="sp-ci"></label>
+              <label class="field"><span>Other item specs in family, added up</span><input type="number" min="0" step="1" id="sp-co"></label>
+              <label class="field"><span>Base focus cost (from game)</span><input type="number" min="1" step="any" id="sp-cb"></label>
+            </div>
+            <div id="sp-craft-out" class="small"></div>
+          </div>
+          <div class="stack">
+            <h4>Farming and gathering</h4>
+            <div class="controls">
+              <label class="field"><span>Highest crop tier you can plant</span><select id="sp-fc">${[1, 2, 3, 4, 5, 6, 7, 8].map((t) => `<option value="${t}">T${t}</option>`).join("")}</select></label>
+              <label class="field"><span>Highest herb tier you can plant</span><select id="sp-fh">${[2, 3, 4, 5, 6, 7, 8].map((t) => `<option value="${t}">T${t}</option>`).join("")}</select></label>
+              <label class="field"><span>Gathering spec (your main tier)</span><input type="number" min="0" max="100" step="1" id="sp-g"></label>
+            </div>
+            <div id="sp-farm-out" class="small"></div>
+          </div>
+        </div>
+      </div>
       <div class="box stack">
         <h3>Refining profit, T4 to T8</h3>
         <div class="controls">
@@ -590,7 +632,7 @@
         </div>
         <p class="small muted" id="rf-rates"></p>
         <div id="rf-out"></div>
-        <p class="small muted">Focus cost per refine depends on your spec. Read it from the refining window and type it in to see silver per focus point and the value of your 10,000 daily focus.</p>
+        <p class="small muted">Focus cost per refine comes from your refining spec above for this resource. If the game shows a different number, your spec entries are off.</p>
       </div>
       <div class="grid-2">
         <div class="box stack">
@@ -611,23 +653,59 @@
             <label class="field"><span>Crop or herb</span><select id="is-crop">${ABP.CROPS.concat(ABP.HERBS).map((c) => `<option value="${c.crop}">T${c.tier} ${c.name}</option>`).join("")}</select></label>
             <label class="field"><span>Plots planted</span><input type="number" id="is-plots" value="8" min="1"></label>
             <label class="field"><span>Plants per plot</span><input type="number" id="is-slots" value="9" min="1"></label>
-            <label class="field"><span>Harvest per plant</span><input type="number" id="is-yield" value="6" min="0" step="0.5"></label>
+            <label class="field"><span>Harvest per plant</span><input type="number" id="is-yield" value="9" min="0" step="0.5"></label>
             <label class="field"><span>Seeds returned</span><input type="number" id="is-seedret" value="70" min="0" max="100"></label>
             <label class="field"><span>Sell in</span><select id="is-city">${ABP.CITIES.map((c) => `<option>${c}</option>`).join("")}</select></label>
             <label class="field"><span>Crop price</span><input type="number" id="is-price" min="0"></label>
             <label class="field"><span>Seed price</span><input type="number" id="is-seed" min="0"></label>
           </div>
-          <p class="small muted">Harvest per plant and seed return are starting guesses for a premium account. Replace them with what your last harvest gave.</p>
+          <p class="small muted">Harvest per plant defaults to 9, the premium average (3 to 6 per seed, doubled). Seed return is a starting guess. Replace them with what your last harvest gave.</p>
           <div class="out" id="is-out"></div>
         </div>
       </div>`;
+
+    /* Spec */
+    const SP = ABP.spec;
+    const spRes = $("#sp-res");
+    spRes.value = rf.res;
+    const fillRefine = () => [4, 5, 6, 7, 8].forEach((t) => ($("#sp-r" + t).value = SP.refine[spRes.value][t - 4]));
+    fillRefine();
+    $("#sp-cm").value = SP.craft.mastery; $("#sp-ci").value = SP.craft.item; $("#sp-co").value = SP.craft.others; $("#sp-cb").value = SP.craft.base;
+    $("#sp-fc").value = SP.farm.crop; $("#sp-fh").value = SP.farm.herb; $("#sp-g").value = SP.gather;
+    const clamp = (v, max = 100) => Math.max(0, Math.min(max, Math.round(+v || 0)));
+    function specOut() {
+      const res = ABP.RESOURCES.find((r) => r.key === spRes.value);
+      const sp = SP.refine[res.key];
+      $("#sp-refine-out").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Tier</th><th>Efficiency</th><th>Focus .0</th><th>.1</th><th>.2</th><th>.3</th><th>.0 refines per 10k</th></tr></thead><tbody>${[4, 5, 6, 7, 8].map((t) => {
+        const eff = ABP.refineEfficiency(sp, t);
+        const c = ABP.REFINE_FOCUS[t].map((b) => ABP.focusCost(b, eff));
+        return `<tr><td>T${t}</td><td class="num">${full(eff)}</td>${c.map((x) => `<td class="num">${x.toFixed(1)}</td>`).join("")}<td class="num">${full(10000 / c[0])}</td></tr>`;
+      }).join("")}</tbody></table></div>`;
+      const ce = SP.craft.mastery * 30 + SP.craft.others * 30 + SP.craft.item * 280;
+      const cf = ABP.focusCost(SP.craft.base || 0, ce);
+      $("#sp-craft-out").innerHTML = `Efficiency <strong>${full(ce)}</strong>: each craft costs <strong>${cf.toFixed(1)}</strong> focus instead of ${full(SP.craft.base)}, so 10,000 focus covers <strong>${full(10000 / (cf || 1))}</strong> crafts. Higher item spec also improves your chance of better quality.`;
+      $("#sp-farm-out").innerHTML = `Best picks only recommends crops up to T${SP.farm.crop} and herbs up to T${SP.farm.herb}. Your gathering spec adds <strong>+${(SP.gather * 0.5).toFixed(1)}%</strong> yield on top of premium's +50%.`;
+    }
+    function specChanged() {
+      ABP.saveSpec(); specOut();
+      rendered.picks = false;
+      if (rendered.plan) updatePlan();
+      if (rf.res === spRes.value) loadRefine();
+    }
+    spRes.addEventListener("change", () => { fillRefine(); specOut(); });
+    [4, 5, 6, 7, 8].forEach((t) => $("#sp-r" + t).addEventListener("change", (e) => { SP.refine[spRes.value][t - 4] = clamp(e.target.value); e.target.value = SP.refine[spRes.value][t - 4]; specChanged(); }));
+    [["sp-cm", "mastery", 100], ["sp-ci", "item", 100], ["sp-co", "others", 10000], ["sp-cb", "base", 1e7]].forEach(([id, k, max]) => $("#" + id).addEventListener("change", (e) => { SP.craft[k] = k === "base" ? Math.max(1, +e.target.value || 1) : clamp(e.target.value, max); specChanged(); }));
+    $("#sp-fc").addEventListener("change", (e) => { SP.farm.crop = +e.target.value; specChanged(); });
+    $("#sp-fh").addEventListener("change", (e) => { SP.farm.herb = +e.target.value; specChanged(); });
+    $("#sp-g").addEventListener("change", (e) => { SP.gather = clamp(e.target.value); specChanged(); });
+    specOut();
 
     /* Refining */
     for (const k of ["res", "ench", "buyCity", "refineCity", "sellCity", "buyMode", "sellMode", "daily", "fee"]) {
       const elx = $("#rf-" + k); elx.value = rf[k];
       elx.addEventListener("change", () => {
         rf[k] = ["ench", "daily", "fee"].includes(k) ? +elx.value : elx.value;
-        if (k === "res") { const city = ABP.RESOURCES.find((r) => r.key === rf.res).city; rf.refineCity = city; rf.sellCity = city; $("#rf-refineCity").value = city; $("#rf-sellCity").value = city; }
+        if (k === "res") { $("#sp-res").value = rf.res; [4, 5, 6, 7, 8].forEach((t) => ($("#sp-r" + t).value = ABP.spec.refine[rf.res][t - 4])); specOut(); const city = ABP.RESOURCES.find((r) => r.key === rf.res).city; rf.refineCity = city; rf.sellCity = city; $("#rf-refineCity").value = city; $("#rf-sellCity").value = city; }
         store.set("calc.refine", rf); loadRefine();
       });
     }
@@ -671,7 +749,7 @@
         const input = (n * rawP + prevP) * buyMult;
         const rev = outP * sellMult;
         const pNo = rev - input * (1 - rNo) - rf.fee, pF = rev - input * (1 - rF) - rf.fee;
-        const fc = +(rf.focus[t] || 0);
+        const fc = rf.ench <= 3 ? ABP.focusCost(ABP.REFINE_FOCUS[t][rf.ench], ABP.refineEfficiency(ABP.spec.refine[res.key], t)) : 0;
         const spf = fc ? pF / fc : null;
         return { t, rawId, prevId, outId, n, rawP, prevP, outP, pNo, pF, fc, spf, ok: rawP && prevP && outP };
       });
@@ -685,12 +763,12 @@
           <td><input type="number" class="num" data-id="${r.outId}|${sMode}" value="${Math.round(r.outP) || ""}" style="width:90px"></td>
           <td class="num ${r.ok ? (r.pNo > 0 ? "good" : "bad") : "empty"}">${r.ok ? full(r.pNo) : "–"}</td>
           <td class="num ${r.ok ? (r.pF > 0 ? "good" : "bad") : "empty"}">${r.ok ? full(r.pF) : "–"}</td>
-          <td><input type="number" class="num" data-focus="${r.t}" value="${r.fc || ""}" placeholder="from game" style="width:96px"></td>
+          <td class="num">${r.fc ? r.fc.toFixed(1) : "–"}</td>
           <td class="num">${r.ok && r.spf != null ? r.spf.toFixed(1) : "–"}</td>
           <td class="num money">${r.ok && r.spf != null ? fmt(r.spf * 10000) : "–"}</td>
         </tr>`).join("")}</tbody></table></div>`;
       $$("#rf-out input[data-id]").forEach((inp) => inp.addEventListener("change", () => { manual[inp.dataset.id] = +inp.value || 0; drawRefine(res, rNo, rF); }));
-      $$("#rf-out input[data-focus]").forEach((inp) => inp.addEventListener("change", () => { rf.focus[inp.dataset.focus] = +inp.value || 0; store.set("calc.refine", rf); drawRefine(res, rNo, rF); }));
+
     }
     loadRefine();
 
@@ -862,13 +940,13 @@
 
 
   /* ---------- Best picks ---------- */
-  const assume = Object.assign({ plots: 8, perPlant: 6, seedReturn: 70 }, store.get("assume", {}));
+  const assume = Object.assign({ plots: 8, perPlant: 9, seedReturn: 70 }, store.get("assume", {}));
   const PICKS = [
     { key: "crops", title: "Island: what to plant", how: "Ranked by profit per day across all your plots after seed costs, using the best city to sell in. A crop only counts as much as the market can absorb (half its daily sales), so a pricey crop nobody buys does not win.",
       run: () => ABP.advisor.crops({ plots: assume.plots, perPlant: assume.perPlant, seedReturn: assume.seedReturn / 100 }),
       line: (r) => `${fmt(r.daily)} a day · sells ${full(r.sell.sell)} in ${r.sell.city}`, name: (r) => `T${r.tier} ${r.name}`, link: ["market", "crops"] },
-    { key: "refining", title: "Refining: what to spend focus on", how: "Every resource from T4 to T8 at .0 to .2 enchant, refined with focus in its bonus city. Ranked by profit margin with focus, then weighed down if the refined item sells fewer than 200 a day.",
-      run: () => ABP.advisor.refining(), line: (r) => `${pct(r.margin, 0)} margin · ${full(r.pF)} per refine in ${r.city}`, name: (r) => r.label, link: ["calc"] },
+    { key: "refining", title: "Refining: what to spend focus on", how: "Every resource from T4 to T8 at .0 to .2 enchant, refined with focus in its bonus city. Focus cost comes from your refining spec (Calculators → Your spec). Ranked by what your 10,000 daily focus earns: the extra profit focus adds per refine, times how many refines your focus covers, capped at half of what the market sells per day.",
+      run: () => ABP.advisor.refining(), line: (r) => `${fmt(r.score)} a day from focus · ${r.spf.toFixed(1)} silver per focus · ${r.city}`, name: (r) => r.label, link: ["calc"] },
     { key: "bm", title: "Black Market: what to flip", how: "All Black Market gear from T4 to T8 at .0 to .2. Only Black Market prices from the last 12 hours count. Ranked by profit per flip times how many the Black Market actually bought per day (up to 10).",
       run: () => ABP.advisor.blackMarket(), line: (r) => `${full(r.profit)} each · buy in ${r.src.city}`, name: (r) => r.label, link: ["market", "bm"] },
     { key: "flips", title: "Order flips: what to buy and relist", how: "Refined and raw resources (T4 to T8, .0 to .2), crops, herbs and common T4 to T6 gear in every city. Profit is the cheapest listing minus the top buy order after the 2.5% fee on both orders and the 4% tax. Ranked by that profit times a fifth of the daily sales, the share you can realistically fill. Items selling fewer than 5 a day are dropped.",
@@ -889,7 +967,7 @@
       <div class="panel-head">
         <span class="label">Live recommendations</span>
         <h2>Best picks today</h2>
-        <p>Instead of "plant the best crop", this page works out which one it is from today's prices and last week's sales, and says why. Rankings use the ${esc(ABP.SERVERS.find((s) => s.id === ABP.api.server).label)} server; change it on the Market tab.</p>
+        <p>Instead of "plant the best crop", this page works out which one it is from today's prices, last week's sales and your spec, and says why. Set your spec under Calculators → Your spec. Rankings use the ${esc(ABP.SERVERS.find((s) => s.id === ABP.api.server).label)} server; change it on the Market tab.</p>
         <div class="row"><button class="btn" id="pk-refresh">Refresh picks</button><span class="small muted" id="pk-time"></span></div>
       </div>
       <div class="stack" id="pk-list">${PICKS.map((k) => `

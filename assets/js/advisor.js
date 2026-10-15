@@ -45,12 +45,14 @@ ABP.advisor = (() => {
   }
 
   /* ---- Crops and herbs ---- */
-  async function crops({ plots = 8, perPlant = 6, seedReturn = 0.7, plantsPerPlot = 9 } = {}) {
-    const list = ABP.CROPS.map((c) => ({ ...c, kind: "crop" })).concat(ABP.HERBS.map((h) => ({ ...h, kind: "herb" })));
+  async function crops({ plots = 8, perPlant = 9, seedReturn = 0.7, plantsPerPlot = 9 } = {}) {
+    const all = ABP.CROPS.map((c) => ({ ...c, kind: "crop" })).concat(ABP.HERBS.map((h) => ({ ...h, kind: "herb" })));
+    const can = (c) => c.tier <= (c.kind === "herb" ? ABP.spec.farm.herb : ABP.spec.farm.crop);
+    const list = all;
     const idx = ABP.api.index(await ABP.api.prices(list.flatMap((c) => [c.crop, c.seed]), ABP.CITIES));
     const plants = plots * plantsPerPlot;
     const harvest = plants * perPlant;
-    const rows = list.map((c) => {
+    let rows = list.map((c) => {
       const sell = dearest(idx[c.crop], ABP.CITIES);
       const seed = cheapest(idx[c.seed], ABP.CITIES);
       if (!sell || !seed) return { ...c, missing: true };
@@ -72,6 +74,9 @@ ABP.advisor = (() => {
       r.daily = sellable * r.net - r.seedCost;
     }
     rows.sort((a, b) => b.daily - a.daily);
+    const locked = rows.filter((r) => !can(r));
+    const bestLocked = locked[0];
+    rows = rows.filter(can);
     rows.forEach((r, i) => {
       const next = rows[i + 1];
       r.reasons = [
@@ -84,7 +89,8 @@ ABP.advisor = (() => {
             : `Only ${n(r.perDay)} sell per day in ${r.sell.city}. Selling more than about half of that crashes the price, so the ranking counts ${n(r.sellable)} a day. Plant the rest with your second pick or turn it into ${r.kind === "herb" ? "potions" : "food or animal feed"}.`,
       ];
       if (i === 0 && next) r.reasons.push(`It beats ${next.name} (next best) by ${short(r.daily - next.daily)} a day.`);
-      r.reasons.push(`T${r.tier} needs the matching Farming spec (${r.kind === "herb" ? "Herbalist" : "Crop Farmer"}). If you can't plant it yet, use the highest pick below that you can.`);
+      if (i === 0 && bestLocked && bestLocked.daily > r.daily) r.reasons.push(`Your spec reaches T${ABP.spec.farm.crop} crops and T${ABP.spec.farm.herb} herbs. Unlocking T${bestLocked.tier} ${bestLocked.name} would pay about ${short(bestLocked.daily)} a day, ${short(bestLocked.daily - r.daily)} more, so that is the farming node to level next.`);
+      else if (i === 0) r.reasons.push(`Nothing above your current farming spec (T${ABP.spec.farm.crop} crops, T${ABP.spec.farm.herb} herbs) pays more, so there is no need to rush the next farming tier.`);
     });
     return { rows, harvest, plots };
   }
@@ -116,10 +122,12 @@ ABP.advisor = (() => {
       const input = k * raw.p + prev.p;
       const net = out.p * keepOrder();
       const pF = net - input * (1 - rF), pNo = net - input * (1 - rNo);
-      rows.push({ res: r, t, e, city, k, rawId, outId, prevId, raw, prev, out, input, net, pF, pNo, margin: pF / (input * (1 - rF)) });
+      const eff = ABP.refineEfficiency(ABP.spec.refine[r.key], t);
+      const fc = ABP.focusCost(ABP.REFINE_FOCUS[t][e], eff);
+      rows.push({ res: r, t, e, city, k, rawId, outId, prevId, raw, prev, out, input, net, pF, pNo, eff, fc, spf: (pF - Math.max(0, pNo)) / fc, margin: pF / (input * (1 - rF)) });
     }
-    rows.sort((a, b) => b.margin - a.margin);
-    const top = rows.slice(0, 30);
+    rows.sort((a, b) => b.spf - a.spf);
+    const top = rows.slice(0, 40);
     try {
       const byCity = {};
       top.forEach((x) => (byCity[x.city] = byCity[x.city] || []).push(x.outId));
@@ -127,7 +135,11 @@ ABP.advisor = (() => {
       const vol = Object.assign({}, ...vols);
       top.forEach((x) => { x.perDay = vol[x.outId]?.[x.city]?.perDay ?? null; });
     } catch (e) { /* no volume */ }
-    const scored = rows.map((x) => ({ ...x, score: x.margin * (x.perDay == null ? 0.3 : Math.min(1, x.perDay / 200)) }));
+    const scored = rows.map((x) => {
+      const perFocus = 10000 / x.fc;
+      const cap = x.perDay == null ? perFocus * 0.3 : Math.min(perFocus, x.perDay * 0.5);
+      return { ...x, perFocus, refines: cap, score: cap * (x.pF - Math.max(0, x.pNo)) };
+    }).filter((x) => x.pF > 0);
     scored.sort((a, b) => b.score - a.score);
     scored.forEach((x) => {
       const label = `T${x.t}${x.e ? "." + x.e : ""} ${x.res.refinedName}`;
@@ -135,9 +147,10 @@ ABP.advisor = (() => {
       x.reasons = [
         `In ${x.city} (the ${x.res.refinedName} bonus city) each refine takes ${x.k} T${x.t}${x.e ? "." + x.e : ""} ${x.res.rawName} at ${n(x.raw.p)} by ${x.raw.how} and 1 T${x.t - 1}${x.e && x.t > 4 ? "." + x.e : ""} ${x.res.refinedName} at ${n(x.prev.p)}, so ${n(x.input)} of material.`,
         `With focus ${pct(rF)} of that comes back, so a refine really costs ${n(x.input * (1 - rF))}. ${label} sells for ${n(x.out.p)} (${age(x.out.date)}); you keep ${n(x.net)}, a profit of ${n(x.pF)} (${pct(x.margin)} on cost).`,
-        x.pNo > 0 ? `It still makes ${n(x.pNo)} per refine without focus, so you can keep refining after your focus runs out.` : `Without focus it loses ${n(-x.pNo)} per refine, so refine only as much as your focus covers.`,
-        x.perDay == null ? `No sales history came back, so check that ${label} sells in ${x.city} before you buy big.` : `${n(x.perDay)} sell per day in ${x.city}${x.perDay < 50 ? ". That is thin: list small batches" : ", enough to sell a day's refining without crashing the price"}.`,
-        `Focus cost rises with item value, so margin is the fairest way to compare tiers. Enter your focus cost in the Refining calculator to see exact silver per focus.`,
+        `Your ${x.res.refinedName} spec gives ${n(x.eff)} focus efficiency at T${x.t}, so one refine costs ${x.fc.toFixed(1)} focus and 10,000 focus covers ${n(x.perFocus)} refines.`,
+        x.pNo > 0 ? `It makes ${n(x.pNo)} per refine even without focus, so focus only adds ${n(x.pF - x.pNo)} each: ${x.spf.toFixed(1)} silver per focus point. Keep refining it after your focus runs out.` : `Without focus it loses ${n(-x.pNo)} per refine, so focus is what makes it pay: ${x.spf.toFixed(1)} silver per focus point. Refine only as much as your focus covers.`,
+        x.perDay == null ? `No sales history came back, so the ranking assumes you can sell ${n(x.refines)} a day. Check the market before you buy big.` : x.perDay * 0.5 < x.perFocus ? `Only ${n(x.perDay)} sell per day in ${x.city}, so the ranking counts ${n(x.refines)} refines a day (half the market), worth ${short(x.score)} of focus value.` : `${n(x.perDay)} sell per day in ${x.city}, enough for all ${n(x.perFocus)} refines. Your daily focus is worth about ${short(x.score)} here.`,
+        x.t >= 6 && x.eff < 5000 ? `Your T${x.t} spec is low, so focus is expensive here. Each 10 levels in T${x.t} cuts its focus cost by about 18%.` : `Leveling T${x.t} further keeps cutting the focus cost: every 40 levels in this tier halves it.`,
       ];
     });
     return { rows: scored, rF, rNo };
