@@ -559,9 +559,9 @@ ABP.WIKI = [
    Focus cost = base × 0.5^(efficiency / 10,000) (official wiki: halved per 10,000 points).
    Refining and crafting: every spec level under the same mastery adds 30 efficiency,
    and the spec for the exact item or tier you make adds another 250 per level. */
-ABP.REFINE_FOCUS = {
-  4: [48, 89, 143, 239], 5: [89, 160, 269, 461], 6: [160, 284, 487, 844],
-  7: [284, 500, 866, 1508], 8: [500, 877, 1527, 2666],
+ABP.REFINE_FOCUS = { // base focus per refine, from Albion's item data (ao-bin-dumps items.json)
+  4: [54, 94, 164, 287], 5: [94, 164, 287, 503], 6: [164, 287, 503, 880],
+  7: [287, 503, 880, 1539], 8: [503, 880, 1539, 2694],
 };
 ABP.focusCost = (base, efficiency) => base * Math.pow(0.5, efficiency / 10000);
 ABP.refineEfficiency = (specs, tier) => specs.reduce((s, v) => s + (+v || 0), 0) * 30 + (+specs[tier - 4] || 0) * 250;

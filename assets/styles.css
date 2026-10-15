@@ -410,3 +410,4 @@ tr.on td { background: var(--gold-soft); }
 .hb .bar.down { top: 50%; background: var(--s1); border-radius: 0 0 3px 3px; }
 .hb .hl { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); font-size: 0.68rem; color: var(--muted); white-space: nowrap; padding-top: 4px; }
 .hb:hover .bar, .hb:focus .bar { filter: brightness(1.15); }
+.tabs button[data-badge]:not([data-badge=""])::after { content: attr(data-badge); margin-left: 6px; background: var(--button); color: var(--button-ink); border-radius: 9px; padding: 0 6px; font-size: 0.72rem; }

@@ -12,6 +12,9 @@ A one-page web app, styled after Albion Online (dark leather and brass, parchmen
 - **Wiki**: premium, islands, focus, taxes and fees, return rates, refining recipes, crafting bonus cities, tiers, zones, the Black Market and journals.
 - **Wealth**: enter each bank's value by location (the estimate the game shows on every bank), plus items on sell orders and silver in buy orders, your silver and gold. Shows net worth, liquid vs solid, a stacked bar chart by location, and net worth over time (saved once a day). Optional item list priced at live market value.
 - **Times**: everything in Vancouver time (DST handled). Daily maintenance for each server (10:00 UTC Americas and Europe, about 23:00 UTC Asia) with countdowns, a header clock, island harvest and focus-full timers, plan milestones and premium end. *Best hours to buy and sell* tests a week of hourly market history and only names an hour when its price gap beats day-to-day noise on most days.
+- **Tools**: a haul planner (fits a load to your mount's carry limit and budget, prices both ends, rates the route risk and the share of runs you can lose and still profit), a crafting shopping list (every material, cheapest city, cost, with return rate), and backup and restore of everything you enter.
+- **Profit ledger** (Progress tab): log each session's method, hours and silver to see what really pays you per hour.
+- **Price alerts** (Market tab): get told when a listing drops to, or a buy order reaches, your price. Checked when the app opens and every 10 minutes while it is open; the Android app sends a phone notification.
 - **Change of pace**: suggests a method outside your chosen path for a few hours or days, with why it's a change and a three-step starter plan.
 - **Progress**: a character lookup from Albion's official game info API shows guild and lifetime crafting, gathering and farming fame, and the fame gained between lookups. Log your wealth over time and compare it with your plan. Gold converts to silver at the live gold price, or a rate you set. Data stays in your browser.
 - **Spend real money? wheel**: 30 slices, 1 YES and 29 NO, picked with a fair random draw.
@@ -31,3 +34,13 @@ Live prices are fetched by your browser directly from the Albion Online Data Pro
 - Income figures are community estimates. Prices and patches change, so check the Market tab before committing silver.
 - Price freshness depends on players running the Albion Data client. Faded cells in the Market table are more than a day old.
 - Not affiliated with Sandbox Interactive.
+
+## Android app
+
+The same app is packaged for Android with [Capacitor](https://capacitorjs.com/). Every push to `main` or the app branch runs `.github/workflows/android.yml`, which builds `albion-billionaire.apk` and publishes it as a GitHub release.
+
+- **Install**: open the repository's *Releases* page on your phone, download `albion-billionaire.apk` from the newest release and open it. Allow installs from your browser or files app when Android asks.
+- **Updates**: every build is signed with the same key (`tools/android-debug.keystore`), so a new APK installs over the old one and keeps your data.
+- In the app, live prices and the character lookup go through Android's own network stack, so nothing is blocked the way a browser can block it. Price alerts arrive as phone notifications.
+- Recipes, base focus costs and item weights come from Albion's item data (`assets/data/recipes.json`). Rebuild it after a game patch with `python3 tools/build_recipes.py items.json`, using `items.json` from [ao-bin-dumps](https://github.com/ao-data/ao-bin-dumps).
+- Build it yourself: `npm ci`, `npm run android:sync`, then open `android/` in Android Studio.

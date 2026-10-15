@@ -31,7 +31,7 @@
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
   /* ---------- Tabs ---------- */
-  const TABS = ["plan", "picks", "methods", "market", "calc", "wiki", "wealth", "progress", "times"];
+  const TABS = ["plan", "picks", "methods", "market", "calc", "wiki", "wealth", "progress", "tools", "times"];
   const rendered = {};
   function show(tab) {
     if (!TABS.includes(tab)) tab = "plan";
@@ -502,7 +502,8 @@
         <div class="row small muted" id="mk-gold"></div>
       </div>
       <div id="mk-out" class="stack"></div>
-      <div id="mk-detail"></div>`;
+      <div id="mk-detail"></div>
+      ${alertsBox()}`;
     $("#mk-server").value = ABP.api.server;
     $("#mk-preset").value = mk.preset;
     $("#mk-tier").value = mk.tier;
@@ -516,6 +517,7 @@
       $("#" + id).addEventListener("change", (e) => { mk[k] = ["ench", "quality"].includes(k) ? +e.target.value : e.target.value; saveMk(); sync(); loadMarket(); }));
     $("#mk-load").addEventListener("click", loadMarket);
     setupSearch();
+    setupAlerts();
     loadGold();
     loadMarket();
   }
@@ -1328,6 +1330,7 @@
           <h2>Progress</h2>
           <p>Log your wealth once a day or once a week: silver in the bank, in orders and in stock, plus any gold. Gold is converted to silver at the gold price. The chart compares you with the plan you picked. Your log stays in this browser.</p>
         </div>
+        ${ledgerBox()}
         <div class="box stack" id="char">
           <div class="row spread"><h3>Your character</h3><span class="small muted">From Albion's official game info server</span></div>
           <p class="small muted">Look up a character to see their guild and lifetime fame. Each lookup is saved, so the next one shows how much crafting, gathering and farming fame you earned in between. The game does not share bank contents or spec levels, so enter those yourself.</p>
@@ -1362,6 +1365,7 @@
       $("#lg-gold").addEventListener("input", lgTotal);
       lgTotal();
       setupCharacter();
+      setupLedger();
       $("#lg-form").addEventListener("submit", (e) => {
         e.preventDefault();
         const date = $("#lg-date").value, coin = +$("#lg-silver").value || 0, gold = +$("#lg-gold").value || 0;
@@ -1874,6 +1878,351 @@
       <details><summary class="small">Table view</summary><div class="table-wrap"><table><thead><tr><th>Hour</th><th>Vs day average</th><th>± noise</th><th>Days above</th><th>Samples</th>${t.gold ? "" : "<th>Sold</th>"}</tr></thead><tbody>${eff.stats.filter((s) => s.mean != null).map((s) => `<tr><td>${hourLabel(s.h)}</td><td class="num">${pctOf(s.mean)}</td><td class="num">${(2 * s.se * 100).toFixed(1)}%</td><td class="num">${Math.round(s.aboveShare * 100)}%</td><td class="num">${s.n}</td>${t.gold ? "" : `<td class="num">${full(s.vol)}</td>`}</tr>`).join("")}</tbody></table></div></details>`;
   }
 
+  /* ---------- Native helpers: the Android app (Capacitor) gets real notifications and file sharing ---------- */
+  const isNative = () => !!window.Capacitor?.isNativePlatform?.();
+  const plugin = (n) => (isNative() ? window.Capacitor.Plugins?.[n] || window.Capacitor.registerPlugin?.(n) : null);
+  async function notify(title, body) {
+    try {
+      if (isNative() && plugin("LocalNotifications")) {
+        const LN = plugin("LocalNotifications");
+        const perm = await LN.requestPermissions();
+        if (perm.display !== "granted") return false;
+        await LN.schedule({ notifications: [{ id: Math.floor(Math.random() * 2e9), title, body }] });
+        return true;
+      }
+      if ("Notification" in window) {
+        if (Notification.permission === "default") await Notification.requestPermission();
+        if (Notification.permission === "granted") { new Notification(title, { body }); return true; }
+      }
+    } catch (e) { /* fall back to the in-app banner */ }
+    return false;
+  }
+  async function saveFile(name, text) {
+    if (isNative() && plugin("Filesystem") && plugin("Share")) {
+      const res = await plugin("Filesystem").writeFile({ path: name, data: text, directory: "CACHE", encoding: "utf8" });
+      await plugin("Share").share({ title: name, url: res.uri, dialogTitle: "Save your backup" });
+      return "shared";
+    }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+    a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    return "downloaded";
+  }
+
+  /* Albion's own item data (recipes, base focus, weights), built by tools/build_recipes.py. */
+  let recipesP = null;
+  function recipes() {
+    if (window.ABP_RECIPES) return Promise.resolve(window.ABP_RECIPES);
+    if (!recipesP) recipesP = fetch("assets/data/recipes.json").then((r) => { if (!r.ok) throw new Error("Recipe data did not load."); return r.json(); }).catch((e) => { recipesP = null; throw e; });
+    return recipesP;
+  }
+  const weightOf = (R, id) => R.w[id.split("@")[0]] ?? null;
+
+  /* Item picker shared by the tools: name search with an id fallback. */
+  function itemPicker(inputSel, boxSel, wrapSel, onPick) {
+    const input = $(inputSel), box = $(boxSel);
+    let list = null;
+    input.addEventListener("focus", async () => {
+      if (list) return;
+      try { list = await ABP.api.itemNames(); } catch (e) { list = []; input.placeholder = "Names could not load. Type an item id such as T6_BAG and press Enter."; }
+    });
+    input.addEventListener("input", () => {
+      const q = input.value.trim().toLowerCase();
+      if (q.length < 2 || !list) { box.hidden = true; return; }
+      const hits = list.filter((n) => n.name.toLowerCase().includes(q) || n.id.toLowerCase().includes(q)).slice(0, 30);
+      box.innerHTML = hits.map((h) => `<button type="button" data-id="${esc(h.id)}"><span>${esc(h.name)}</span><small>${esc(h.id)}</small></button>`).join("") || `<p class="small muted" style="padding:8px">No items match.</p>`;
+      box.hidden = false;
+      $$("button", box).forEach((b) => b.addEventListener("click", () => { box.hidden = true; input.value = b.dataset.id; onPick(b.dataset.id); }));
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && /^T\d_[A-Z0-9_@]+$/i.test(input.value.trim())) { e.preventDefault(); box.hidden = true; onPick(input.value.trim().toUpperCase()); }
+      if (e.key === "Escape") box.hidden = true;
+    });
+    document.addEventListener("click", (e) => { if (!$(wrapSel)?.contains(e.target)) box.hidden = true; });
+  }
+
+  /* ---------- Tools tab: haul planner, crafting shopping list, backup ---------- */
+  const haul = Object.assign({ id: "T5_PLANKS", from: "Fort Sterling", to: "Caerleon", buyMode: "instant", sellMode: "order", cap: 1000, budget: 10000000, quality: 1 }, store.get("haul", {}));
+  const shop = Object.assign({ id: "T6_MAIN_SWORD", ench: 0, qty: 10, rr: 0, craftCity: "Lymhurst" }, store.get("shop", {}));
+  const cityOpts = (cur, withBM) => ABP.CITIES.concat(withBM ? [ABP.BM] : []).map((c) => `<option ${c === cur ? "selected" : ""}>${c}</option>`).join("");
+  function routeRisk(a, b) {
+    const s = [a, b];
+    if (s.includes(ABP.BM) || s.includes("Caerleon")) return { level: "High", text: "Caerleon sits behind red zones. You can be attacked and lose the whole load, so only carry what you can afford to lose." };
+    if (s.includes("Brecilien")) return { level: "High", text: "Brecilien is reached through the Mists, which are full-loot. Expect to lose the load if you are caught." };
+    return { level: "Low", text: "Royal cities link through blue and yellow zones. Taking that path, you cannot lose your cargo." };
+  }
+
+  function renderTools() {
+    const p = $("#panel-tools");
+    p.innerHTML = `
+      <div class="panel-head">
+        <span class="label">Workshop</span>
+        <h2>Tools</h2>
+        <p>Plan a trade run, get a shopping list for a craft, and back up everything you have entered. Weights, recipes and focus costs come from Albion's own item data.</p>
+      </div>
+      <div class="box stack" id="haul">
+        <h3>Haul planner</h3>
+        <p class="small muted">Fits a load to your mount's carry limit and your budget, prices it at both ends, and tells you how risky the route is.</p>
+        <div class="controls">
+          <div class="search" id="hl-wrap" style="grid-column: span 2"><label class="field"><span>Item</span><input type="search" id="hl-item" autocomplete="off" placeholder="Type an item name"></label><div class="results" id="hl-results" hidden></div></div>
+          <label class="field"><span>Buy in</span><select id="hl-from">${cityOpts(haul.from)}</select></label>
+          <label class="field"><span>Sell in</span><select id="hl-to">${cityOpts(haul.to, true)}</select></label>
+          <label class="field"><span>Buy by</span><select id="hl-buyMode"><option value="instant">Instant buy</option><option value="order">Buy order</option></select></label>
+          <label class="field"><span>Sell by</span><select id="hl-sellMode"><option value="order">Sell order</option><option value="instant">Instant sell</option></select></label>
+          <label class="field"><span>Mount carry limit (kg)</span><input type="number" id="hl-cap" min="1" step="any"></label>
+          <label class="field"><span>Silver to spend</span><input type="number" id="hl-budget" min="0" step="any"></label>
+          <div class="field"><span>&nbsp;</span><button class="btn" type="button" id="hl-go">Plan the run</button></div>
+        </div>
+        <p class="small muted">Use the carry limit your mount's tooltip shows, plus any bag or food bonus, minus what you already carry.</p>
+        <div id="hl-out"></div>
+      </div>
+      <div class="box stack" id="shopping">
+        <h3>Crafting shopping list</h3>
+        <p class="small muted">Pick what you want to craft. You get every material, the cheapest city to buy each one, and the total cost, with your return rate taken off.</p>
+        <div class="controls">
+          <div class="search" id="sh-wrap" style="grid-column: span 2"><label class="field"><span>Item to craft</span><input type="search" id="sh-item" autocomplete="off" placeholder="Type an item name"></label><div class="results" id="sh-results" hidden></div></div>
+          <label class="field"><span>Enchantment</span><select id="sh-ench">${[0, 1, 2, 3, 4].map((e) => `<option value="${e}">.${e}</option>`).join("")}</select></label>
+          <label class="field"><span>How many</span><input type="number" id="sh-qty" min="1" step="1"></label>
+          <label class="field"><span>Return rate</span><select id="sh-rr"><option value="0">None (count everything)</option>${ABP.RRR.map((r, i) => `<option value="${i + 1}">${r.setup} (${pct(r.rate)})</option>`).join("")}</select></label>
+          <label class="field"><span>Sell the item in</span><select id="sh-city">${cityOpts(shop.craftCity, true)}</select></label>
+          <div class="field"><span>&nbsp;</span><button class="btn" type="button" id="sh-go">Make the list</button></div>
+        </div>
+        <div id="sh-out"></div>
+      </div>
+      <div class="box stack" id="backup">
+        <h3>Backup and restore</h3>
+        <p class="small muted">Everything you enter lives on this device: your plan, spec, wealth, logs, ledger, alerts and timers. Save a backup file now and then, and restore it on a new phone or after reinstalling.</p>
+        <div class="row"><button class="btn" type="button" id="bk-save">Save backup file</button>
+          <label class="btn ghost" for="bk-file" style="cursor:pointer">Restore from file</label><input type="file" id="bk-file" accept="application/json,.json" hidden></div>
+        <p class="small" id="bk-msg"></p>
+      </div>`;
+
+    /* Haul */
+    $("#hl-item").value = haul.id;
+    for (const k of ["from", "to", "buyMode", "sellMode", "cap", "budget"]) {
+      const x = $("#hl-" + k); x.value = haul[k];
+      x.addEventListener("change", () => { haul[k] = ["cap", "budget"].includes(k) ? Math.max(0, +x.value || 0) : x.value; store.set("haul", haul); });
+    }
+    itemPicker("#hl-item", "#hl-results", "#hl-wrap", (id) => { haul.id = id; store.set("haul", haul); planHaul(); });
+    $("#hl-go").addEventListener("click", () => { const v = $("#hl-item").value.trim().toUpperCase(); if (/^T\d_/.test(v)) haul.id = v; store.set("haul", haul); planHaul(); });
+
+    /* Shopping list */
+    $("#sh-item").value = shop.id; $("#sh-ench").value = shop.ench; $("#sh-qty").value = shop.qty; $("#sh-rr").value = shop.rr;
+    [["ench", "#sh-ench"], ["qty", "#sh-qty"], ["rr", "#sh-rr"], ["craftCity", "#sh-city"]].forEach(([k, sel]) => $(sel).addEventListener("change", (e) => { shop[k] = k === "craftCity" ? e.target.value : Math.max(k === "qty" ? 1 : 0, +e.target.value || 0); store.set("shop", shop); }));
+    itemPicker("#sh-item", "#sh-results", "#sh-wrap", (id) => { shop.id = id.split("@")[0]; if (id.includes("@")) { shop.ench = +id.split("@")[1]; $("#sh-ench").value = shop.ench; } store.set("shop", shop); shoppingList(); });
+    $("#sh-go").addEventListener("click", () => { const v = $("#sh-item").value.trim().toUpperCase(); if (/^T\d_/.test(v)) shop.id = v.split("@")[0]; store.set("shop", shop); shoppingList(); });
+
+    /* Backup */
+    $("#bk-save").addEventListener("click", async () => {
+      const data = {};
+      for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith("abp.")) data[k] = localStorage.getItem(k); }
+      const txt = JSON.stringify({ app: "albion-billionaire", version: 1, exported: new Date().toISOString(), data }, null, 1);
+      const name = `albion-billionaire-backup-${todayISO()}.json`;
+      try { const how = await saveFile(name, txt); $("#bk-msg").textContent = how === "shared" ? "Backup ready. Save it to Drive or your files from the share menu." : `Saved ${name} to your downloads.`; }
+      catch (e) { $("#bk-msg").textContent = "Could not save the file: " + e.message; }
+    });
+    $("#bk-file").addEventListener("change", async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      try {
+        const j = JSON.parse(await f.text());
+        if (j.app !== "albion-billionaire" || !j.data) throw new Error("This is not an Albion Billionaire backup.");
+        if (!confirm(`Replace everything in the app with the backup from ${new Date(j.exported).toLocaleString()}?`)) return;
+        Object.keys(localStorage).filter((k) => k.startsWith("abp.")).forEach((k) => localStorage.removeItem(k));
+        Object.entries(j.data).forEach(([k, v]) => k.startsWith("abp.") && localStorage.setItem(k, v));
+        $("#bk-msg").textContent = "Restored. Reloading…";
+        setTimeout(() => location.reload(), 600);
+      } catch (err) { $("#bk-msg").textContent = err.message; }
+      e.target.value = "";
+    });
+  }
+
+  async function planHaul() {
+    const out = $("#hl-out");
+    out.innerHTML = `<p class="small muted">Pricing ${esc(itemLabel(haul.id))}…</p>`;
+    let R, rows;
+    try { R = await recipes(); rows = await ABP.api.prices([haul.id], [haul.from, haul.to], [1]); }
+    catch (e) { out.innerHTML = `<p class="small">${esc(e.message)}</p>`; return; }
+    const idx = ABP.api.index(rows)[haul.id] || {};
+    const src = idx[haul.from] || {}, dst = idx[haul.to] || {};
+    const buyEach = haul.buyMode === "instant" ? src.sell : src.buy ? (src.buy + 1) * (1 + FEES.setupFee) : null;
+    const sellGross = haul.to === ABP.BM || haul.sellMode === "instant" ? dst.buy : dst.sell ? dst.sell - 1 : null;
+    const sellEach = sellGross ? sellGross * (1 - FEES.salesTaxPremium - (haul.to !== ABP.BM && haul.sellMode === "order" ? FEES.setupFee : 0)) : null;
+    const w = weightOf(R, haul.id);
+    if (!buyEach || !sellEach) { out.innerHTML = `<p class="small">No ${!buyEach ? "buy price in " + esc(haul.from) : "sell price in " + esc(haul.to)} for this item right now. Try another city or type a different item.</p>`; return; }
+    if (!w) { out.innerHTML = `<p class="small">Albion's item data has no weight for ${esc(haul.id)}.</p>`; return; }
+    let vol = null; try { vol = (await ABP.api.volumes([haul.id], [haul.to]))[haul.id]?.[haul.to]?.perDay ?? null; } catch (e) {}
+    const byWeight = Math.floor(haul.cap / w), byBudget = Math.floor(haul.budget / buyEach);
+    const units = Math.max(0, Math.min(byWeight, byBudget));
+    const cost = units * buyEach, revenue = units * sellEach, profit = revenue - cost;
+    const risk = routeRisk(haul.from, haul.to);
+    const breakEven = revenue > 0 ? profit / revenue : 0;
+    const limit = byWeight <= byBudget ? `your mount (${full(byWeight)} × ${w} kg)` : `your budget`;
+    out.innerHTML = `
+      <div class="stats">
+        <div class="stat key"><span class="label">Profit per trip</span><span class="v ${profit >= 0 ? "good" : "bad"}">${fmt(profit)}</span><span class="small muted">${full(units)} items, limited by ${limit}</span></div>
+        <div class="stat"><span class="label">You spend</span><span class="v">${fmt(cost)}</span><span class="small muted">${full(buyEach)} each in ${esc(haul.from)}</span></div>
+        <div class="stat"><span class="label">You get back</span><span class="v">${fmt(revenue)}</span><span class="small muted">${full(sellEach)} each after fees in ${esc(haul.to)}</span></div>
+        <div class="stat"><span class="label">Margin</span><span class="v">${cost ? pct(profit / cost) : "–"}</span><span class="small muted">load weighs ${full(units * w)} kg</span></div>
+      </div>
+      <div class="notice"><p><strong>Risk: ${risk.level}.</strong> ${risk.text}${risk.level === "High" && profit > 0 ? ` This run still pays if you lose fewer than <strong>${pct(breakEven, 0)}</strong> of trips; lose more and you are better off not going.` : ""}</p></div>
+      ${vol != null ? `<p class="small ${units > vol * 3 ? "bad" : "muted"}">${esc(haul.to)} sells about ${full(vol)} a day of this item.${units > vol * 3 ? " Your load is more than three days of sales, so expect to cut your price or wait." : ""}</p>` : ""}`;
+  }
+
+  async function shoppingList() {
+    const out = $("#sh-out");
+    const key = shop.ench ? `${shop.id}@${shop.ench}` : shop.id;
+    out.innerHTML = `<p class="small muted">Loading the recipe for ${esc(itemLabel(key))}…</p>`;
+    let R;
+    try { R = await recipes(); } catch (e) { out.innerHTML = `<p class="small">${esc(e.message)}</p>`; return; }
+    const rec = R.r[key];
+    if (!rec) { out.innerHTML = `<p class="small">Albion's item data has no recipe for ${esc(key)}. Check the enchantment, or pick the item from the search list.</p>`; return; }
+    const [focus, made, mats] = rec;
+    const crafts = Math.ceil(shop.qty / made);
+    const rr = shop.rr ? ABP.RRR[shop.rr - 1].rate : 0;
+    const ids = mats.map((m) => m[0]);
+    let idx = {};
+    try { idx = ABP.api.index(await ABP.api.prices(ids.concat(key), ABP.CITIES.concat(ABP.BM), [1])); } catch (e) { out.innerHTML = `<p class="small">${esc(e.message)} The list below has no prices.</p>`; }
+    const lines = mats.map(([id, count, noRet]) => {
+      const need = count * crafts;
+      const buy = noRet || !rr ? need : Math.ceil(need * (1 - rr));
+      let best = null;
+      for (const c of ABP.CITIES) { const r = idx[id]?.[c]; if (r?.sell && (!best || r.sell < best.sell)) best = { city: c, sell: r.sell }; }
+      return { id, count, need, buy, noRet, best, cost: best ? best.sell * buy : null };
+    });
+    const total = lines.reduce((a, l) => a + (l.cost || 0), 0);
+    const missing = lines.filter((l) => !l.best).length;
+    const sellRow = idx[key]?.[shop.craftCity];
+    const sellEach = shop.craftCity === ABP.BM ? sellRow?.buy : sellRow?.sell;
+    const revenue = sellEach ? sellEach * shop.qty * (1 - FEES.salesTaxPremium - (shop.craftCity === ABP.BM ? 0 : FEES.setupFee)) : null;
+    const efc = ABP.focusCost(focus, ABP.spec.craft.mastery * 30 + ABP.spec.craft.others * 30 + ABP.spec.craft.item * 280);
+    out.innerHTML = `
+      <p class="small">${crafts} craft${crafts === 1 ? "" : "s"} make ${full(crafts * made)} × ${esc(itemLabel(key))}. Base focus ${full(focus)} per craft, ${full(efc)} with your crafting spec.</p>
+      <div class="table-wrap"><table><thead><tr><th>Material</th><th>Per craft</th><th>Needed</th><th>Buy${rr ? " after returns" : ""}</th><th>Cheapest in</th><th>Each</th><th>Cost</th></tr></thead><tbody>${lines.map((l) => `
+        <tr><td><span class="item-name">${esc(itemLabel(l.id))}<small>${esc(l.id)}</small></span>${l.noRet ? `<br><small class="muted">never returned</small>` : ""}</td><td class="num">${l.count}</td><td class="num">${full(l.need)}</td><td class="num"><strong>${full(l.buy)}</strong></td>
+          <td>${l.best ? esc(l.best.city) : "–"}</td><td class="num">${l.best ? full(l.best.sell) : "–"}</td><td class="num money">${l.cost != null ? full(l.cost) : "–"}</td></tr>`).join("")}</tbody></table></div>
+      <div class="stats">
+        <div class="stat key"><span class="label">Materials cost</span><span class="v money">${fmt(total)}</span><span class="small muted">${missing ? missing + " material" + (missing > 1 ? "s" : "") + " without a price" : "cheapest sell listings, instant buy"}</span></div>
+        <div class="stat"><span class="label">Sells for</span><span class="v">${revenue != null ? fmt(revenue) : "–"}</span><span class="small muted">${sellEach ? `${full(sellEach)} each in ${esc(shop.craftCity)}, after fees` : "no price in " + esc(shop.craftCity)}</span></div>
+        <div class="stat"><span class="label">Profit</span><span class="v ${revenue != null && revenue - total >= 0 ? "good" : "bad"}">${revenue != null && !missing ? fmt(revenue - total) : "–"}</span><span class="small muted">before station fees</span></div>
+      </div>
+      ${rr ? `<p class="small muted">Returns are an average: with ${pct(rr)} back you buy less in total, but you need the full amount for the first crafts. Materials marked "never returned" (artifacts, tokens) always count in full.</p>` : ""}`;
+  }
+
+  /* ---------- Profit ledger: what each method really pays you ---------- */
+  let ledger = store.get("ledger", []);
+  function ledgerBox() {
+    return `<div class="box stack" id="ledger">
+      <div class="row spread"><h3>Profit ledger by method</h3><span class="small muted">Your real silver per hour, method by method</span></div>
+      <p class="small muted">After each session, log what you did, for how long, and the silver you came out with after costs. The app compares your real results with the estimates it plans with.</p>
+      <form class="controls" id="ld-form">
+        <label class="field"><span>Date</span><input type="date" id="ld-date" required></label>
+        <label class="field"><span>Method</span><select id="ld-method">${ABP.METHODS.map((m) => `<option value="${m.id}">${esc(m.name)}</option>`).join("")}</select></label>
+        <label class="field"><span>Hours</span><input type="number" id="ld-hours" min="0.1" step="0.1" required></label>
+        <label class="field"><span>Silver made (after costs)</span><input type="number" id="ld-silver" step="any" required placeholder="negative for a loss"></label>
+        <label class="field"><span>Note</span><input type="text" id="ld-note" placeholder="optional"></label>
+        <button class="btn" type="submit">Log session</button>
+      </form>
+      <div id="ld-summary"></div>
+      <div id="ld-rows"></div>
+    </div>`;
+  }
+  function setupLedger() {
+    $("#ld-date").value = todayISO();
+    $("#ld-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      ledger.push({ date: $("#ld-date").value, method: $("#ld-method").value, hours: +$("#ld-hours").value || 0, silver: +$("#ld-silver").value || 0, note: $("#ld-note").value.trim() });
+      ledger.sort((a, b) => a.date.localeCompare(b.date));
+      store.set("ledger", ledger);
+      $("#ld-hours").value = ""; $("#ld-silver").value = ""; $("#ld-note").value = "";
+      drawLedger();
+    });
+    drawLedger();
+  }
+  function drawLedger() {
+    const by = new Map();
+    for (const s of ledger) { const r = by.get(s.method) || { method: s.method, n: 0, hours: 0, silver: 0 }; r.n++; r.hours += s.hours; r.silver += s.silver; by.set(s.method, r); }
+    const rows = [...by.values()].map((r) => Object.assign(r, { rate: r.hours ? r.silver / r.hours : 0 })).sort((a, b) => b.rate - a.rate);
+    const max = Math.max(1, ...rows.map((r) => Math.abs(r.rate)));
+    const name = (id) => ABP.METHODS.find((m) => m.id === id)?.name || id;
+    $("#ld-summary").innerHTML = rows.length ? `
+      <div class="hbars">${rows.map((r) => `<div class="hbar" tabindex="0" title="${esc(name(r.method))}: ${full(r.rate)} silver an hour over ${r.n} session${r.n > 1 ? "s" : ""}">
+        <span class="name">${esc(name(r.method))}</span>
+        <span class="track" style="width:${((Math.abs(r.rate) / max) * 100).toFixed(1)}%"><span class="seg" style="flex:1;background:${r.rate >= 0 ? "var(--accent)" : "var(--bad)"}"></span></span>
+        <span class="val">${fmt(r.rate)}/h</span></div>`).join("")}</div>
+      <div class="table-wrap"><table><thead><tr><th>Method</th><th>Sessions</th><th>Hours</th><th>Silver</th><th>Your silver/hour</th><th>App estimate</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(name(r.method))}</td><td class="num">${r.n}</td><td class="num">${r.hours.toFixed(1)}</td><td class="num money">${full(r.silver)}</td><td class="num"><strong>${full(r.rate)}</strong></td><td class="small">${esc(ABP.METHODS.find((m) => m.id === r.method)?.rate || "")}</td></tr>`).join("")}</tbody></table></div>
+      ${rows[0]?.rate > 0 ? `<p class="small"><strong>${esc(name(rows[0].method))}</strong> pays you the most per hour so far${rows[0].n < 3 ? ", but log a few more sessions before trusting it" : ""}.</p>` : ""}` : `<p class="small muted">No sessions yet.</p>`;
+    $("#ld-rows").innerHTML = ledger.length ? `<details><summary class="small">All sessions (${ledger.length})</summary><div class="table-wrap"><table><thead><tr><th>Date</th><th>Method</th><th>Hours</th><th>Silver</th><th>Note</th><th></th></tr></thead><tbody>${ledger.slice().reverse().map((s, i) => `<tr><td>${esc(s.date)}</td><td>${esc(name(s.method))}</td><td class="num">${s.hours}</td><td class="num ${s.silver >= 0 ? "" : "bad"}">${full(s.silver)}</td><td>${esc(s.note)}</td><td><button class="btn ghost" type="button" data-ldel="${ledger.length - 1 - i}">Delete</button></td></tr>`).join("")}</tbody></table></div></details>` : "";
+    $$("#ld-rows [data-ldel]").forEach((b) => b.addEventListener("click", () => { ledger.splice(+b.dataset.ldel, 1); store.set("ledger", ledger); drawLedger(); }));
+  }
+
+  /* ---------- Price alerts ---------- */
+  let alerts = store.get("alerts", []);
+  function alertsBox() {
+    return `<div class="box stack" id="alerts">
+      <div class="row spread"><h3>Price alerts</h3><span class="small muted" id="al-status"></span></div>
+      <p class="small muted">Get told when an item gets cheap enough to buy or when buyers pay enough to sell. The app checks when you open it and every 10 minutes while it is open${isNative() ? ", and sends a phone notification" : ""}.</p>
+      <div class="controls">
+        <div class="search" id="al-wrap" style="grid-column: span 2"><label class="field"><span>Item</span><input type="search" id="al-item" autocomplete="off" placeholder="Type an item name"></label><div class="results" id="al-results" hidden></div></div>
+        <label class="field"><span>Market</span><select id="al-city">${cityOpts("Caerleon", true)}</select></label>
+        <label class="field"><span>Alert when</span><select id="al-kind"><option value="below">Cheapest listing drops to</option><option value="above">Best buy order reaches</option></select></label>
+        <label class="field"><span>Price</span><input type="number" id="al-price" min="1" step="any"></label>
+        <div class="field"><span>&nbsp;</span><button class="btn" type="button" id="al-add">Add alert</button></div>
+      </div>
+      <div id="al-list"></div>
+      <div class="row"><button class="btn ghost" type="button" id="al-check">Check now</button></div>
+    </div>`;
+  }
+  function setupAlerts() {
+    let picked = null;
+    itemPicker("#al-item", "#al-results", "#al-wrap", (id) => { picked = id; });
+    $("#al-add").addEventListener("click", () => {
+      const id = picked || $("#al-item").value.trim().toUpperCase(), price = +$("#al-price").value;
+      if (!/^T\d_[A-Z0-9_@]+$/.test(id) || !(price > 0)) { $("#al-status").textContent = "Pick an item and set a price."; return; }
+      alerts.push({ id, city: $("#al-city").value, kind: $("#al-kind").value, price, hit: null, firedAt: 0, last: null });
+      store.set("alerts", alerts); picked = null; $("#al-item").value = ""; $("#al-price").value = "";
+      drawAlerts(); checkAlerts(true);
+    });
+    $("#al-check").addEventListener("click", () => checkAlerts(true));
+    drawAlerts();
+  }
+  function drawAlerts() {
+    const el = $("#al-list"); if (!el) return;
+    el.innerHTML = alerts.length ? `<div class="table-wrap"><table><thead><tr><th>Item</th><th>Market</th><th>Rule</th><th>Now</th><th></th></tr></thead><tbody>${alerts.map((a, i) => `
+      <tr class="${a.hit ? "on" : ""}"><td><span class="item-name">${esc(itemLabel(a.id))}<small>${esc(a.id)}</small></span></td><td>${esc(a.city)}</td>
+        <td>${a.kind === "below" ? "Listing at or under" : "Buy order at or over"} ${full(a.price)}</td>
+        <td class="num">${a.last != null ? full(a.last) : "–"}${a.hit ? `<br><strong class="good">Triggered</strong>` : ""}</td>
+        <td><button class="btn ghost" type="button" data-adel="${i}">Remove</button></td></tr>`).join("")}</tbody></table></div>` : `<p class="small muted">No alerts yet.</p>`;
+    $$("#al-list [data-adel]").forEach((b) => b.addEventListener("click", () => { alerts.splice(+b.dataset.adel, 1); store.set("alerts", alerts); drawAlerts(); }));
+  }
+  async function checkAlerts(manual = false) {
+    if (!alerts.length) return;
+    const status = $("#al-status");
+    const byCity = {};
+    alerts.forEach((a) => (byCity[a.city] = byCity[a.city] || new Set()).add(a.id));
+    try {
+      const rows = (await Promise.all(Object.entries(byCity).map(([c, ids]) => ABP.api.prices([...ids], [c], [1])))).flat();
+      const idx = ABP.api.index(rows);
+      const fired = [];
+      for (const a of alerts) {
+        const r = idx[a.id]?.[a.city];
+        a.last = a.kind === "below" ? r?.sell || null : r?.buy || null;
+        const hit = a.last != null && (a.kind === "below" ? a.last <= a.price : a.last >= a.price);
+        if (hit && Date.now() - a.firedAt > 6 * 36e5) { fired.push(a); a.firedAt = Date.now(); }
+        a.hit = hit;
+      }
+      store.set("alerts", alerts);
+      for (const a of fired) await notify(`${itemLabel(a.id)} in ${a.city}`, `${a.kind === "below" ? "Listed at" : "Buy order at"} ${full(a.last)} silver (your alert: ${full(a.price)}).`);
+      if (status) status.textContent = `Checked ${vanTime(new Date())}${fired.length ? ` · ${fired.length} triggered` : ""}`;
+      const n = alerts.filter((a) => a.hit).length;
+      const tab = $("#tab-market"); if (tab) tab.dataset.badge = n ? String(n) : "";
+    } catch (e) { if (status && manual) status.textContent = e.message; }
+    drawAlerts();
+  }
+  setTimeout(() => checkAlerts(false), 3000);
+  setInterval(() => checkAlerts(false), 10 * 6e4);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) checkAlerts(false); });
+
   /* ---------- Change of pace: a method outside your path, for a short stint ---------- */
   let paceLast = null, paceReturn = null;
   function pickPace() {
@@ -1914,7 +2263,7 @@
   $("#pace").addEventListener("click", (e) => { if (e.target.id === "pace") closePace(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#pace").hidden) closePace(); });
 
-  const RENDER = { plan: renderPlan, picks: renderPicks, methods: renderMethods, market: renderMarket, calc: renderCalc, wiki: renderWiki, wealth: renderWealth, progress: renderProgress, times: renderTimes };
+  const RENDER = { plan: renderPlan, picks: renderPicks, methods: renderMethods, market: renderMarket, calc: renderCalc, wiki: renderWiki, wealth: renderWealth, progress: renderProgress, tools: renderTools, times: renderTimes };
   tickClock();
 
   let rz;

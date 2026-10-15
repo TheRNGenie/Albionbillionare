@@ -1,0 +1,10 @@
+{
+  "appId": "com.therngenie.albionbillionaire",
+  "appName": "Albion Billionaire",
+  "webDir": "www",
+  "android": { "backgroundColor": "#15100b" },
+  "plugins": {
+    "CapacitorHttp": { "enabled": true },
+    "LocalNotifications": { "iconColor": "#e0b04f" }
+  }
+}

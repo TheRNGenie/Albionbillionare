@@ -1,0 +1,21 @@
+{
+  "name": "albion-billionaire",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Albion Billionaire: a year-long plan to 1 billion silver, as a web app and an Android app.",
+  "scripts": {
+    "build:web": "node tools/build-web.mjs",
+    "android:sync": "npm run build:web && npx cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/filesystem": "^8.0.0",
+    "@capacitor/local-notifications": "^8.0.0",
+    "@capacitor/share": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.0.0"
+  }
+}
