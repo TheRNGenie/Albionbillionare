@@ -31,7 +31,7 @@
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
   /* ---------- Tabs ---------- */
-  const TABS = ["plan", "picks", "methods", "market", "calc", "wiki", "progress"];
+  const TABS = ["plan", "picks", "methods", "market", "calc", "wiki", "wealth", "progress"];
   const rendered = {};
   function show(tab) {
     if (!TABS.includes(tab)) tab = "plan";
@@ -42,6 +42,7 @@
     if (!rendered[tab]) { RENDER[tab](); rendered[tab] = true; }
     if (tab === "plan") drawPlanChart();
     if (tab === "progress") renderProgress();
+    if (tab === "wealth") drawHistory();
     store.set("tab", tab);
   }
   $$(".tabs button").forEach((b) => b.addEventListener("click", () => {
@@ -966,62 +967,246 @@
 
   /* ---------- Progress ---------- */
   let log = store.get("log", []);
-  /* ---------- Wealth sheet: liquid (silver, orders, gold) and solid (items at market value) ---------- */
-  const wealth = Object.assign({ silver: 0, orders: 0, gold: 0, city: "Caerleon", mode: "sell", sort: "value", filter: "all", items: [] }, store.get("wealth", {}));
-  const saveWealth = () => store.set("wealth", wealth);
+  /* ---------- Wealth: banks by location, liquid vs solid, charts ----------
+     Liquid = silver on hand, gold at the gold price, silver locked in buy orders.
+     Solid = bank contents (the estimated value each bank shows), items on sell orders, and items tracked at market price. */
+  const LOCATIONS = ABP.CITIES.concat(["Island", "Guild hall", "Hideout", "Rest area (Roads of Avalon)", "Smuggler's den"]);
+  const SERIES = [
+    { key: "items", label: "Items in bank", color: "--s1" },
+    { key: "sell", label: "On sell orders", color: "--s2" },
+    { key: "buy", label: "In buy orders", color: "--s3" },
+  ];
+  const wealth = Object.assign({ silver: 0, gold: 0, banks: null, city: "Caerleon", mode: "sell", sort: "value", filter: "all", items: [], snaps: [], locSort: "value" }, store.get("wealth", {}));
+  if (!wealth.banks) {
+    wealth.banks = [{ loc: "Caerleon", items: 0, sell: 0, buy: +wealth.orders || 0 }];
+    delete wealth.orders;
+  }
+  wealth.items.forEach((it) => { if (it.loc == null) it.loc = wealth.banks[0]?.loc || "Caerleon"; });
   const QUAL = ["Normal", "Good", "Outstanding", "Excellent", "Masterpiece"];
-  function wealthRows() {
-    const rows = [
-      { kind: "liquid", name: "Silver in bank", qty: null, unit: null, total: wealth.silver },
-      { kind: "liquid", name: "Silver in buy orders", qty: null, unit: null, total: wealth.orders },
-      { kind: "liquid", name: "Gold", qty: wealth.gold, unit: goldRate.rate, total: wealth.gold * goldRate.rate },
-    ];
-    wealth.items.forEach((it, i) => {
-      const unit = it.price != null ? it.price : (it.live || 0);
-      rows.push({ kind: "solid", i, it, name: itemLabel(it.id), qty: it.qty, unit, total: unit * it.qty, manual: it.price != null });
-    });
-    return rows;
+  const itemUnit = (it) => (it.price != null ? it.price : it.live || 0);
+  function byLocation() {
+    const map = new Map();
+    const get = (loc) => { if (!map.has(loc)) map.set(loc, { loc, items: 0, sell: 0, buy: 0, tracked: 0 }); return map.get(loc); };
+    wealth.banks.forEach((b) => { const r = get(b.loc); r.items += +b.items || 0; r.sell += +b.sell || 0; r.buy += +b.buy || 0; });
+    wealth.items.forEach((it) => { get(it.loc).tracked += itemUnit(it) * it.qty; });
+    return [...map.values()].map((r) => Object.assign(r, { total: r.items + r.sell + r.buy + r.tracked }));
   }
   function wealthTotals() {
-    const rows = wealthRows();
-    const liquid = rows.filter((r) => r.kind === "liquid").reduce((a, r) => a + r.total, 0);
-    const solid = rows.filter((r) => r.kind === "solid").reduce((a, r) => a + r.total, 0);
-    return { liquid, solid, total: liquid + solid };
+    const locs = byLocation();
+    const sum = (k) => locs.reduce((a, r) => a + r[k], 0);
+    const goldS = wealth.gold * goldRate.rate;
+    const liquid = wealth.silver + goldS + sum("buy");
+    const solid = sum("items") + sum("sell") + sum("tracked");
+    return { locs, liquid, solid, total: liquid + solid, goldS, buy: sum("buy"), bank: sum("items"), sell: sum("sell"), tracked: sum("tracked") };
   }
+  /* One snapshot per day, updated as the numbers change, so the history chart fills itself in. */
+  function saveWealth() {
+    const t = wealthTotals();
+    const d = todayISO();
+    const snap = { date: d, liquid: Math.round(t.liquid), solid: Math.round(t.solid) };
+    const i = wealth.snaps.findIndex((x) => x.date === d);
+    if (t.total > 0) { if (i >= 0) wealth.snaps[i] = snap; else wealth.snaps.push(snap); }
+    wealth.snaps.sort((a, b) => a.date.localeCompare(b.date));
+    store.set("wealth", wealth);
+  }
+
+  function renderWealth() {
+    const p = $("#panel-wealth");
+    p.innerHTML = `
+      <div class="panel-head">
+        <span class="label">Your vault</span>
+        <h2>Wealth</h2>
+        <p>Enter what each bank holds, location by location. The game shows an estimated value at the top of every bank; copy that number in, plus what you have on the market there. Liquid wealth is silver you can spend now; solid wealth is everything you would have to sell first.</p>
+      </div>
+      <div class="box stack">
+        <div class="stats" id="wv-stats"></div>
+        <div class="stack" style="gap:6px">
+          <div class="row spread"><span class="small">Liquid share of your wealth</span><span class="small" id="wv-liq-pct"></span></div>
+          <div class="meter" role="img" id="wv-meter"><div></div></div>
+        </div>
+      </div>
+      <div class="box stack">
+        <div class="row spread"><h3>Wealth by location</h3>
+          <label class="field" style="max-width:220px"><span>Order</span><select id="wv-locsort"><option value="value">Largest first</option><option value="name">By name</option></select></label></div>
+        <div class="legend" id="wv-legend"></div>
+        <div class="hbars" id="wv-bars"></div>
+      </div>
+      <div class="box stack">
+        <div class="row spread"><h3>Your banks</h3><button class="btn ghost" type="button" id="wv-add">Add a location</button></div>
+        <p class="small muted">Silver is shared across all banks in Albion, so it goes in once below. Each row here is one location. Buy orders count as liquid because you can cancel them for silver.</p>
+        <div id="wv-banks"></div>
+        <div class="controls">
+          <label class="field"><span>Silver (shown in any bank)</span><input type="number" id="wv-silver" min="0" step="any"></label>
+          <label class="field"><span>Gold</span><input type="number" id="wv-gold" min="0" step="any"></label>
+          <label class="field"><span>Gold price (silver per gold)</span><input type="number" class="gold-rate" id="wv-rate" min="1" step="any"></label>
+        </div>
+        <p class="small muted"><span class="rate-note"></span></p>
+        <div class="row"><button class="btn ghost" type="button" id="wl-to-log">Copy into today's Progress entry</button><button class="btn ghost" type="button" id="wl-to-plan">Use as plan starting wealth</button></div>
+        <p class="small muted" id="wv-msg"></p>
+      </div>
+      <div class="box stack">
+        <div class="row spread"><h3>Net worth over time</h3><span class="small muted">Saved once a day as you update this page</span></div>
+        <canvas class="chart" id="wv-chart" aria-label="Net worth over time"></canvas>
+        <div id="wv-history"></div>
+      </div>
+      <details class="box" id="wealth">
+        <summary>Price individual items at market value</summary>
+        <div class="stack">
+          <p class="small muted">Use this for items you want valued at today's market price instead of the bank's estimate, such as a stack you plan to sell. List only items you left out of the bank values above, or they count twice.</p>
+          <div class="controls">
+            <label class="field"><span>Value items in</span><select id="wl-city">${ABP.CITIES.concat(ABP.BM).map((c) => `<option>${c}</option>`).join("")}</select></label>
+            <label class="field"><span>Value items at</span><select id="wl-mode"><option value="sell">Cheapest sell listing</option><option value="buy">Best buy order (sell now)</option></select></label>
+            <label class="field"><span>Sort by</span><select id="wl-sort"><option value="value">Total value, high to low</option><option value="unit">Value per item, high to low</option><option value="loc">Location</option><option value="name">Name</option></select></label>
+            <div class="search" id="wl-search-wrap" style="grid-column: span 2">
+              <label class="field"><span>Add an item</span><input type="search" id="wl-search" placeholder="Type an item name, for example Elder's Bag" autocomplete="off"></label>
+              <div class="results" id="wl-results" hidden></div>
+            </div>
+          </div>
+          <div id="wl-table"></div>
+          <div class="row"><button class="btn ghost" type="button" id="wl-refresh">Refresh prices</button><span class="small muted" id="wl-msg"></span></div>
+        </div>
+      </details>`;
+    bindRate(p);
+    const num = (id, k) => { const x = $(id); x.value = wealth[k] || ""; x.addEventListener("input", () => { wealth[k] = Math.max(0, +x.value || 0); saveWealth(); drawWealth(); }); };
+    num("#wv-silver", "silver"); num("#wv-gold", "gold");
+    $("#wv-locsort").value = wealth.locSort;
+    $("#wv-locsort").addEventListener("change", (e) => { wealth.locSort = e.target.value; saveWealth(); drawWealth(); });
+    $("#wv-add").addEventListener("click", () => {
+      const used = new Set(wealth.banks.map((b) => b.loc));
+      wealth.banks.push({ loc: LOCATIONS.find((l) => !used.has(l)) || "Other", items: 0, sell: 0, buy: 0 });
+      saveWealth(); drawBanks(); drawWealth();
+      $$("#wv-banks [data-k='items']").pop()?.focus();
+    });
+    for (const k of ["city", "mode", "sort"]) {
+      const x = $("#wl-" + k); x.value = wealth[k];
+      x.addEventListener("change", () => { wealth[k] = x.value; saveWealth(); k === "sort" ? drawItems() : priceWealth(); });
+    }
+    $("#wl-refresh").addEventListener("click", priceWealth);
+    const merged = () => { const t = wealthTotals(); return { coin: t.total - t.goldS, gold: wealth.gold, t }; };
+    $("#wl-to-log").addEventListener("click", () => {
+      const m = merged();
+      store.set("wealth.pending", { silver: Math.round(m.coin), gold: m.gold, note: `liquid ${fmt(m.t.liquid)}, solid ${fmt(m.t.solid)}` });
+      history.replaceState(null, "", "#progress"); show("progress");
+    });
+    $("#wl-to-plan").addEventListener("click", () => {
+      const m = merged();
+      plan.silver = Math.round(m.coin); plan.gold = m.gold; plan.start = toSilver(plan.silver, plan.gold); savePlan();
+      rendered.plan = false; goalMeter();
+      $("#wv-msg").textContent = `Your plan now starts from ${full(plan.start)} silver.`;
+    });
+    setupItemSearch();
+    drawBanks();
+    priceWealth();
+    window.addEventListener("resize", () => { if (!$("#panel-wealth").hidden) drawHistory(); });
+  }
+
+  function drawBanks() {
+    const opts = (cur) => [...new Set(LOCATIONS.concat(wealth.banks.map((b) => b.loc)))].map((l) => `<option ${l === cur ? "selected" : ""}>${esc(l)}</option>`).join("");
+    $("#wv-banks").innerHTML = `<datalist id="wv-locs">${LOCATIONS.map((l) => `<option value="${esc(l)}">`).join("")}</datalist>
+      <div class="stack">${wealth.banks.map((b, i) => `
+        <div class="controls bank-row">
+          <label class="field"><span>Location</span><input type="text" list="wv-locs" data-i="${i}" data-k="loc" value="${esc(b.loc)}"></label>
+          ${[["items", "Bank value (items)"], ["sell", "Items on sell orders"], ["buy", "Silver in buy orders"]].map(([k, l]) => `<label class="field"><span>${l}</span><input type="number" min="0" step="any" data-i="${i}" data-k="${k}" value="${b[k] || ""}" placeholder="0"></label>`).join("")}
+          <div class="field"><span>&nbsp;</span><button class="btn ghost" type="button" data-rm="${i}" aria-label="Remove ${esc(b.loc)}">Remove</button></div>
+        </div>`).join("")}</div>`;
+    $$("#wv-banks input[data-k]").forEach((x) => x.addEventListener(x.dataset.k === "loc" ? "change" : "input", () => {
+      const b = wealth.banks[+x.dataset.i];
+      if (x.dataset.k === "loc") { const old = b.loc; b.loc = x.value.trim() || old; wealth.items.forEach((it) => { if (it.loc === old) it.loc = b.loc; }); }
+      else b[x.dataset.k] = Math.max(0, +x.value || 0);
+      saveWealth(); drawWealth();
+    }));
+    $$("#wv-banks [data-rm]").forEach((x) => x.addEventListener("click", () => { wealth.banks.splice(+x.dataset.rm, 1); saveWealth(); drawBanks(); drawWealth(); }));
+  }
+
+  function drawWealth() {
+    const t = wealthTotals();
+    const prev = wealth.snaps.filter((s) => s.date < todayISO()).pop();
+    const change = prev ? t.total - (prev.liquid + prev.solid) : null;
+    $("#wv-stats").innerHTML = `
+      <div class="stat key"><span class="label">Net worth</span><span class="v money">${fmt(t.total)}</span><span class="small muted">${full(t.total)} silver</span></div>
+      <div class="stat"><span class="label">Liquid</span><span class="v">${fmt(t.liquid)}</span><span class="small muted">silver ${fmt(wealth.silver)} · gold ${fmt(t.goldS)} · buy orders ${fmt(t.buy)}</span></div>
+      <div class="stat"><span class="label">Solid</span><span class="v">${fmt(t.solid)}</span><span class="small muted">banks ${fmt(t.bank)} · sell orders ${fmt(t.sell)}${t.tracked ? " · priced items " + fmt(t.tracked) : ""}</span></div>
+      <div class="stat"><span class="label">Since last snapshot</span><span class="v ${change == null ? "" : change >= 0 ? "good" : "bad"}">${change == null ? "–" : (change >= 0 ? "+" : "") + fmt(change)}</span><span class="small muted">${prev ? "vs " + dateText(new Date(prev.date + "T12:00:00")) : "comes in from tomorrow"}</span></div>`;
+    const lp = t.total ? t.liquid / t.total : 0;
+    $("#wv-liq-pct").textContent = t.total ? `${pct(lp, 0)} liquid · ${pct(1 - lp, 0)} solid` : "";
+    $("#wv-meter > div").style.width = (lp * 100).toFixed(1) + "%";
+    $("#wv-meter").setAttribute("aria-label", `${pct(lp, 0)} of your wealth is liquid`);
+
+    /* Location bars: bank items and priced items share slot 1 (both are goods sitting in that bank). */
+    const locs = t.locs.filter((r) => r.total > 0).sort(wealth.locSort === "name" ? (a, b) => a.loc.localeCompare(b.loc) : (a, b) => b.total - a.total);
+    const max = Math.max(1, ...locs.map((r) => r.total));
+    const val = (r, k) => (k === "items" ? r.items + r.tracked : r[k]);
+    $("#wv-legend").innerHTML = SERIES.map((s) => `<span><i style="background:var(${s.color})"></i>${s.label}</span>`).join("");
+    $("#wv-bars").innerHTML = locs.length ? locs.map((r, i) => `
+      <div class="hbar" tabindex="0" data-i="${i}" aria-label="${esc(r.loc)}: ${full(r.total)} silver. ${SERIES.map((s) => `${s.label} ${full(val(r, s.key))}`).join(", ")}">
+        <span class="name">${esc(r.loc)}</span>
+        <span class="track" style="width:${((r.total / max) * 100).toFixed(2)}%">${SERIES.filter((s) => val(r, s.key) > 0).map((s) => `<span class="seg" style="flex:${val(r, s.key)} 1 0;background:var(${s.color})"></span>`).join("")}</span>
+        <span class="val">${fmt(r.total)}</span>
+      </div>`).join("") + `<div class="tip" id="wv-tip" hidden></div>` : `<p class="small muted">Add your banks below and the chart fills in.</p>`;
+    const tip = $("#wv-tip");
+    $$("#wv-bars .hbar").forEach((row) => {
+      const r = locs[+row.dataset.i];
+      const showTip = () => {
+        tip.innerHTML = `<strong>${esc(r.loc)}</strong>${SERIES.map((s) => `<div class="r"><span><i style="background:var(${s.color})"></i>${s.label}</span><span>${full(val(r, s.key))}</span></div>`).join("")}<div class="r"><span>Total</span><strong>${full(r.total)}</strong></div><div class="r muted"><span>Share of net worth</span><span>${pct(r.total / (t.total || 1), 1)}</span></div>`;
+        tip.hidden = false;
+        const box = $("#wv-bars").getBoundingClientRect(), rb = row.getBoundingClientRect();
+        tip.style.top = (rb.bottom - box.top + 6) + "px";
+        tip.style.left = Math.max(0, Math.min(box.width - tip.offsetWidth, rb.left - box.left + 40)) + "px";
+      };
+      row.addEventListener("mouseenter", showTip); row.addEventListener("focus", showTip);
+      row.addEventListener("mouseleave", () => (tip.hidden = true)); row.addEventListener("blur", () => (tip.hidden = true));
+    });
+    drawHistory();
+    drawItems();
+  }
+
+  function drawHistory() {
+    const snaps = wealth.snaps;
+    const c = $("#wv-chart");
+    if (!c) return;
+    c.hidden = snaps.length < 2;
+    if (snaps.length >= 2) {
+      const d0 = new Date(snaps[0].date + "T12:00:00");
+      const pts = snaps.map((s) => ({ x: Math.round((new Date(s.date + "T12:00:00") - d0) / 864e5), y: s.liquid + s.solid }));
+      const span = pts[pts.length - 1].x || 1;
+      const labels = [0, Math.round(span / 2), span].map((x) => ({ x, text: addDays(d0, x).toLocaleDateString("en-US", { month: "short", day: "numeric" }) }));
+      lineChart(c, [{ data: pts, color: css("--accent"), fill: true, dots: pts.length <= 40 }], { xLabels: labels });
+    }
+    const rows = snaps.slice(-10).reverse();
+    $("#wv-history").innerHTML = snaps.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Liquid</th><th>Solid</th><th>Net worth</th><th>Change</th></tr></thead><tbody>${rows.map((s) => {
+      const i = snaps.indexOf(s), before = snaps[i - 1];
+      const tot = s.liquid + s.solid, ch = before ? tot - before.liquid - before.solid : null;
+      return `<tr><td>${dateText(new Date(s.date + "T12:00:00"))}</td><td class="num">${full(s.liquid)}</td><td class="num">${full(s.solid)}</td><td class="num money">${full(tot)}</td><td class="num ${ch == null ? "" : ch >= 0 ? "good" : "bad"}">${ch == null ? "–" : (ch >= 0 ? "+" : "") + full(ch)}</td></tr>`;
+    }).join("")}</tbody></table></div>${snaps.length < 2 ? `<p class="small muted">The chart appears once you have two days of entries.</p>` : ""}` : `<p class="small muted">Nothing saved yet. Your first entry today starts the history.</p>`;
+  }
+
   /* Redrawing removes a focused input, which fires its change event mid-redraw; queue that instead. */
   let wlDrawing = false, wlAgain = false;
-  function drawWealth() {
+  function drawItems() {
     if (wlDrawing) { wlAgain = true; return; }
     wlDrawing = true;
-    try { drawWealthNow(); } finally { wlDrawing = false; }
+    try { drawItemsNow(); } finally { wlDrawing = false; }
     if (wlAgain) { wlAgain = false; setTimeout(drawWealth); }
   }
-  function drawWealthNow() {
-    const t = wealthTotals();
-    $("#wl-stats").innerHTML = `
-      <div class="stat key"><span class="label">Net worth</span><span class="v money">${fmt(t.total)}</span><span class="small muted">${full(t.total)} silver</span></div>
-      <div class="stat"><span class="label">Liquid</span><span class="v">${fmt(t.liquid)}</span><span class="small muted">${t.total ? pct(t.liquid / t.total, 0) + " of your wealth" : "spendable now"}</span></div>
-      <div class="stat"><span class="label">Solid</span><span class="v">${fmt(t.solid)}</span><span class="small muted">${wealth.items.length} item line${wealth.items.length === 1 ? "" : "s"}</span></div>`;
-    let rows = wealthRows().filter((r) => wealth.filter === "all" || r.kind === wealth.filter);
-    const byVal = (a, b) => b.total - a.total;
-    rows.sort({
-      value: byVal,
-      unit: (a, b) => (b.unit ?? b.total) - (a.unit ?? a.total),
-      liquid: (a, b) => (a.kind === b.kind ? byVal(a, b) : a.kind === "liquid" ? -1 : 1),
-      name: (a, b) => a.name.localeCompare(b.name),
-    }[wealth.sort]);
-    $("#wl-table").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Asset</th><th>Type</th><th>Quality</th><th>Qty</th><th>Each</th><th>Total</th><th>Share</th><th></th></tr></thead><tbody>${rows.map((r) => r.kind === "liquid" ? `
-      <tr><td>${esc(r.name)}</td><td>Liquid</td><td></td><td class="num">${r.qty != null ? full(r.qty) : ""}</td><td class="num">${r.unit != null ? full(r.unit) : ""}</td><td class="num money">${full(r.total)}</td><td class="num">${t.total ? pct(r.total / t.total, 1) : "–"}</td><td></td></tr>` : `
-      <tr><td>${esc(r.name)}<br><small class="muted">${esc(r.it.id)}</small></td><td>Solid</td>
+  function drawItemsNow() {
+    const total = wealthTotals().total || 1;
+    const rows = wealth.items.map((it, i) => ({ it, i, name: itemLabel(it.id), unit: itemUnit(it), total: itemUnit(it) * it.qty }));
+    rows.sort({ value: (a, b) => b.total - a.total, unit: (a, b) => b.unit - a.unit, loc: (a, b) => a.it.loc.localeCompare(b.it.loc) || b.total - a.total, name: (a, b) => a.name.localeCompare(b.name) }[wealth.sort] || ((a, b) => b.total - a.total));
+    const locOpts = (cur) => [...new Set(wealth.banks.map((b) => b.loc).concat(cur))].map((l) => `<option ${l === cur ? "selected" : ""}>${esc(l)}</option>`).join("");
+    $("#wl-table").innerHTML = rows.length ? `<div class="table-wrap"><table><thead><tr><th>Item</th><th>Location</th><th>Quality</th><th>Qty</th><th>Each</th><th>Total</th><th>Share</th><th></th></tr></thead><tbody>${rows.map((r) => `
+      <tr><td>${esc(r.name)}<br><small class="muted">${esc(r.it.id)}</small></td>
+        <td><select data-loc="${r.i}" aria-label="Location">${locOpts(r.it.loc)}</select></td>
         <td><select data-q="${r.i}" aria-label="Quality">${QUAL.map((q, k) => `<option value="${k + 1}" ${r.it.quality === k + 1 ? "selected" : ""}>${q}</option>`).join("")}</select></td>
         <td><input type="number" class="num" data-qty="${r.i}" value="${r.it.qty}" min="0" step="1" style="width:80px" aria-label="Quantity"></td>
-        <td><input type="number" class="num" data-price="${r.i}" value="${r.unit ? Math.round(r.unit) : ""}" placeholder="no price" min="0" step="any" style="width:100px" aria-label="Value each"><br><small class="muted">${r.manual ? `your price${r.it.live ? " · market " + full(r.it.live) : ""}` : r.it.live ? "market" : "no market price"}</small></td>
-        <td class="num money">${full(r.total)}</td><td class="num">${t.total ? pct(r.total / t.total, 1) : "–"}</td>
-        <td><button class="btn ghost" type="button" data-del="${r.i}" aria-label="Remove">Remove</button></td></tr>`).join("")}</tbody></table></div>`;
-    $$("#wl-table [data-qty]").forEach((x) => x.addEventListener("change", () => { wealth.items[+x.dataset.qty].qty = Math.max(0, +x.value || 0); saveWealth(); drawWealth(); }));
-    $$("#wl-table [data-price]").forEach((x) => x.addEventListener("change", () => { const it = wealth.items[+x.dataset.price]; it.price = x.value === "" ? null : Math.max(0, +x.value || 0); saveWealth(); drawWealth(); }));
+        <td><input type="number" class="num" data-price="${r.i}" value="${r.unit ? Math.round(r.unit) : ""}" placeholder="no price" min="0" step="any" style="width:100px" aria-label="Value each"><br><small class="muted">${r.it.price != null ? `your price${r.it.live ? " · market " + full(r.it.live) : ""}` : r.it.live ? "market" : "no market price"}</small></td>
+        <td class="num money">${full(r.total)}</td><td class="num">${pct(r.total / total, 1)}</td>
+        <td><button class="btn ghost" type="button" data-del="${r.i}" aria-label="Remove">Remove</button></td></tr>`).join("")}</tbody></table></div>` : `<p class="small muted">No items priced yet.</p>`;
+    const upd = () => { saveWealth(); drawWealth(); };
+    $$("#wl-table [data-qty]").forEach((x) => x.addEventListener("change", () => { wealth.items[+x.dataset.qty].qty = Math.max(0, +x.value || 0); upd(); }));
+    $$("#wl-table [data-price]").forEach((x) => x.addEventListener("change", () => { const it = wealth.items[+x.dataset.price]; it.price = x.value === "" ? null : Math.max(0, +x.value || 0); upd(); }));
+    $$("#wl-table [data-loc]").forEach((x) => x.addEventListener("change", () => { wealth.items[+x.dataset.loc].loc = x.value; upd(); }));
     $$("#wl-table [data-q]").forEach((x) => x.addEventListener("change", () => { wealth.items[+x.dataset.q].quality = +x.value; saveWealth(); priceWealth(); }));
-    $$("#wl-table [data-del]").forEach((x) => x.addEventListener("click", () => { wealth.items.splice(+x.dataset.del, 1); saveWealth(); drawWealth(); }));
+    $$("#wl-table [data-del]").forEach((x) => x.addEventListener("click", () => { wealth.items.splice(+x.dataset.del, 1); upd(); }));
   }
   async function priceWealth() {
     drawWealth();
@@ -1040,26 +1225,7 @@
     }
     drawWealth();
   }
-  function setupWealth() {
-    const num = (id, k) => { const x = $(id); x.value = wealth[k] || ""; x.addEventListener("input", () => { wealth[k] = Math.max(0, +x.value || 0); saveWealth(); drawWealth(); }); };
-    num("#wl-silver", "silver"); num("#wl-orders", "orders"); num("#wl-gold", "gold");
-    for (const k of ["city", "mode", "sort", "filter"]) {
-      const x = $("#wl-" + k); x.value = wealth[k];
-      x.addEventListener("change", () => { wealth[k] = x.value; saveWealth(); k === "city" || k === "mode" ? priceWealth() : drawWealth(); });
-    }
-    $("#wl-refresh").addEventListener("click", priceWealth);
-    const merged = () => { const t = wealthTotals(); return { coin: wealth.silver + wealth.orders + t.solid, gold: wealth.gold }; };
-    $("#wl-to-log").addEventListener("click", () => {
-      const m = merged();
-      $("#lg-silver").value = Math.round(m.coin); $("#lg-gold").value = m.gold || ""; $("#lg-note").value = $("#lg-note").value || `liquid ${fmt(wealthTotals().liquid)}, solid ${fmt(wealthTotals().solid)}`;
-      lgTotal(); $("#lg-form").scrollIntoView({ behavior: "smooth", block: "center" });
-    });
-    $("#wl-to-plan").addEventListener("click", () => {
-      const m = merged();
-      plan.silver = Math.round(m.coin); plan.gold = m.gold; plan.start = toSilver(plan.silver, plan.gold); savePlan();
-      rendered.plan = false; goalMeter();
-      $("#wl-msg").textContent = `Your plan now starts from ${full(plan.start)} silver.`;
-    });
+  function setupItemSearch() {
     const input = $("#wl-search"), box = $("#wl-results");
     let list = null;
     input.addEventListener("focus", async () => {
@@ -1069,8 +1235,9 @@
       catch (e) { input.placeholder = "Item names could not load here. Type an item id such as T6_BAG and press Enter."; list = []; }
     });
     const add = (id) => {
-      const have = wealth.items.find((it) => it.id === id && (it.quality || 1) === 1);
-      if (have) have.qty += 1; else wealth.items.push({ id, qty: 1, quality: 1, price: null, live: null });
+      const loc = wealth.banks[0]?.loc || "Caerleon";
+      const have = wealth.items.find((it) => it.id === id && (it.quality || 1) === 1 && it.loc === loc);
+      if (have) have.qty += 1; else wealth.items.push({ id, qty: 1, quality: 1, price: null, live: null, loc });
       saveWealth(); input.value = ""; box.hidden = true; priceWealth();
     };
     input.addEventListener("input", () => {
@@ -1085,8 +1252,7 @@
       if (e.key === "Enter" && /^T\d_[A-Z0-9_@]+$/i.test(input.value.trim())) add(input.value.trim().toUpperCase());
       if (e.key === "Escape") box.hidden = true;
     });
-    document.addEventListener("click", (e) => { if (!$("#wl-search-wrap").contains(e.target)) box.hidden = true; });
-    priceWealth();
+    document.addEventListener("click", (e) => { if (!$("#wl-search-wrap")?.contains(e.target)) box.hidden = true; });
   }
 
   /* ---------- Character lookup (Albion game info API) ---------- */
@@ -1162,31 +1328,6 @@
           <h2>Progress</h2>
           <p>Log your wealth once a day or once a week: silver in the bank, in orders and in stock, plus any gold. Gold is converted to silver at the gold price. The chart compares you with the plan you picked. Your log stays in this browser.</p>
         </div>
-        <div class="box stack" id="wealth">
-          <div class="row spread"><h3>Your wealth: liquid and solid</h3><span class="small muted">Saved in this browser</span></div>
-          <p class="small muted">Liquid wealth is silver you can spend right now: your bank, silver sitting in buy orders, and gold at the gold price. Solid wealth is everything you would have to sell first: gear, resources, mounts, stock on sell orders. Items are valued at live market prices in the city you pick; type your own price over any of them.</p>
-          <div class="controls">
-            <label class="field"><span>Silver in bank</span><input type="number" id="wl-silver" min="0" step="any"></label>
-            <label class="field"><span>Silver in buy orders</span><input type="number" id="wl-orders" min="0" step="any"></label>
-            <label class="field"><span>Gold</span><input type="number" id="wl-gold" min="0" step="any"></label>
-            <label class="field"><span>Value items in</span><select id="wl-city">${ABP.CITIES.concat(ABP.BM).map((c) => `<option>${c}</option>`).join("")}</select></label>
-            <label class="field"><span>Value items at</span><select id="wl-mode"><option value="sell">Cheapest sell listing</option><option value="buy">Best buy order (sell now)</option></select></label>
-          </div>
-          <div class="search" id="wl-search-wrap">
-            <label class="field"><span>Add an item you own</span><input type="search" id="wl-search" placeholder="Type an item name, for example Elder's Bag" autocomplete="off"></label>
-            <div class="results" id="wl-results" hidden></div>
-          </div>
-          <div class="stats" id="wl-stats"></div>
-          <div class="row spread">
-            <div class="row">
-              <label class="field"><span>Show</span><select id="wl-filter"><option value="all">Everything</option><option value="liquid">Liquid only</option><option value="solid">Solid only</option></select></label>
-              <label class="field"><span>Sort by</span><select id="wl-sort"><option value="value">Total value, high to low</option><option value="unit">Value per item, high to low</option><option value="liquid">Liquid first, then by value</option><option value="name">Name</option></select></label>
-            </div>
-            <div class="row"><button class="btn ghost" type="button" id="wl-refresh">Refresh prices</button><button class="btn ghost" type="button" id="wl-to-log">Copy into today's entry</button><button class="btn ghost" type="button" id="wl-to-plan">Use as plan starting wealth</button></div>
-          </div>
-          <div id="wl-table"></div>
-          <p class="small muted" id="wl-msg"></p>
-        </div>
         <div class="box stack" id="char">
           <div class="row spread"><h3>Your character</h3><span class="small muted">From Albion's official game info server</span></div>
           <p class="small muted">Look up a character to see their guild and lifetime fame. Each lookup is saved, so the next one shows how much crafting, gathering and farming fame you earned in between. The game does not share bank contents or spec levels, so enter those yourself.</p>
@@ -1220,7 +1361,6 @@
       $("#lg-silver").addEventListener("input", lgTotal);
       $("#lg-gold").addEventListener("input", lgTotal);
       lgTotal();
-      setupWealth();
       setupCharacter();
       $("#lg-form").addEventListener("submit", (e) => {
         e.preventDefault();
@@ -1240,6 +1380,12 @@
         try { const v = JSON.parse($("#lg-json").value); if (!Array.isArray(v)) throw 0; log = v; store.set("log", log); renderProgress(); goalMeter(); $("#lg-msg").textContent = "Restored."; }
         catch (e) { $("#lg-msg").textContent = "That text is not a saved log."; }
       });
+    }
+    const pend = store.get("wealth.pending", null);
+    if (pend) {
+      store.set("wealth.pending", null);
+      $("#lg-date").value = todayISO(); $("#lg-silver").value = pend.silver; $("#lg-gold").value = pend.gold || ""; $("#lg-note").value = pend.note || "";
+      lgTotal(); setTimeout(() => $("#lg-form").scrollIntoView({ block: "center" }));
     }
     const prof = profileOf(plan.profile);
     const sim = simulate(prof, plan.start, plan.hours ?? prof.hours, plan.skill);
@@ -1511,7 +1657,47 @@
   $("#wheel").addEventListener("click", (e) => { if (e.target.id === "wheel") closeWheel(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#wheel").hidden) closeWheel(); });
 
-  const RENDER = { plan: renderPlan, picks: renderPicks, methods: renderMethods, market: renderMarket, calc: renderCalc, wiki: renderWiki, progress: renderProgress };
+  /* ---------- Change of pace: a method outside your path, for a short stint ---------- */
+  let paceLast = null, paceReturn = null;
+  function pickPace() {
+    const prof = profileOf(plan.profile);
+    let pool = ABP.METHODS.filter((m) => ABP.PACE[m.id] && !prof.methods.includes(m.id) && m.id !== paceLast);
+    if (!pool.length) pool = ABP.METHODS.filter((m) => ABP.PACE[m.id] && m.id !== paceLast);
+    const buf = new Uint32Array(1); crypto.getRandomValues(buf);
+    return pool[buf[0] % pool.length];
+  }
+  function showPace() {
+    const m = pickPace(); paceLast = m.id;
+    const pc = ABP.PACE[m.id], prof = profileOf(plan.profile);
+    const usual = [...new Set(prof.methods.map((id) => ABP.METHODS.find((x) => x.id === id)?.kind).filter(Boolean))];
+    $("#pc-card").innerHTML = `
+      <span class="label">Change of pace · ${esc(pc.length)}</span>
+      <h2 id="pc-title">${esc(m.name)}</h2>
+      <p>${esc(pc.hook)}</p>
+      <p class="small muted">Your path (${esc(prof.name)}) is mostly ${esc(usual.join(", ").toLowerCase())}. This is ${esc(m.kind.toLowerCase())}, so it works different muscles while your island and focus keep earning.</p>
+      <h4>Try it like this</h4>
+      <ol class="pace-steps">${pc.plan.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>
+      <div class="stats">
+        <div class="stat"><span class="label">Typical income</span><span class="small">${esc(m.rate)}</span></div>
+        <div class="stat"><span class="label">Money needed</span><span class="small">${esc(m.capital)}</span></div>
+        <div class="stat"><span class="label">Risk</span><span class="small">${esc(m.risk || "–")}</span></div>
+      </div>
+      <div class="row"><button class="btn" type="button" id="pc-next">Another idea</button><button class="btn ghost" type="button" id="pc-open">Full playbook</button><button class="btn ghost" type="button" id="pc-close">Close</button></div>`;
+    $("#pc-next").addEventListener("click", showPace);
+    $("#pc-close").addEventListener("click", closePace);
+    $("#pc-open").addEventListener("click", () => {
+      closePace(); history.replaceState(null, "", "#methods"); show("methods");
+      const t = $("#m-" + m.id); if (t) { t.open = true; t.scrollIntoView({ behavior: "smooth", block: "start" }); }
+    });
+    $("#pc-next").focus();
+  }
+  function openPace() { paceReturn = document.activeElement; $("#pace").hidden = false; showPace(); }
+  function closePace() { $("#pace").hidden = true; paceReturn?.focus?.(); }
+  $("#paceOpen").addEventListener("click", openPace);
+  $("#pace").addEventListener("click", (e) => { if (e.target.id === "pace") closePace(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#pace").hidden) closePace(); });
+
+  const RENDER = { plan: renderPlan, picks: renderPicks, methods: renderMethods, market: renderMarket, calc: renderCalc, wiki: renderWiki, wealth: renderWealth, progress: renderProgress };
 
   let rz;
   window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { drawPlanChart(); if (!$("#panel-progress").hidden) renderProgress(); }, 150); });
