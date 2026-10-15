@@ -808,6 +808,81 @@
       <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${(share * 100).toFixed(1)}"><div class="fill" style="width:${(share * 100).toFixed(2)}%"></div></div>`;
   }
 
+
+  /* ---------- Welcome message ---------- */
+  const WELCOME_DEFAULT = {
+    title: "Welcome back, adventurer",
+    message: "Island first, focus second, then the market.\nYou need {daily} today to stay on pace for your first billion.",
+    show: true,
+  };
+  let welcome = Object.assign({}, WELCOME_DEFAULT, store.get("welcome", {}));
+  function welcomeValues() {
+    const last = log[log.length - 1];
+    const silver = last ? last.silver : plan.start;
+    const elapsed = Math.max(0, Math.round((Date.now() - new Date(plan.date + "T00:00:00")) / 864e5));
+    const daysLeft = Math.max(1, ABP.DAYS - elapsed);
+    return {
+      silver: fmt(silver), progress: pct(silver / ABP.GOAL), daily: fmt(Math.max(0, ABP.GOAL - silver) / daysLeft),
+      daysLeft: String(daysLeft), path: profileOf(plan.profile).name,
+      date: new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" }),
+    };
+  }
+  const fillIn = (text, v) => text.replace(/\{(\w+)\}/g, (m, k) => (k in v ? v[k] : m));
+  let welcomeReturn = null;
+  function openWelcome(edit = false) {
+    const box = $("#welcome");
+    if (box.hidden) welcomeReturn = document.activeElement;
+    const v = welcomeValues();
+    box.innerHTML = edit ? `
+      <div class="welcome">
+        <h2 id="wl-title">Edit your welcome</h2>
+        <form id="wl-form">
+          <label class="field"><span>Heading</span><input type="text" id="wl-head" maxlength="80"></label>
+          <label class="field"><span>Message</span><textarea id="wl-msg" rows="5" maxlength="600"></textarea></label>
+          <p class="hint">You can use {silver}, {progress}, {daily}, {daysLeft}, {path} and {date}. They fill in with your numbers each time the app opens.</p>
+          <label class="check"><input type="checkbox" id="wl-show"> Show this every time the app opens</label>
+          <div class="row"><button class="btn" type="submit">Save</button><button class="btn ghost" type="button" id="wl-reset">Reset to default</button><button class="btn ghost" type="button" id="wl-cancel">Cancel</button></div>
+        </form>
+      </div>` : `
+      <div class="welcome">
+        <span class="crest" aria-hidden="true"></span>
+        <span class="label">${esc(v.date)}</span>
+        <h2 id="wl-title"></h2>
+        <p class="msg" id="wl-text"></p>
+        <div class="facts-row">
+          <span>Silver<strong>${esc(v.silver)}</strong></span>
+          <span>Toward 1B<strong>${esc(v.progress)}</strong></span>
+          <span>Needed today<strong>${esc(v.daily)}</strong></span>
+        </div>
+        <div class="row"><button class="btn" type="button" id="wl-enter">Enter</button><button class="btn ghost" type="button" id="wl-edit">Edit message</button></div>
+      </div>`;
+    box.hidden = false;
+    if (edit) {
+      $("#wl-head").value = welcome.title; $("#wl-msg").value = welcome.message; $("#wl-show").checked = welcome.show;
+      $("#wl-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        welcome = { title: $("#wl-head").value.trim() || WELCOME_DEFAULT.title, message: $("#wl-msg").value.trim(), show: $("#wl-show").checked };
+        store.set("welcome", welcome); openWelcome(false);
+      });
+      $("#wl-reset").addEventListener("click", () => { $("#wl-head").value = WELCOME_DEFAULT.title; $("#wl-msg").value = WELCOME_DEFAULT.message; $("#wl-show").checked = true; });
+      $("#wl-cancel").addEventListener("click", () => openWelcome(false));
+      $("#wl-head").focus();
+    } else {
+      $("#wl-title").textContent = fillIn(welcome.title, v);
+      $("#wl-text").textContent = fillIn(welcome.message, v);
+      $("#wl-enter").addEventListener("click", closeWelcome);
+      $("#wl-edit").addEventListener("click", () => openWelcome(true));
+      $("#wl-enter").focus();
+    }
+  }
+  function closeWelcome() {
+    $("#welcome").hidden = true; $("#welcome").innerHTML = "";
+    welcomeReturn?.focus?.();
+  }
+  $("#welcome").addEventListener("click", (e) => { if (e.target.id === "welcome") closeWelcome(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#welcome").hidden) closeWelcome(); });
+  $("#welcomeOpen").addEventListener("click", () => openWelcome(false));
+
   const RENDER = { plan: renderPlan, methods: renderMethods, market: renderMarket, calc: renderCalc, wiki: renderWiki, progress: renderProgress };
 
   let rz;
@@ -817,5 +892,6 @@
   goalMeter();
   const initial = (location.hash || "").slice(1) || store.get("tab", "plan");
   show(initial);
+  if (welcome.show) openWelcome(false);
   ABP.api.itemNames().catch(() => {});
 })();

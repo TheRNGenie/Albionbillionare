@@ -1,38 +1,52 @@
 /* Layout: a ledger-like workbench. Sticky header with the goal meter, tabbed panels below.
-   Color: cool "silver" neutrals, a steel-blue accent for controls, and gold reserved for money. */
+   Look: Albion Online's own world. Dark tooled-leather panels with brass trim (the in-game UI),
+   carved Roman capitals in gold (the logo), and parchment for the light theme (maps and quest scrolls).
+   Silver amounts are drawn in silver, gold in gold, buttons in Albion's ember red. */
 :root {
-  --bg: #eef1f3;
-  --surface: #ffffff;
-  --surface-2: #f5f7f8;
-  --line: #d5dce1;
-  --fg: #1c2530;
-  --muted: #5b6874;
-  --accent: #2f6688;
-  --accent-ink: #ffffff;
-  --gold: #9a6b12;
-  --gold-soft: #f4e7c8;
-  --good: #1f7a4d;
-  --bad: #b23a3a;
-  --warn: #9a6b12;
-  --chart-grid: #e1e6ea;
-  --font-display: "Spectral SC", "Palatino Linotype", Georgia, serif;
-  --font-body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
-  --radius: 8px;
+  --bg: #15100b;
+  --surface: #241a12;
+  --surface-2: #2e2218;
+  --line: #4a3824;
+  --trim: #8a6a35;
+  --fg: #ecdfc4;
+  --muted: #b09c7c;
+  --accent: #e0b04f;
+  --accent-ink: #1a120b;
+  --button: #a63d1c;
+  --button-hi: #c4532a;
+  --button-ink: #fbefd5;
+  --gold: #e0b04f;
+  --gold-soft: #3a2a14;
+  --silver: #d3d9de;
+  --good: #8fc46a;
+  --bad: #e66a4c;
+  --warn: #e0b04f;
+  --chart-grid: #3a2b1d;
+  --grain: rgba(255, 230, 180, 0.025);
+  --shadow: rgba(0, 0, 0, 0.45);
+  --font-display: "Cinzel", "Trajan Pro", "Times New Roman", serif;
+  --font-body: "Alegreya Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Alegreya Sans", "Segoe UI", system-ui, sans-serif;
+  --radius: 4px;
+  color-scheme: dark;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #0f141a; --surface: #161e27; --surface-2: #1b2530; --line: #2a3643;
-    --fg: #e3e8ec; --muted: #9aa8b4; --accent: #7fb1d3; --accent-ink: #0f141a;
-    --gold: #e2b65a; --gold-soft: #3a2f17; --good: #5cc28d; --bad: #f07f7f; --warn: #e2b65a;
-    --chart-grid: #233040; color-scheme: dark;
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #e6d8b8; --surface: #f4ead2; --surface-2: #ecdfc0; --line: #c8b085; --trim: #a8844a;
+    --fg: #2e2114; --muted: #6b573b; --accent: #8a5a12; --accent-ink: #fff7e6;
+    --button: #9b3a1c; --button-hi: #b4492a; --button-ink: #fbefd5;
+    --gold: #8a5f14; --gold-soft: #ead6a2; --silver: #4c5863; --good: #3f7a2a; --bad: #a8361c; --warn: #8a5f14;
+    --chart-grid: #d9c79f; --grain: rgba(90, 60, 20, 0.03); --shadow: rgba(80, 50, 10, 0.18);
+    color-scheme: light;
   }
 }
-:root[data-theme="dark"] {
-  --bg: #0f141a; --surface: #161e27; --surface-2: #1b2530; --line: #2a3643;
-  --fg: #e3e8ec; --muted: #9aa8b4; --accent: #7fb1d3; --accent-ink: #0f141a;
-  --gold: #e2b65a; --gold-soft: #3a2f17; --good: #5cc28d; --bad: #f07f7f; --warn: #e2b65a;
-  --chart-grid: #233040; color-scheme: dark;
+:root[data-theme="light"] {
+  --bg: #e6d8b8; --surface: #f4ead2; --surface-2: #ecdfc0; --line: #c8b085; --trim: #a8844a;
+  --fg: #2e2114; --muted: #6b573b; --accent: #8a5a12; --accent-ink: #fff7e6;
+  --button: #9b3a1c; --button-hi: #b4492a; --button-ink: #fbefd5;
+  --gold: #8a5f14; --gold-soft: #ead6a2; --silver: #4c5863; --good: #3f7a2a; --bad: #a8361c; --warn: #8a5f14;
+  --chart-grid: #d9c79f; --grain: rgba(90, 60, 20, 0.03); --shadow: rgba(80, 50, 10, 0.18);
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -54,7 +68,7 @@ p { margin: 0; }
   padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
 .num, .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-.money { color: var(--gold); font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; }
+.money { color: var(--silver); font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; }
 .muted { color: var(--muted); }
 .good { color: var(--good); }
 .bad { color: var(--bad); }
@@ -187,7 +201,7 @@ td.empty { color: var(--muted); opacity: .5; }
 .notice { border: 1px solid var(--line); border-left: 4px solid var(--warn); background: var(--surface); border-radius: 6px; padding: 12px 14px; display: grid; gap: 8px; }
 .notice.err { border-left-color: var(--bad); }
 .notice code, .notice textarea { font-family: var(--font-mono); font-size: 0.8rem; }
-textarea { width: 100%; min-height: 90px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px; color: var(--fg); }
+textarea { font-family: var(--font-body); width: 100%; min-height: 90px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 8px; color: var(--fg); }
 .url-box { word-break: break-all; background: var(--surface-2); padding: 6px 8px; border-radius: 4px; }
 
 .search { position: relative; }
@@ -213,3 +227,119 @@ textarea { width: 100%; min-height: 90px; background: var(--surface-2); border: 
 .foot p { max-width: 90ch; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* ---------- Albion skin ---------- */
+body {
+  font-size: 16px;
+  background:
+    radial-gradient(ellipse at top, var(--gold-soft), transparent 60%) no-repeat,
+    repeating-linear-gradient(90deg, var(--grain) 0 2px, transparent 2px 7px),
+    var(--bg);
+}
+h1, h2, h3 { letter-spacing: 0.04em; color: var(--gold); font-weight: 700; }
+h2 { font-size: 1.75rem; }
+h4 { font-family: var(--font-display); color: var(--fg); letter-spacing: 0.03em; }
+.panel-head h2::after {
+  content: ""; display: block; width: 120px; height: 2px; margin-top: 10px;
+  background: linear-gradient(90deg, var(--gold), transparent);
+}
+.label { color: var(--trim); letter-spacing: 0.14em; }
+.num, .mono, td.num, .stat .v, .money { font-variant-numeric: tabular-nums lining-nums; }
+.stat .v { font-family: var(--font-display); font-size: 1.3rem; letter-spacing: 0.02em; }
+
+.top {
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  border-bottom: 2px solid var(--trim);
+  box-shadow: 0 1px 0 var(--line), 0 6px 18px var(--shadow);
+}
+body::before { background: var(--surface-2); }
+.brand h1 { font-size: 1.6rem; letter-spacing: 0.08em; text-transform: uppercase; text-shadow: 0 1px 0 var(--shadow); }
+.brand .sub { letter-spacing: 0.06em; }
+.coin {
+  width: 38px; height: 38px;
+  background: radial-gradient(circle at 35% 30%, #fbfcfd, #c3ccd3 50%, #6f7b85);
+  box-shadow: 0 0 0 2px var(--trim), inset 0 0 0 3px rgba(255,255,255,0.35), inset 0 0 0 6px rgba(0,0,0,0.15);
+}
+.goal .bar { height: 10px; border-radius: 2px; border-color: var(--trim); background: var(--bg); }
+.goal .fill { background: linear-gradient(90deg, #8f969c, var(--silver)); }
+.tabs { gap: 2px; }
+.tabs button { font-family: var(--font-display); font-weight: 700; letter-spacing: 0.08em; font-size: 0.82rem; text-transform: uppercase; border-bottom-width: 2px; }
+.tabs button[aria-selected="true"] { color: var(--gold); border-bottom-color: var(--gold); background: linear-gradient(0deg, var(--gold-soft), transparent); }
+
+.box, .profile, .table-wrap, .notice, .results {
+  border: 1px solid var(--trim);
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 1px var(--line), inset 0 0 0 3px var(--surface), inset 0 0 0 4px var(--line), 0 4px 14px var(--shadow);
+}
+.box { background: linear-gradient(180deg, var(--surface-2), var(--surface)); padding: 20px; }
+.profile { background: var(--surface); }
+.profile h3 { color: var(--fg); }
+.profile[aria-pressed="true"] { background: linear-gradient(180deg, var(--gold-soft), var(--surface)); border-color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold), 0 0 0 1px var(--gold), 0 4px 14px var(--shadow); }
+.profile[aria-pressed="true"] h3 { color: var(--gold); }
+.profile .tag { color: var(--trim); }
+
+.btn {
+  font-family: var(--font-display); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; font-size: 0.82rem;
+  background: linear-gradient(180deg, var(--button-hi), var(--button)); color: var(--button-ink);
+  border: 1px solid var(--trim); border-radius: 3px; padding: 9px 16px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.18), 0 2px 6px var(--shadow);
+}
+.btn:hover { filter: brightness(1.08); }
+.btn.ghost { background: transparent; color: var(--gold); border-color: var(--trim); box-shadow: none; }
+select, input[type="number"], input[type="text"], input[type="date"], input[type="search"], textarea {
+  background: var(--bg); border: 1px solid var(--line); border-radius: 3px; color: var(--fg);
+}
+select:focus, input:focus, textarea:focus { border-color: var(--gold); outline: none; box-shadow: 0 0 0 1px var(--gold); }
+.chip { font-family: var(--font-display); letter-spacing: 0.06em; font-size: 0.78rem; text-transform: uppercase; background: var(--surface); border-color: var(--line); border-radius: 3px; }
+.chip[aria-pressed="true"] { background: var(--gold-soft); color: var(--gold); border-color: var(--gold); }
+.kind { font-family: var(--font-display); background: var(--bg); color: var(--trim); border-color: var(--trim); border-radius: 2px; }
+
+.stat { border-left-color: var(--line); }
+.stat.key { border-left-color: var(--gold); }
+.phase { border-top: 2px solid var(--line); }
+.phase.on { border-top-color: var(--gold); }
+.phase h4 { color: var(--gold); font-size: 1.05rem; }
+.phase .when { font-family: var(--font-body); }
+
+th { background: var(--surface-2); color: var(--trim); font-family: var(--font-display); letter-spacing: 0.08em; border-bottom: 1px solid var(--trim); }
+td:first-child { background: var(--surface); }
+td.hi { color: var(--gold); }
+table { font-size: 0.95rem; }
+details > summary { color: var(--gold); list-style-position: outside; }
+details.method > summary h3 { font-size: 1.15rem; }
+a { color: var(--gold); }
+.toc a { font-family: var(--font-display); font-size: 0.85rem; letter-spacing: 0.04em; }
+.toc a:hover { background: var(--gold-soft); color: var(--gold); }
+.wiki article { border-left: 2px solid var(--line); padding-left: 16px; }
+.wiki article h3 { font-size: 1.15rem; }
+.notice { border-left: 4px solid var(--warn); }
+.foot { font-size: 0.9rem; }
+
+/* Welcome scroll */
+.welcome-back {
+  position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  background: rgba(10, 6, 2, 0.72); backdrop-filter: blur(2px);
+}
+.welcome {
+  width: min(560px, 100%); max-height: 100%; overflow-y: auto;
+  background: linear-gradient(180deg, #f6ecd3, #eadbb7); color: #2e2114;
+  border: 2px solid #a8844a; border-radius: 4px; padding: 28px 28px 22px;
+  box-shadow: inset 0 0 0 4px #f6ecd3, inset 0 0 0 5px #c8b085, inset 0 0 60px rgba(120, 80, 20, 0.18), 0 20px 60px rgba(0,0,0,0.6);
+  display: grid; gap: 14px; text-align: center;
+}
+.welcome .crest { width: 54px; height: 54px; margin: 0 auto; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fbfcfd, #c3ccd3 50%, #6f7b85); box-shadow: 0 0 0 3px #a8844a, inset 0 0 0 4px rgba(255,255,255,0.35); }
+.welcome h2 { color: #7a4f10; font-size: 1.7rem; }
+.welcome .msg { font-size: 1.08rem; line-height: 1.6; white-space: pre-line; }
+.welcome .facts-row { display: flex; justify-content: center; gap: 24px; flex-wrap: wrap; font-family: var(--font-display); color: #6b573b; font-size: 0.85rem; letter-spacing: 0.06em; text-transform: uppercase; }
+.welcome .facts-row strong { display: block; color: #2e2114; font-size: 1.2rem; }
+.welcome .row { justify-content: center; }
+.welcome .btn.ghost { color: #7a4f10; border-color: #a8844a; }
+.welcome form { display: grid; gap: 10px; text-align: left; }
+.welcome form input, .welcome form textarea { background: #fbf5e6; color: #2e2114; border-color: #c8b085; }
+.welcome form .field > span { color: #6b573b; }
+.welcome form .hint { font-size: 0.85rem; color: #6b573b; }
+.welcome label.check { display: flex; gap: 8px; align-items: center; font-size: 0.92rem; }
+.welcome label.check input { accent-color: #9b3a1c; }
+.welcome-btn { margin-left: auto; }

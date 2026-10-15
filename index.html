@@ -7,7 +7,7 @@
 <meta name="description" content="A year-long plan to reach 1 billion silver in Albion Online, with live market prices, profit calculators and a wiki reference.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral+SC:wght@500;700&family=Source+Sans+3:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Alegreya+Sans:wght@400;500;700&display=swap">
 <link rel="stylesheet" href="assets/styles.css">
 </head>
 <body>
@@ -29,6 +29,7 @@
     <button role="tab" data-tab="calc" id="tab-calc">Calculators</button>
     <button role="tab" data-tab="wiki" id="tab-wiki">Wiki</button>
     <button role="tab" data-tab="progress" id="tab-progress">Progress</button>
+    <button class="chip welcome-btn" id="welcomeOpen" type="button">Welcome</button>
   </nav>
 </header>
 
@@ -44,6 +45,8 @@
 <footer class="wrap foot">
   <p>Prices from the <a href="https://www.albion-online-data.com/" target="_blank" rel="noopener">Albion Online Data Project</a>. Item names from <a href="https://github.com/ao-data/ao-bin-dumps" target="_blank" rel="noopener">ao-bin-dumps</a>. Income figures are estimates; check prices before you commit silver. Not affiliated with Sandbox Interactive.</p>
 </footer>
+
+<div class="welcome-back" id="welcome" role="dialog" aria-modal="true" aria-labelledby="wl-title" hidden></div>
 
 <script src="assets/js/data.js"></script>
 <script src="assets/js/api.js"></script>

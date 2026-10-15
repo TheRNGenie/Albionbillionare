@@ -1,6 +1,6 @@
 # Albion Billionaire
 
-A one-page web app for reaching **1,000,000,000 silver in Albion Online within a year**, built for a player with premium and a fully upgraded personal island.
+A one-page web app, styled after Albion Online (dark leather and brass, parchment in light mode, carved gold capitals), for reaching **1,000,000,000 silver in Albion Online within a year**, built for a player with premium and a fully upgraded personal island.
 
 ## What's inside
 
@@ -10,6 +10,7 @@ A one-page web app for reaching **1,000,000,000 silver in Albion Online within a
 - **Calculators**: refining profit across T4 to T8 (return rates, focus, daily bonus, fees), order flip profit and break-even, and island harvest profit.
 - **Wiki**: premium, islands, focus, taxes and fees, return rates, refining recipes, crafting bonus cities, tiers, zones, the Black Market and journals.
 - **Progress**: log your silver over time and compare it with your plan. Data stays in your browser.
+- **Welcome message**: a greeting shown when the app opens. Use the Edit message button to change it; placeholders like `{daily}` and `{progress}` fill in with your numbers. Turn it off there too, and reopen it with the Welcome button.
 
 ## Run it
 
