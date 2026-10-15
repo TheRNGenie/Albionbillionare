@@ -13,9 +13,9 @@ ABP.FEES = {
 };
 
 ABP.SERVERS = [
-  { id: "west", label: "Americas", host: "https://west.albion-online-data.com" },
-  { id: "europe", label: "Europe", host: "https://europe.albion-online-data.com" },
-  { id: "east", label: "Asia", host: "https://east.albion-online-data.com" },
+  { id: "west", label: "Americas", host: "https://west.albion-online-data.com", gameinfo: "https://gameinfo.albiononline.com" },
+  { id: "europe", label: "Europe", host: "https://europe.albion-online-data.com", gameinfo: "https://gameinfo-ams.albiononline.com" },
+  { id: "east", label: "Asia", host: "https://east.albion-online-data.com", gameinfo: "https://gameinfo-sgp.albiononline.com" },
 ];
 
 ABP.CITIES = ["Caerleon", "Bridgewatch", "Fort Sterling", "Lymhurst", "Martlock", "Thetford", "Brecilien"];

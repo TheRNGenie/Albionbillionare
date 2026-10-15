@@ -38,6 +38,25 @@ ABP.api = (() => {
     return v;
   }
 
+  /* Albion's own game info API (official, public): character search and lifetime fame.
+     It has no bank, silver or spec data. Some browsers block it from other sites; the app then offers paste-in. */
+  const character = {
+    base() { return (ABP.SERVERS.find((s) => s.id === server) || ABP.SERVERS[0]).gameinfo + "/api/gameinfo"; },
+    searchUrl(name) { return this.base() + "/search?q=" + encodeURIComponent(name); },
+    playerUrl(id) { return this.base() + "/players/" + encodeURIComponent(id); },
+    async get(url) {
+      let res;
+      try { res = await fetch(url); } catch (e) {
+        const err = new Error("Your browser blocked the call to Albion's character server from this page.");
+        err.code = "blocked"; err.url = url; throw err;
+      }
+      if (!res.ok) { const err = new Error("Albion's character server answered " + res.status + ". It is often slow; try again shortly."); err.url = url; throw err; }
+      return res.json();
+    },
+    async search(name) { const r = await this.get(this.searchUrl(name)); return r.players || []; },
+    player(id) { return this.get(this.playerUrl(id)); },
+  };
+
   /* Split item ids into chunks that keep URLs under about 3,500 characters. */
   function chunk(ids) {
     const out = [];
@@ -130,6 +149,7 @@ ABP.api = (() => {
   }
 
   return {
+    character,
     get server() { return server; },
     set server(v) { server = v; cache.clear(); try { localStorage.setItem("abp.server", v); } catch (e) {} },
     host, prices, index, history, volumes, gold, itemNames, nameOf,

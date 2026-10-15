@@ -966,6 +966,192 @@
 
   /* ---------- Progress ---------- */
   let log = store.get("log", []);
+  /* ---------- Wealth sheet: liquid (silver, orders, gold) and solid (items at market value) ---------- */
+  const wealth = Object.assign({ silver: 0, orders: 0, gold: 0, city: "Caerleon", mode: "sell", sort: "value", filter: "all", items: [] }, store.get("wealth", {}));
+  const saveWealth = () => store.set("wealth", wealth);
+  const QUAL = ["Normal", "Good", "Outstanding", "Excellent", "Masterpiece"];
+  function wealthRows() {
+    const rows = [
+      { kind: "liquid", name: "Silver in bank", qty: null, unit: null, total: wealth.silver },
+      { kind: "liquid", name: "Silver in buy orders", qty: null, unit: null, total: wealth.orders },
+      { kind: "liquid", name: "Gold", qty: wealth.gold, unit: goldRate.rate, total: wealth.gold * goldRate.rate },
+    ];
+    wealth.items.forEach((it, i) => {
+      const unit = it.price != null ? it.price : (it.live || 0);
+      rows.push({ kind: "solid", i, it, name: itemLabel(it.id), qty: it.qty, unit, total: unit * it.qty, manual: it.price != null });
+    });
+    return rows;
+  }
+  function wealthTotals() {
+    const rows = wealthRows();
+    const liquid = rows.filter((r) => r.kind === "liquid").reduce((a, r) => a + r.total, 0);
+    const solid = rows.filter((r) => r.kind === "solid").reduce((a, r) => a + r.total, 0);
+    return { liquid, solid, total: liquid + solid };
+  }
+  /* Redrawing removes a focused input, which fires its change event mid-redraw; queue that instead. */
+  let wlDrawing = false, wlAgain = false;
+  function drawWealth() {
+    if (wlDrawing) { wlAgain = true; return; }
+    wlDrawing = true;
+    try { drawWealthNow(); } finally { wlDrawing = false; }
+    if (wlAgain) { wlAgain = false; setTimeout(drawWealth); }
+  }
+  function drawWealthNow() {
+    const t = wealthTotals();
+    $("#wl-stats").innerHTML = `
+      <div class="stat key"><span class="label">Net worth</span><span class="v money">${fmt(t.total)}</span><span class="small muted">${full(t.total)} silver</span></div>
+      <div class="stat"><span class="label">Liquid</span><span class="v">${fmt(t.liquid)}</span><span class="small muted">${t.total ? pct(t.liquid / t.total, 0) + " of your wealth" : "spendable now"}</span></div>
+      <div class="stat"><span class="label">Solid</span><span class="v">${fmt(t.solid)}</span><span class="small muted">${wealth.items.length} item line${wealth.items.length === 1 ? "" : "s"}</span></div>`;
+    let rows = wealthRows().filter((r) => wealth.filter === "all" || r.kind === wealth.filter);
+    const byVal = (a, b) => b.total - a.total;
+    rows.sort({
+      value: byVal,
+      unit: (a, b) => (b.unit ?? b.total) - (a.unit ?? a.total),
+      liquid: (a, b) => (a.kind === b.kind ? byVal(a, b) : a.kind === "liquid" ? -1 : 1),
+      name: (a, b) => a.name.localeCompare(b.name),
+    }[wealth.sort]);
+    $("#wl-table").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Asset</th><th>Type</th><th>Quality</th><th>Qty</th><th>Each</th><th>Total</th><th>Share</th><th></th></tr></thead><tbody>${rows.map((r) => r.kind === "liquid" ? `
+      <tr><td>${esc(r.name)}</td><td>Liquid</td><td></td><td class="num">${r.qty != null ? full(r.qty) : ""}</td><td class="num">${r.unit != null ? full(r.unit) : ""}</td><td class="num money">${full(r.total)}</td><td class="num">${t.total ? pct(r.total / t.total, 1) : "–"}</td><td></td></tr>` : `
+      <tr><td>${esc(r.name)}<br><small class="muted">${esc(r.it.id)}</small></td><td>Solid</td>
+        <td><select data-q="${r.i}" aria-label="Quality">${QUAL.map((q, k) => `<option value="${k + 1}" ${r.it.quality === k + 1 ? "selected" : ""}>${q}</option>`).join("")}</select></td>
+        <td><input type="number" class="num" data-qty="${r.i}" value="${r.it.qty}" min="0" step="1" style="width:80px" aria-label="Quantity"></td>
+        <td><input type="number" class="num" data-price="${r.i}" value="${r.unit ? Math.round(r.unit) : ""}" placeholder="no price" min="0" step="any" style="width:100px" aria-label="Value each"><br><small class="muted">${r.manual ? `your price${r.it.live ? " · market " + full(r.it.live) : ""}` : r.it.live ? "market" : "no market price"}</small></td>
+        <td class="num money">${full(r.total)}</td><td class="num">${t.total ? pct(r.total / t.total, 1) : "–"}</td>
+        <td><button class="btn ghost" type="button" data-del="${r.i}" aria-label="Remove">Remove</button></td></tr>`).join("")}</tbody></table></div>`;
+    $$("#wl-table [data-qty]").forEach((x) => x.addEventListener("change", () => { wealth.items[+x.dataset.qty].qty = Math.max(0, +x.value || 0); saveWealth(); drawWealth(); }));
+    $$("#wl-table [data-price]").forEach((x) => x.addEventListener("change", () => { const it = wealth.items[+x.dataset.price]; it.price = x.value === "" ? null : Math.max(0, +x.value || 0); saveWealth(); drawWealth(); }));
+    $$("#wl-table [data-q]").forEach((x) => x.addEventListener("change", () => { wealth.items[+x.dataset.q].quality = +x.value; saveWealth(); priceWealth(); }));
+    $$("#wl-table [data-del]").forEach((x) => x.addEventListener("click", () => { wealth.items.splice(+x.dataset.del, 1); saveWealth(); drawWealth(); }));
+  }
+  async function priceWealth() {
+    drawWealth();
+    if (!wealth.items.length) return;
+    const ids = [...new Set(wealth.items.map((it) => it.id))];
+    try {
+      const rows = await ABP.api.prices(ids, [wealth.city], [1, 2, 3, 4, 5]);
+      for (const it of wealth.items) {
+        const r = rows.find((x) => x.id === it.id && x.city === wealth.city && x.quality === (it.quality || 1));
+        it.live = r ? (wealth.mode === "buy" ? r.buy : r.sell) || null : null;
+      }
+      $("#wl-msg").textContent = `Market values: ${wealth.mode === "buy" ? "best buy order" : "cheapest sell listing"} in ${wealth.city}, before the 4% tax and setup fee.`;
+      saveWealth();
+    } catch (e) {
+      $("#wl-msg").textContent = e.message + " Type a value for each item meanwhile.";
+    }
+    drawWealth();
+  }
+  function setupWealth() {
+    const num = (id, k) => { const x = $(id); x.value = wealth[k] || ""; x.addEventListener("input", () => { wealth[k] = Math.max(0, +x.value || 0); saveWealth(); drawWealth(); }); };
+    num("#wl-silver", "silver"); num("#wl-orders", "orders"); num("#wl-gold", "gold");
+    for (const k of ["city", "mode", "sort", "filter"]) {
+      const x = $("#wl-" + k); x.value = wealth[k];
+      x.addEventListener("change", () => { wealth[k] = x.value; saveWealth(); k === "city" || k === "mode" ? priceWealth() : drawWealth(); });
+    }
+    $("#wl-refresh").addEventListener("click", priceWealth);
+    const merged = () => { const t = wealthTotals(); return { coin: wealth.silver + wealth.orders + t.solid, gold: wealth.gold }; };
+    $("#wl-to-log").addEventListener("click", () => {
+      const m = merged();
+      $("#lg-silver").value = Math.round(m.coin); $("#lg-gold").value = m.gold || ""; $("#lg-note").value = $("#lg-note").value || `liquid ${fmt(wealthTotals().liquid)}, solid ${fmt(wealthTotals().solid)}`;
+      lgTotal(); $("#lg-form").scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    $("#wl-to-plan").addEventListener("click", () => {
+      const m = merged();
+      plan.silver = Math.round(m.coin); plan.gold = m.gold; plan.start = toSilver(plan.silver, plan.gold); savePlan();
+      rendered.plan = false; goalMeter();
+      $("#wl-msg").textContent = `Your plan now starts from ${full(plan.start)} silver.`;
+    });
+    const input = $("#wl-search"), box = $("#wl-results");
+    let list = null;
+    input.addEventListener("focus", async () => {
+      if (list) return;
+      input.placeholder = "Loading item names…";
+      try { list = await ABP.api.itemNames(); input.placeholder = "Type an item name, for example Elder's Bag"; }
+      catch (e) { input.placeholder = "Item names could not load here. Type an item id such as T6_BAG and press Enter."; list = []; }
+    });
+    const add = (id) => {
+      const have = wealth.items.find((it) => it.id === id && (it.quality || 1) === 1);
+      if (have) have.qty += 1; else wealth.items.push({ id, qty: 1, quality: 1, price: null, live: null });
+      saveWealth(); input.value = ""; box.hidden = true; priceWealth();
+    };
+    input.addEventListener("input", () => {
+      const q = input.value.trim().toLowerCase();
+      if (q.length < 2 || !list) { box.hidden = true; return; }
+      const hits = list.filter((n) => n.name.toLowerCase().includes(q) || n.id.toLowerCase().includes(q)).slice(0, 30);
+      box.innerHTML = hits.map((h) => `<button type="button" data-id="${esc(h.id)}"><span>${esc(h.name)}</span><small>${esc(h.id)}</small></button>`).join("") || `<p class="small muted" style="padding:8px">No items match.</p>`;
+      box.hidden = false;
+      $$("button", box).forEach((b) => b.addEventListener("click", () => add(b.dataset.id)));
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && /^T\d_[A-Z0-9_@]+$/i.test(input.value.trim())) add(input.value.trim().toUpperCase());
+      if (e.key === "Escape") box.hidden = true;
+    });
+    document.addEventListener("click", (e) => { if (!$("#wl-search-wrap").contains(e.target)) box.hidden = true; });
+    priceWealth();
+  }
+
+  /* ---------- Character lookup (Albion game info API) ---------- */
+  const charState = Object.assign({ name: "", server: null, id: null, snaps: [] }, store.get("char", {}));
+  function fameOf(p) {
+    const L = p.LifetimeStatistics || {};
+    const g = L.Gathering || {};
+    return {
+      t: Date.now(), kill: p.KillFame || 0, death: p.DeathFame || 0, pve: L.PvE?.Total || 0,
+      gather: g.All?.Total || 0, fiber: g.Fiber?.Total || 0, hide: g.Hide?.Total || 0, ore: g.Ore?.Total || 0, rock: g.Rock?.Total || 0, wood: g.Wood?.Total || 0,
+      craft: L.Crafting?.Total || 0, farm: L.FarmingFame || 0, fish: L.FishingFame || 0, crystal: L.CrystalLeague || 0,
+    };
+  }
+  function showPlayer(p) {
+    const now = fameOf(p);
+    const same = charState.id === p.Id;
+    const prev = same ? charState.snaps[charState.snaps.length - 1] : null;
+    charState.snaps = same ? charState.snaps.concat(now).slice(-60) : [now];
+    Object.assign(charState, { id: p.Id, name: p.Name });
+    store.set("char", charState);
+    const rows = [["Crafting", "craft"], ["Farming", "farm"], ["Gathering, all", "gather"], ["Fiber", "fiber"], ["Hide", "hide"], ["Ore", "ore"], ["Stone", "rock"], ["Wood", "wood"], ["Fishing", "fish"], ["PvE", "pve"], ["Kill fame", "kill"], ["Death fame", "death"], ["Crystal League", "crystal"]];
+    const since = prev ? new Date(prev.t).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : null;
+    $("#ch-out").innerHTML = `
+      <div class="stats">
+        <div class="stat key"><span class="label">Character</span><span class="v">${esc(p.Name)}</span><span class="small muted">${p.GuildName ? esc(p.GuildName) : "No guild"}${p.AllianceName ? " · " + esc(p.AllianceName) : ""}</span></div>
+        <div class="stat"><span class="label">Crafting fame</span><span class="v">${fmt(now.craft)}</span>${prev ? `<span class="small muted">+${fmt(now.craft - prev.craft)} since ${since}</span>` : ""}</div>
+        <div class="stat"><span class="label">Farming fame</span><span class="v">${fmt(now.farm)}</span>${prev ? `<span class="small muted">+${fmt(now.farm - prev.farm)} since ${since}</span>` : ""}</div>
+        <div class="stat"><span class="label">Gathering fame</span><span class="v">${fmt(now.gather)}</span>${prev ? `<span class="small muted">+${fmt(now.gather - prev.gather)} since ${since}</span>` : ""}</div>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Lifetime fame</th><th>Total</th><th>${prev ? "Since " + esc(since) : "Change"}</th></tr></thead><tbody>${rows.map(([n, k]) => `<tr><td>${n}</td><td class="num">${full(now[k])}</td><td class="num">${prev ? (now[k] - prev[k] ? "+" + full(now[k] - prev[k]) : "0") : "–"}</td></tr>`).join("")}</tbody></table></div>
+      <p class="small muted">${prev ? "" : "Look up again later to see what you earned in between. "}Crafting fame includes refining. The game info server can lag the game by a few hours.</p>`;
+  }
+  function chooseFrom(players) {
+    if (!players.length) { $("#ch-out").innerHTML = `<p class="small">No character by that name on this server. Check the spelling and the server.</p>`; return; }
+    const exact = players.find((x) => x.Name.toLowerCase() === $("#ch-name").value.trim().toLowerCase());
+    if (exact || players.length === 1) return loadPlayer((exact || players[0]).Id);
+    $("#ch-out").innerHTML = `<p class="small">Several characters match. Pick yours:</p><div class="chips">${players.slice(0, 12).map((x) => `<button type="button" class="chip" data-pid="${esc(x.Id)}">${esc(x.Name)}${x.GuildName ? " · " + esc(x.GuildName) : ""}</button>`).join("")}</div>`;
+    $$("#ch-out [data-pid]").forEach((b) => b.addEventListener("click", () => loadPlayer(b.dataset.pid)));
+  }
+  function charFallback(e) {
+    $("#ch-out").innerHTML = `<div class="notice stack"><p class="small">${esc(e.message)} You can still load it by hand: open <a href="${esc(e.url)}" target="_blank" rel="noopener">this link</a>, copy everything it shows, and paste it here.</p>
+      <textarea id="ch-paste" aria-label="Pasted character data"></textarea><div class="row"><button class="btn ghost" type="button" id="ch-paste-go">Read pasted data</button></div></div>`;
+    $("#ch-paste-go").addEventListener("click", () => {
+      let j; try { j = JSON.parse($("#ch-paste").value); } catch (x) { return alert("That text is not the data from the link. Copy the whole page and try again."); }
+      if (Array.isArray(j.players)) chooseFrom(j.players); else if (j.Id && j.Name) showPlayer(j); else alert("That data has no character in it.");
+    });
+  }
+  async function loadPlayer(id) {
+    $("#ch-out").innerHTML = `<p class="small muted">Loading character…</p>`;
+    try { showPlayer(await ABP.api.character.player(id)); } catch (e) { charFallback(e); }
+  }
+  function setupCharacter() {
+    $("#ch-name").value = charState.name || "";
+    $("#ch-server").value = charState.server || ABP.api.server;
+    $("#ch-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = $("#ch-name").value.trim(); if (!name) return;
+      const srv = $("#ch-server").value;
+      if (srv !== ABP.api.server) ABP.api.server = srv;
+      charState.server = srv; charState.name = name; store.set("char", charState);
+      $("#ch-out").innerHTML = `<p class="small muted">Searching…</p>`;
+      try { chooseFrom(await ABP.api.character.search(name)); } catch (err) { charFallback(err); }
+    });
+  }
+
   function renderProgress() {
     const p = $("#panel-progress");
     if (!p.dataset.ready) {
@@ -975,6 +1161,41 @@
           <span class="label">Ledger</span>
           <h2>Progress</h2>
           <p>Log your wealth once a day or once a week: silver in the bank, in orders and in stock, plus any gold. Gold is converted to silver at the gold price. The chart compares you with the plan you picked. Your log stays in this browser.</p>
+        </div>
+        <div class="box stack" id="wealth">
+          <div class="row spread"><h3>Your wealth: liquid and solid</h3><span class="small muted">Saved in this browser</span></div>
+          <p class="small muted">Liquid wealth is silver you can spend right now: your bank, silver sitting in buy orders, and gold at the gold price. Solid wealth is everything you would have to sell first: gear, resources, mounts, stock on sell orders. Items are valued at live market prices in the city you pick; type your own price over any of them.</p>
+          <div class="controls">
+            <label class="field"><span>Silver in bank</span><input type="number" id="wl-silver" min="0" step="any"></label>
+            <label class="field"><span>Silver in buy orders</span><input type="number" id="wl-orders" min="0" step="any"></label>
+            <label class="field"><span>Gold</span><input type="number" id="wl-gold" min="0" step="any"></label>
+            <label class="field"><span>Value items in</span><select id="wl-city">${ABP.CITIES.concat(ABP.BM).map((c) => `<option>${c}</option>`).join("")}</select></label>
+            <label class="field"><span>Value items at</span><select id="wl-mode"><option value="sell">Cheapest sell listing</option><option value="buy">Best buy order (sell now)</option></select></label>
+          </div>
+          <div class="search" id="wl-search-wrap">
+            <label class="field"><span>Add an item you own</span><input type="search" id="wl-search" placeholder="Type an item name, for example Elder's Bag" autocomplete="off"></label>
+            <div class="results" id="wl-results" hidden></div>
+          </div>
+          <div class="stats" id="wl-stats"></div>
+          <div class="row spread">
+            <div class="row">
+              <label class="field"><span>Show</span><select id="wl-filter"><option value="all">Everything</option><option value="liquid">Liquid only</option><option value="solid">Solid only</option></select></label>
+              <label class="field"><span>Sort by</span><select id="wl-sort"><option value="value">Total value, high to low</option><option value="unit">Value per item, high to low</option><option value="liquid">Liquid first, then by value</option><option value="name">Name</option></select></label>
+            </div>
+            <div class="row"><button class="btn ghost" type="button" id="wl-refresh">Refresh prices</button><button class="btn ghost" type="button" id="wl-to-log">Copy into today's entry</button><button class="btn ghost" type="button" id="wl-to-plan">Use as plan starting wealth</button></div>
+          </div>
+          <div id="wl-table"></div>
+          <p class="small muted" id="wl-msg"></p>
+        </div>
+        <div class="box stack" id="char">
+          <div class="row spread"><h3>Your character</h3><span class="small muted">From Albion's official game info server</span></div>
+          <p class="small muted">Look up a character to see their guild and lifetime fame. Each lookup is saved, so the next one shows how much crafting, gathering and farming fame you earned in between. The game does not share bank contents or spec levels, so enter those yourself.</p>
+          <form class="controls" id="ch-form">
+            <label class="field"><span>Character name</span><input type="text" id="ch-name" autocomplete="off" required></label>
+            <label class="field"><span>Server</span><select id="ch-server">${ABP.SERVERS.map((s) => `<option value="${s.id}">${s.label}</option>`).join("")}</select></label>
+            <button class="btn" type="submit">Look up</button>
+          </form>
+          <div id="ch-out"></div>
         </div>
         <div class="box stack">
           <form class="controls" id="lg-form">
@@ -999,6 +1220,8 @@
       $("#lg-silver").addEventListener("input", lgTotal);
       $("#lg-gold").addEventListener("input", lgTotal);
       lgTotal();
+      setupWealth();
+      setupCharacter();
       $("#lg-form").addEventListener("submit", (e) => {
         e.preventDefault();
         const date = $("#lg-date").value, coin = +$("#lg-silver").value || 0, gold = +$("#lg-gold").value || 0;
