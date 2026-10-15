@@ -84,6 +84,24 @@ ABP.api = (() => {
     return rows.map((r) => ({ city: r.location, data: (r.data || []).slice(-7) }));
   }
 
+  /* 7-day sales per item and market: map[id][city] = { sold, perDay, avg }. */
+  async function volumes(ids, locations, quality = 1) {
+    const loc = encodeURIComponent(locations.join(","));
+    const parts = chunk([...new Set(ids)]);
+    const results = await Promise.all(parts.map((p) =>
+      getJSON(`${host()}/api/v2/stats/history/${p.map(encodeURIComponent).join(",")}.json?locations=${loc}&qualities=${quality}&time-scale=24`)
+    ));
+    const out = {};
+    for (const r of results.flat()) {
+      const data = (r.data || []).slice(-7);
+      const sold = data.reduce((s, p) => s + p.item_count, 0);
+      const avg = sold ? data.reduce((s, p) => s + p.avg_price * p.item_count, 0) / sold : null;
+      const prev = (out[r.item_id] = out[r.item_id] || {})[r.location];
+      if (!prev || sold > prev.sold) out[r.item_id][r.location] = { sold, perDay: data.length ? sold / 7 : 0, avg };
+    }
+    return out;
+  }
+
   async function gold() {
     const rows = await getJSON(`${host()}/api/v2/stats/gold.json?count=24`);
     return rows;
@@ -114,6 +132,6 @@ ABP.api = (() => {
   return {
     get server() { return server; },
     set server(v) { server = v; cache.clear(); try { localStorage.setItem("abp.server", v); } catch (e) {} },
-    host, prices, index, history, gold, itemNames, nameOf,
+    host, prices, index, history, volumes, gold, itemNames, nameOf,
   };
 })();

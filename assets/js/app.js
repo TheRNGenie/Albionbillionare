@@ -31,7 +31,7 @@
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
   /* ---------- Tabs ---------- */
-  const TABS = ["plan", "methods", "market", "calc", "wiki", "progress"];
+  const TABS = ["plan", "picks", "methods", "market", "calc", "wiki", "progress"];
   const rendered = {};
   function show(tab) {
     if (!TABS.includes(tab)) tab = "plan";
@@ -809,6 +809,85 @@
   }
 
 
+
+  /* ---------- Best picks ---------- */
+  const assume = Object.assign({ plots: 8, perPlant: 6, seedReturn: 70 }, store.get("assume", {}));
+  const PICKS = [
+    { key: "crops", title: "Island: what to plant", how: "Ranked by profit per day across all your plots after seed costs, using the best city to sell in. A crop only counts as much as the market can absorb (half its daily sales), so a pricey crop nobody buys does not win.",
+      run: () => ABP.advisor.crops({ plots: assume.plots, perPlant: assume.perPlant, seedReturn: assume.seedReturn / 100 }),
+      line: (r) => `${fmt(r.daily)} a day · sells ${full(r.sell.sell)} in ${r.sell.city}`, name: (r) => `T${r.tier} ${r.name}`, link: ["market", "crops"] },
+    { key: "refining", title: "Refining: what to spend focus on", how: "Every resource from T4 to T8 at .0 to .2 enchant, refined with focus in its bonus city. Ranked by profit margin with focus, then weighed down if the refined item sells fewer than 200 a day.",
+      run: () => ABP.advisor.refining(), line: (r) => `${pct(r.margin, 0)} margin · ${full(r.pF)} per refine in ${r.city}`, name: (r) => r.label, link: ["calc"] },
+    { key: "bm", title: "Black Market: what to flip", how: "All Black Market gear from T4 to T8 at .0 to .2. Only Black Market prices from the last 12 hours count. Ranked by profit per flip times how many the Black Market actually bought per day (up to 10).",
+      run: () => ABP.advisor.blackMarket(), line: (r) => `${full(r.profit)} each · buy in ${r.src.city}`, name: (r) => r.label, link: ["market", "bm"] },
+    { key: "flips", title: "Order flips: what to buy and relist", how: "Refined and raw resources (T4 to T8, .0 to .2), crops, herbs and common T4 to T6 gear in every city. Profit is the cheapest listing minus the top buy order after the 2.5% fee on both orders and the 4% tax. Ranked by that profit times a fifth of the daily sales, the share you can realistically fill. Items selling fewer than 5 a day are dropped.",
+      run: () => ABP.advisor.flips(), line: (r) => `${full(r.profit)} each · ${pct(r.margin, 0)} · in ${r.city}`, name: (r) => r.label },
+    { key: "journals", title: "Journals: which to fill", how: "Full journal sell price minus empty journal cost, after fees, in the best cities. Weighed down when fewer than 3 full journals sell per day.",
+      run: () => ABP.advisor.journals(), line: (r) => `${full(r.profit)} per journal`, name: (r) => r.label },
+  ];
+  const STATIC_WHY = {
+    crops: "Without live prices: higher tiers sell for more per plant but need more Farming spec, and herbs feed potion makers so their demand is steadier than most crops. Plant the highest tier you can farm whose daily sales are at least twice your harvest.",
+    refining: "Without live prices: refine in the resource's bonus city with focus (53.9% return). Mid tiers (T5 and T6) at .1 or .2 usually have the best mix of margin and sales volume; T8 margins can be large but sell slowly.",
+    bm: "Without live prices: start with items you can buy in Caerleon itself, because there is no hauling risk. Look for Black Market orders updated in the last few hours with at least 10% margin after the 4% tax.",
+    flips: "Without live prices: flip items that sell hundreds a day (refined resources, potions, food) where the gap between the top buy order and the cheapest listing is above 12%, which leaves profit after the 9% round-trip cost.",
+    journals: "Without live prices: fill the journal for whatever you already do all day. Crafting journals for your crafting line and gathering journals for your gathering line are free extra silver.",
+  };
+  function renderPicks() {
+    const p = $("#panel-picks");
+    p.innerHTML = `
+      <div class="panel-head">
+        <span class="label">Live recommendations</span>
+        <h2>Best picks today</h2>
+        <p>Instead of "plant the best crop", this page works out which one it is from today's prices and last week's sales, and says why. Rankings use the ${esc(ABP.SERVERS.find((s) => s.id === ABP.api.server).label)} server; change it on the Market tab.</p>
+        <div class="row"><button class="btn" id="pk-refresh">Refresh picks</button><span class="small muted" id="pk-time"></span></div>
+      </div>
+      <div class="stack" id="pk-list">${PICKS.map((k) => `
+        <section class="box pick" id="pk-${k.key}">
+          <div class="row spread"><h3>${k.title}</h3>${k.link ? `<a href="#${k.link[0]}" class="small" data-go="${k.link.join(",")}">See the full table</a>` : ""}</div>
+          ${k.key === "crops" ? `<div class="controls">
+            <label class="field"><span>Plots you plant</span><input type="number" id="as-plots" min="1" value="${assume.plots}"></label>
+            <label class="field"><span>Harvest per plant</span><input type="number" id="as-per" min="0" step="0.5" value="${assume.perPlant}"></label>
+            <label class="field"><span>Seeds returned (%)</span><input type="number" id="as-seed" min="0" max="100" value="${assume.seedReturn}"></label>
+          </div>` : ""}
+          <details class="how"><summary>How this is ranked</summary><p class="small">${k.how}</p></details>
+          <div class="pick-body"><p class="muted">Waiting to load…</p></div>
+        </section>`).join("")}</div>`;
+    $("#pk-refresh").addEventListener("click", loadPicks);
+    $$("#pk-list [data-go]").forEach((a) => a.addEventListener("click", (e) => {
+      e.preventDefault();
+      const [tab, preset] = a.dataset.go.split(",");
+      if (preset) { mk.preset = preset; if (preset === "bm") mk.tier = "6"; saveMk(); rendered.market = false; }
+      history.replaceState(null, "", "#" + tab); show(tab);
+    }));
+    [["as-plots", "plots"], ["as-per", "perPlant"], ["as-seed", "seedReturn"]].forEach(([id, k]) => $("#" + id).addEventListener("change", (e) => {
+      assume[k] = +e.target.value || 0; store.set("assume", assume); loadPick(PICKS[0]);
+    }));
+    loadPicks();
+  }
+  function loadPicks() {
+    $("#pk-time").textContent = "Updated " + new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    PICKS.forEach(loadPick);
+  }
+  async function loadPick(k) {
+    const body = $(`#pk-${k.key} .pick-body`);
+    body.innerHTML = `<p class="muted">Checking prices and sales…</p>`;
+    try {
+      const { rows } = await k.run();
+      if (!rows.length) { body.innerHTML = `<p class="muted">Nothing clears a profit with fresh prices right now. ${esc(STATIC_WHY[k.key])}</p>`; return; }
+      const [top, ...rest] = rows;
+      body.innerHTML = `
+        <div class="pick-top">
+          <span class="label">Best pick</span>
+          <h4>${esc(k.name(top))}</h4>
+          <p class="pick-line">${esc(k.line(top))}</p>
+          <ul class="why">${top.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+        </div>
+        <ol class="runners" start="2">${rest.slice(0, 4).map((r) => `<li><details><summary><strong>${esc(k.name(r))}</strong> <span class="muted small">${esc(k.line(r))}</span></summary><ul class="why">${r.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details></li>`).join("")}</ol>`;
+    } catch (e) {
+      body.innerHTML = `<div class="notice"><strong>${esc(e.message)}</strong><p class="small">${esc(STATIC_WHY[k.key])}</p></div>`;
+    }
+  }
+
   /* ---------- Welcome message ---------- */
   const WELCOME_DEFAULT = {
     title: "Welcome back, adventurer",
@@ -883,7 +962,7 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#welcome").hidden) closeWelcome(); });
   $("#welcomeOpen").addEventListener("click", () => openWelcome(false));
 
-  const RENDER = { plan: renderPlan, methods: renderMethods, market: renderMarket, calc: renderCalc, wiki: renderWiki, progress: renderProgress };
+  const RENDER = { plan: renderPlan, picks: renderPicks, methods: renderMethods, market: renderMarket, calc: renderCalc, wiki: renderWiki, progress: renderProgress };
 
   let rz;
   window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { drawPlanChart(); if (!$("#panel-progress").hidden) renderProgress(); }, 150); });

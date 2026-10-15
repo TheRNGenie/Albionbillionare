@@ -343,3 +343,17 @@ a { color: var(--gold); }
 .welcome label.check { display: flex; gap: 8px; align-items: center; font-size: 0.92rem; }
 .welcome label.check input { accent-color: #9b3a1c; }
 .welcome-btn { margin-left: auto; }
+
+/* Best picks */
+.pick { display: grid; gap: 12px; }
+.pick-top { display: grid; gap: 6px; border-left: 3px solid var(--gold); padding-left: 14px; }
+.pick-top h4 { font-size: 1.3rem; color: var(--gold); }
+.pick-line { font-weight: 700; }
+ul.why { margin: 0; padding-left: 18px; display: grid; gap: 6px; max-width: 80ch; }
+ol.runners { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; counter-reset: rank 1; }
+ol.runners > li { counter-increment: rank; }
+ol.runners summary::after { content: none; }
+ol.runners summary strong::before { content: counter(rank) ". "; color: var(--trim); }
+ol.runners summary { color: var(--fg); font-weight: 400; }
+ol.runners ul.why { margin-top: 8px; }
+details.how summary { font-size: 0.9rem; }

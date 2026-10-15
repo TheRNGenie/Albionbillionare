@@ -5,6 +5,7 @@ A one-page web app, styled after Albion Online (dark leather and brass, parchmen
 ## What's inside
 
 - **Plan**: six playstyle paths (Tycoon, Merchant, Artisan, Homesteader, Gatherer, Adventurer). Each path has a day-by-day compounding projection to 1B, four phases with concrete actions, and a daily routine checklist.
+- **Best picks**: ranks what to plant, what to refine with focus, what to flip on the Black Market, which items to order-flip, and which journals to fill, from live prices and last week's sales. Every pick says why: price and city, costs after fees, profit, how much the market buys per day, and the risk.
 - **Methods**: step-by-step playbooks for island farming, focus refining, crafting, order flipping, Black Market flipping, trade routes, gathering, PvE and fishing.
 - **Market**: live prices for every royal city, Brecilien and the Black Market from the free [Albion Online Data Project](https://www.albion-online-data.com/) API. Presets for refined and raw resources, crops and herbs, Black Market flips, plus a searchable watchlist. Click any item for 7-day volume. Shows the live gold price.
 - **Calculators**: refining profit across T4 to T8 (return rates, focus, daily bonus, fees), order flip profit and break-even, and island harvest profit.

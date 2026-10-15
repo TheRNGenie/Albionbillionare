@@ -101,7 +101,7 @@ ABP.METHODS = [
     time: "15 to 30 min a day",
     why: "Premium doubles crop yield and animal growth, and your fully upgraded island gives you every plot already. This is the steady base income that never stops.",
     steps: [
-      "Open the Market tab, choose the Crops & herbs preset, and sort by price. Plant the highest-value crop or herb your Farming spec allows on every farm and herb plot.",
+      "Open Best picks → Island. It ranks every crop and herb by profit per day across your plots after seed costs, and only counts what the market can absorb (half its daily sales). Plant the top pick your Farming spec allows. If its market is thin, plant your second pick on the leftover plots so you are not flooding one market.",
       "Harvest and replant every day (crops take about 22 hours). Missing a day costs a whole cycle, so set a fixed time.",
       "Use focus on your plots when you can spare it: it raises the seed-return chance so you buy fewer seeds. Spend the rest of your focus on refining (it is worth more there).",
       "Put pastures to work: raise animals on crops you grew, then sell grown animals, mounts, or butcher them for meat. Feed each animal its favourite food to speed growth, and raise them on the island whose biome they prefer.",
@@ -110,8 +110,8 @@ ABP.METHODS = [
       "Since the Wild Blood update you can own one personal island per city. Each extra island multiplies this income; buy more once the first one runs at full value.",
     ],
     tips: [
-      "Sell crops in the city with the highest price, not the closest one. The Market tab compares all cities.",
-      "Seeds bought with a buy order are cheaper than instant-buy.",
+      "Best picks names the city that pays most for each crop. A 10% better price on 400 crops a day is worth the trip once a week.",
+      "Buy seeds with a buy order one silver above the top order: it usually saves 10% or more versus instant-buy, and you need them only once a day.",
     ],
     pitfalls: ["Letting premium lapse halves your yield instantly.", "Planting a crop that sells well today but has no daily volume."],
   },
@@ -125,8 +125,8 @@ ABP.METHODS = [
     time: "30 to 60 min a day",
     why: "Premium gives you 10,000 focus a day. Refining in a resource's bonus city with focus returns about 53.9% of materials, which is the most reliable silver-per-focus in the game.",
     steps: [
-      "Pick one resource and stick to it so your spec grows: Planks in Fort Sterling, Metal Bars in Thetford, Leather in Martlock, Cloth in Lymhurst, Stone Blocks in Bridgewatch.",
-      "Run the Refining calculator on the Market tab for T4 to T8 and .1 to .3 enchants. Keep only the rows that profit with focus, and note the silver per focus point.",
+      "Open Best picks → Refining. It ranks all five resources, T4 to T8 and .0 to .2, by profit margin with focus in their bonus cities (Planks in Fort Sterling, Metal Bars in Thetford, Leather in Martlock, Cloth in Lymhurst, Stone Blocks in Bridgewatch), and checks the output sells at least 200 a day. Commit to the resource that tops it most days, so your spec and focus efficiency grow in one line.",
+      "Open the Refining calculator for that resource and type the focus cost per refine from the in-game window. Silver per focus tells you exactly which tier to put your 10,000 daily focus into; it often isn't the highest tier.",
       "Buy raw resources with buy orders a little above the top order, in the cities where they are gathered and cheapest. Buy the lower-tier refined input too, or refine it yourself.",
       "Carry everything to the bonus city. Refine with focus on, spending your whole daily focus. Refine the remaining material without focus only if the calculator still shows a profit.",
       "Check the Activities menu every day. On a silver or gold bonus day for your resource, refine your banked focus (it caps at 30,000) and extra stock.",
@@ -148,12 +148,12 @@ ABP.METHODS = [
     time: "1 to 3 hours a day",
     why: "Crafted gear is what every player loses in PvP and what the Black Market buys to stock mob loot. Crafters with spec and bonus-city return rates make money on volume.",
     steps: [
-      "Choose one item family that the Black Market buys at high volume (check the Black Market preset for items with a high buy price and recent dates). Plate armor, popular weapons and bags are common starting lines.",
+      "Open Best picks → Black Market. Items that keep ranking near the top over a week, with a steady number bought per day, are the families worth crafting. Prefer a family whose crafting bonus city is also where you refine, so materials don't travel.",
       "Craft in the city with the crafting bonus for that family (see the Wiki). Focus is best spent on refining unless the calculator shows your craft beats it per focus point.",
       "Level the item's Destiny Board spec. Each spec level lowers focus cost and raises item quality chances, and masterpiece-quality items sell for much more.",
       "Buy refined materials and artifacts with buy orders. Keep a stock of 1 to 2 days of crafting so a price spike does not stop you.",
       "Fill crafting journals as you craft and sell full journals; they are pure extra profit.",
-      "Sell to the Black Market in Caerleon (instant, pays 4% tax with premium) or list on markets in the city with the highest price. Track which tier and enchant combinations sell out fastest.",
+      "Sell to the Black Market in Caerleon (instant, pays 4% tax with premium) or list on markets in the city with the highest price. Check Best picks each session: when your item drops out of the ranking, the Black Market is stocked, so switch tier or enchant until it returns.",
     ],
     tips: ["Enchanted gear (.1 to .3) is where the Black Market pays the most over material cost.", "Craft in batches during daily bonus days for your category."],
     pitfalls: ["Crafting items with no daily volume.", "Ignoring the station usage fee, which climbs on busy stations."],
@@ -170,11 +170,11 @@ ABP.METHODS = [
     steps: [
       "Fees for a premium account: 2.5% setup fee on every order you place, plus 4% sales tax when a sell order fills. A buy order then sell order round trip costs about 9%, so only flip spreads above about 12%.",
       "In the Market tab, open an item and look at the 7-day volume. Pick items that sell at least dozens per day in your city so your orders fill.",
-      "Place a buy order 1 silver above the highest buy order. When it fills, list a sell order 1 silver under the cheapest sell order.",
+      "Open Best picks → Order flips. It ranks items by the gap between the top buy order and the cheapest listing in the same city after the 9% round-trip cost, weighted by how many sell per day. Place a buy order 1 silver above the top buy order on the top picks. When it fills, list a sell order 1 silver under the cheapest listing.",
       "Re-check two or three times a day and update orders that got undercut. Cancel and relist only when needed, because each relist costs the setup fee again.",
       "Spread your capital over 10 to 30 items so no single crash hurts. Keep a simple log in the Progress tab to see your real return per week.",
     ],
-    tips: ["Resources, potions, food and mounts are the most liquid items.", "Weekend evenings have the most buyers."],
+    tips: ["Resources, potions, food and mounts sell hundreds a day, so orders fill within hours. Gear often has wider gaps but fills slowly; the ranking weighs both.", "Weekend evenings have the most buyers."],
     pitfalls: ["Order wars with other flippers on thin items.", "Forgetting the 2.5% fee on cancelled and relisted orders."],
   },
   {
@@ -207,7 +207,7 @@ ABP.METHODS = [
     time: "1 to 2 hours a session",
     why: "Each royal city produces different refined goods and gear cheaply because of its bonuses. Buy where it is made, sell where it is used.",
     steps: [
-      "On the Market tab, load a preset and look at the cheapest and most expensive city per item. The spread column shows profit per item after tax.",
+      "On the Market tab, load a preset. Green marks the cheapest city and gold the best city per item; the haul profit column is profit per item after tax and listing fee. Click an item to check its 7-day sales in the city you will sell in before you load up.",
       "Pick routes that stay in blue and yellow zones between royal cities. Plan a round trip so you carry goods both ways.",
       "Weigh your load: your mount's capacity and your speed decide how much you can move per hour. Refined resources are heavy; gear is light and valuable.",
       "Sell with sell orders when you can wait, or instant-sell into buy orders when the spread is big enough to absorb it.",
@@ -226,7 +226,7 @@ ABP.METHODS = [
     time: "1 to 3 hours a session",
     why: "Premium gives +50% gathering yield. Gathered resources feed your own refining, so you keep both margins.",
     steps: [
-      "Pick one gathering profession (ore, wood, hide, fiber or stone) and level it with the matching gatherer gear set and tools.",
+      "Pick the gathering profession that matches your refining line, so you keep both margins: check which resource tops Best picks → Refining and gather its raw form. Level it with the matching gatherer gear set and tools.",
       "Gather T4 and T5 in yellow zones first. Move to T6 to T8 and enchanted nodes in red and black zones once you can survive gankers.",
       "Bank often. Never carry more than one trip's value you are willing to lose.",
       "Refine your own resources in the bonus city with focus, or sell raw to refiners in that city.",
@@ -292,7 +292,7 @@ ABP.PROFILES = [
       { active: 0.98e6, roi: 0.004, cap: 700e6, passive: 0.53e6 },
     ],
     actions: [
-      ["Plant every island plot with the best crop or herb you can farm, and harvest daily.", "Pick one refining resource and spend all 10,000 focus a day in its bonus city.", "Gather or run dungeons for starting capital; do not buy expensive gear yet.", "Put any spare silver into flipping orders on 5 to 10 liquid items."],
+      ["Plant every plot with the top crop or herb from Best picks → Island (ranked by profit per day after seeds, capped by what the market absorbs), and harvest daily.", "Refine the top pick from Best picks → Refining with all 10,000 focus a day in its bonus city.", "Gather or run dungeons for starting capital; do not buy expensive gear yet.", "Put spare silver into buy orders on the top 5 to 10 items from Best picks → Order flips."],
       ["Start crafting one Black Market item family in its bonus city.", "Grow flipping to 20 or more items across two cities.", "Do in-city Caerleon market to Black Market flips daily.", "Turn herbs into potions when they beat raw prices."],
       ["Run Black Market hauls from royal cities with capped cargo values.", "Keep 50% of capital in orders, 30% in crafting stock, 20% in reserve.", "Buy a second personal island in another city.", "Craft only enchanted tiers that clear the Black Market fast."],
       ["Run three income lines in parallel: crafting, flipping, Black Market hauling.", "Raise order sizes on proven items rather than adding risky new ones.", "Keep reinvesting; the last 500M comes from capital, not extra hours."],
@@ -312,7 +312,7 @@ ABP.PROFILES = [
       { active: 0.84e6, roi: 0.0045, cap: 800e6, passive: 0.42e6 },
     ],
     actions: [
-      ["Farm the island daily and refine with focus to build the first 10M to 20M.", "Learn order flipping on cheap liquid items: resources, potions, food.", "Write down every flip; your log is your edge."],
+      ["Farm the island daily and refine with focus to build the first 10M to 20M.", "Learn order flipping on the top items from Best picks → Order flips; start with ones that sell 100 or more a day.", "Write down every flip; your log is your edge."],
       ["Do Caerleon market to Black Market flips every session.", "Run blue and yellow trade routes between royal cities with round-trip cargo.", "Spread capital over 20 to 30 items."],
       ["Haul royal-city gear to the Black Market in capped runs.", "Collect gear with buy orders across all five royal cities.", "Use the 7-day volume to size every order."],
       ["Become the main buyer in a few markets you know deeply.", "Keep a 20% reserve to buy crashes after big patches or wars."],
@@ -408,11 +408,11 @@ ABP.PHASES = [
 ];
 
 ABP.DAILY = [
-  "Harvest and replant every island plot",
-  "Spend focus refining (check the daily bonus in the Activities menu)",
+  "Harvest and replant every island plot (check Best picks → Island first)",
+  "Spend focus on the top Best picks → Refining item (check the daily bonus in the Activities menu)",
   "Hand in labourer journals and refill them",
   "Update undercut buy and sell orders",
-  "Check the Black Market preset for flips",
+  "Check Best picks → Black Market and Order flips",
   "Log your silver balance in the Progress tab",
 ];
 
