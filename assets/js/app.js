@@ -111,6 +111,35 @@
     { id: 1.3, label: "Veteran trader or crafter" },
   ];
   const plan = Object.assign({ profile: "tycoon", start: 2_000_000, hours: null, skill: 1, date: todayISO() }, store.get("plan", {}));
+  if (plan.silver == null) { plan.silver = plan.start; plan.gold = 0; }
+
+  /* Gold converts to silver at the live gold price unless the player sets their own rate. */
+  const goldRate = Object.assign({ rate: 4500, live: null, liveAt: null, manual: false }, store.get("gold", {}));
+  const toSilver = (silver, gold) => (+silver || 0) + (+gold || 0) * goldRate.rate;
+  function setRate(v, manual) {
+    goldRate.rate = Math.max(1, Math.round(v)); goldRate.manual = manual; store.set("gold", goldRate);
+    plan.start = toSilver(plan.silver, plan.gold); savePlan();
+    $$(".gold-rate").forEach((i) => { if (document.activeElement !== i) i.value = goldRate.rate; });
+    $$(".rate-note").forEach((n) => (n.innerHTML = rateNote()));
+    if (rendered.plan) updatePlan();
+    $("#lg-total") && lgTotal();
+    goalMeter();
+  }
+  function rateNote() {
+    if (goldRate.manual) return `Your own rate.${goldRate.live ? ` Live price is ${full(goldRate.live)}. <button type="button" class="linkish use-live">Use live</button>` : ""}`;
+    return goldRate.live ? `Live price from the market, ${agoText(ago(goldRate.liveAt))}.` : "Typical price. Live price loads with market data.";
+  }
+  function bindRate(root) {
+    $$(".gold-rate", root).forEach((i) => { i.value = goldRate.rate; i.addEventListener("input", () => { if (+i.value > 0) setRate(+i.value, true); }); });
+    root.addEventListener("click", (e) => { if (e.target.classList.contains("use-live") && goldRate.live) setRate(goldRate.live, false); });
+    $$(".rate-note", root).forEach((n) => (n.innerHTML = rateNote()));
+  }
+  ABP.api.gold().then((rows) => {
+    if (!rows?.length) return;
+    const last = rows[rows.length - 1];
+    goldRate.live = last.price; goldRate.liveAt = last.timestamp; store.set("gold", goldRate);
+    setRate(goldRate.manual ? goldRate.rate : last.price, goldRate.manual);
+  }).catch(() => {});
   const profileOf = (id) => ABP.PROFILES.find((p) => p.id === id) || ABP.PROFILES[0];
   const phaseIdx = (cap) => ABP.PHASES.findIndex((p) => cap < p.until);
 
@@ -141,11 +170,14 @@
       <div class="grid-3" id="profiles"></div>
       <div class="box stack">
         <div class="controls">
-          <label class="field"><span>Silver you have now</span><input type="number" id="pl-start" min="0" step="100000"></label>
+          <label class="field"><span>Silver you have now</span><input type="number" id="pl-start" min="0" step="any"></label>
+          <label class="field"><span>Gold you have</span><input type="number" id="pl-gold" min="0" step="any"></label>
+          <label class="field"><span>Gold price (silver per gold)</span><input type="number" class="gold-rate" id="pl-rate" min="1" step="any"></label>
           <label class="field"><span>Active hours a day</span><input type="number" id="pl-hours" min="0.5" max="12" step="0.5"></label>
           <label class="field"><span>Your experience</span><select id="pl-skill">${SKILL.map((s) => `<option value="${s.id}">${s.label}</option>`).join("")}</select></label>
           <label class="field"><span>Start date</span><input type="date" id="pl-date"></label>
         </div>
+        <p class="small muted"><span id="pl-total"></span> <span class="rate-note"></span></p>
         <div class="stats" id="pl-stats"></div>
         <canvas class="chart" id="pl-chart" aria-label="Projected silver over the year"></canvas>
         <p class="small muted" id="pl-note"></p>
@@ -173,10 +205,13 @@
     $$("#profiles .profile").forEach((b) => b.addEventListener("click", () => {
       plan.profile = b.dataset.id; plan.hours = null; savePlan(); updatePlan();
     }));
-    $("#pl-start").value = plan.start;
+    $("#pl-start").value = plan.silver;
+    $("#pl-gold").value = plan.gold || "";
+    bindRate(p);
     $("#pl-skill").value = plan.skill;
     $("#pl-date").value = plan.date;
-    $("#pl-start").addEventListener("input", (e) => { plan.start = Math.max(0, +e.target.value || 0); savePlan(); updatePlan(); });
+    $("#pl-start").addEventListener("input", (e) => { plan.silver = Math.max(0, +e.target.value || 0); plan.start = toSilver(plan.silver, plan.gold); savePlan(); updatePlan(); goalMeter(); });
+    $("#pl-gold").addEventListener("input", (e) => { plan.gold = Math.max(0, +e.target.value || 0); plan.start = toSilver(plan.silver, plan.gold); savePlan(); updatePlan(); goalMeter(); });
     $("#pl-hours").addEventListener("input", (e) => { plan.hours = Math.max(0, +e.target.value || 0); savePlan(); updatePlan(); });
     $("#pl-skill").addEventListener("change", (e) => { plan.skill = +e.target.value; savePlan(); updatePlan(); });
     $("#pl-date").addEventListener("change", (e) => { plan.date = e.target.value || todayISO(); savePlan(); updatePlan(); });
@@ -193,6 +228,7 @@
     $$("#profiles .profile").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.id === prof.id)));
     const sim = simulate(prof, plan.start, hours, plan.skill);
     lastSim = sim;
+    $("#pl-total").textContent = plan.gold ? `Starting total: ${full(plan.start)} silver (${full(plan.silver)} silver + ${full(plan.gold)} gold × ${full(goldRate.rate)}).` : `Starting total: ${full(plan.start)} silver.`;
     const start = new Date(plan.date + "T12:00:00");
     const perDay = (ABP.GOAL - plan.start) / ABP.DAYS;
     $("#pl-stats").innerHTML = `
@@ -738,15 +774,18 @@
         <div class="panel-head">
           <span class="label">Ledger</span>
           <h2>Progress</h2>
-          <p>Log your total silver (bank plus orders plus stock value) once a day or once a week. The chart compares you with the plan you picked. Your log stays in this browser.</p>
+          <p>Log your wealth once a day or once a week: silver in the bank, in orders and in stock, plus any gold. Gold is converted to silver at the gold price. The chart compares you with the plan you picked. Your log stays in this browser.</p>
         </div>
         <div class="box stack">
           <form class="controls" id="lg-form">
             <label class="field"><span>Date</span><input type="date" id="lg-date" required></label>
-            <label class="field"><span>Total silver</span><input type="number" id="lg-silver" min="0" step="1000" required placeholder="e.g. 25000000"></label>
+            <label class="field"><span>Silver (bank, orders, stock)</span><input type="number" id="lg-silver" min="0" step="any" placeholder="e.g. 25000000"></label>
+            <label class="field"><span>Gold</span><input type="number" id="lg-gold" min="0" step="any" placeholder="optional"></label>
+            <label class="field"><span>Gold price (silver per gold)</span><input type="number" class="gold-rate" id="lg-rate" min="1" step="any"></label>
             <label class="field"><span>Note</span><input type="text" id="lg-note" placeholder="optional"></label>
             <button class="btn" type="submit">Add entry</button>
           </form>
+          <p class="small muted"><span id="lg-total"></span> <span class="rate-note"></span></p>
           <div class="stats" id="lg-stats"></div>
           <canvas class="chart" id="lg-chart" aria-label="Your silver compared with the plan"></canvas>
         </div>
@@ -756,12 +795,18 @@
           <div class="row"><button class="btn ghost" id="lg-copy" type="button">Copy log</button><button class="btn ghost" id="lg-restore" type="button">Restore from text</button><span class="small muted" id="lg-msg"></span></div></div>
         </details>`;
       $("#lg-date").value = todayISO();
+      bindRate(p);
+      $("#lg-silver").addEventListener("input", lgTotal);
+      $("#lg-gold").addEventListener("input", lgTotal);
+      lgTotal();
       $("#lg-form").addEventListener("submit", (e) => {
         e.preventDefault();
-        const date = $("#lg-date").value, silver = +$("#lg-silver").value;
-        if (!date || !(silver >= 0)) return;
-        log = log.filter((x) => x.date !== date).concat({ date, silver, note: $("#lg-note").value.trim() }).sort((a, b) => a.date.localeCompare(b.date));
-        store.set("log", log); $("#lg-silver").value = ""; $("#lg-note").value = "";
+        const date = $("#lg-date").value, coin = +$("#lg-silver").value || 0, gold = +$("#lg-gold").value || 0;
+        if (!date || (!coin && !gold)) { $("#lg-total").textContent = "Enter your silver, your gold, or both."; return; }
+        const entry = { date, silver: toSilver(coin, gold), note: $("#lg-note").value.trim() };
+        if (gold) Object.assign(entry, { coin, gold, rate: goldRate.rate });
+        log = log.filter((x) => x.date !== date).concat(entry).sort((a, b) => a.date.localeCompare(b.date));
+        store.set("log", log); $("#lg-silver").value = ""; $("#lg-gold").value = ""; $("#lg-note").value = ""; lgTotal();
         renderProgress(); goalMeter();
       });
       $("#lg-copy").addEventListener("click", async () => {
@@ -789,7 +834,7 @@
     $("#lg-rows").innerHTML = log.length ? log.slice().reverse().map((x, i, arr) => {
       const prev = arr[i + 1];
       const ch = prev ? x.silver - prev.silver : null;
-      return `<tr><td>${esc(x.date)}</td><td class="num money">${full(x.silver)}</td><td class="num ${ch > 0 ? "good" : ch < 0 ? "bad" : ""}">${ch == null ? "–" : (ch > 0 ? "+" : "") + fmt(ch)}</td><td class="num">${fmt(planAt(x.date))}</td><td style="text-align:left">${esc(x.note || "")}</td><td><button class="btn ghost small" data-del="${esc(x.date)}" aria-label="Delete entry">Delete</button></td></tr>`;
+      return `<tr><td>${esc(x.date)}</td><td class="num money">${full(x.silver)}${x.gold ? `<br><small class="muted">incl. ${full(x.gold)} gold at ${full(x.rate)}</small>` : ""}</td><td class="num ${ch > 0 ? "good" : ch < 0 ? "bad" : ""}">${ch == null ? "–" : (ch > 0 ? "+" : "") + fmt(ch)}</td><td class="num">${fmt(planAt(x.date))}</td><td style="text-align:left">${esc(x.note || "")}</td><td><button class="btn ghost small" data-del="${esc(x.date)}" aria-label="Delete entry">Delete</button></td></tr>`;
     }).join("") : `<tr><td colspan="6" class="muted">Your entries will appear here.</td></tr>`;
     $$("#lg-rows [data-del]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); log = log.filter((x) => x.date !== b.dataset.del); store.set("log", log); renderProgress(); goalMeter(); }));
     const actual = log.map((x) => ({ x: Math.max(0, dayOf(x.date)), y: x.silver }));
@@ -797,6 +842,12 @@
       { data: sim.pts, color: css("--muted"), dash: [3, 4], width: 1.5 },
       { data: actual, color: css("--gold"), dots: true, width: 2.5 },
     ], { goal: ABP.GOAL, xLabels: monthLabels(start) });
+  }
+
+  function lgTotal() {
+    const el = $("#lg-total"); if (!el) return;
+    const coin = +$("#lg-silver").value || 0, gold = +$("#lg-gold").value || 0;
+    el.textContent = gold ? `This entry: ${full(toSilver(coin, gold))} silver (${full(gold)} gold = ${full(gold * goldRate.rate)} silver).` : "";
   }
 
   function goalMeter() {

@@ -10,7 +10,7 @@ A one-page web app, styled after Albion Online (dark leather and brass, parchmen
 - **Market**: live prices for every royal city, Brecilien and the Black Market from the free [Albion Online Data Project](https://www.albion-online-data.com/) API. Presets for refined and raw resources, crops and herbs, Black Market flips, plus a searchable watchlist. Click any item for 7-day volume. Shows the live gold price.
 - **Calculators**: refining profit across T4 to T8 (return rates, focus, daily bonus, fees), order flip profit and break-even, and island harvest profit.
 - **Wiki**: premium, islands, focus, taxes and fees, return rates, refining recipes, crafting bonus cities, tiers, zones, the Black Market and journals.
-- **Progress**: log your silver over time and compare it with your plan. Data stays in your browser.
+- **Progress**: log your silver and gold over time and compare it with your plan. Gold converts to silver at the live gold price, or a rate you set. Data stays in your browser.
 - **Welcome message**: a greeting shown when the app opens. Use the Edit message button to change it; placeholders like `{daily}` and `{progress}` fill in with your numbers. Turn it off there too, and reopen it with the Welcome button.
 
 ## Run it

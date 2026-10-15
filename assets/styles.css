@@ -357,3 +357,4 @@ ol.runners summary strong::before { content: counter(rank) ". "; color: var(--tr
 ol.runners summary { color: var(--fg); font-weight: 400; }
 ol.runners ul.why { margin-top: 8px; }
 details.how summary { font-size: 0.9rem; }
+.linkish { background: none; border: 0; padding: 0; color: var(--gold); text-decoration: underline; cursor: pointer; font: inherit; }
