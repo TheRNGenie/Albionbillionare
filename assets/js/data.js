@@ -568,7 +568,7 @@ ABP.refineEfficiency = (specs, tier) => specs.reduce((s, v) => s + (+v || 0), 0)
 
 ABP.SPEC_DEFAULT = {
   refine: { wood: [0, 0, 0, 0, 0], ore: [0, 0, 0, 0, 0], hide: [0, 0, 0, 0, 0], fiber: [0, 0, 0, 0, 0], rock: [0, 0, 0, 0, 0] },
-  craft: { mastery: 0, item: 0, others: 0, base: 1286 },
+  craft: { mastery: 0, item: 0, others: 0, base: 1286, quality: 0 },
   farm: { crop: 8, herb: 8 },
   gather: 0,
 };
@@ -589,9 +589,59 @@ ABP.WIKI.splice(3, 0, {
     "Refining: each spec level in any tier of that refining line adds 30 efficiency, and each level in the tier you are refining adds 250 more. Five tiers at 100 plus the refined tier at 100 is 40,000 efficiency, a 93.75% discount.",
     "Crafting: the family node (for example Sword Crafter) adds 30 per level, each other item spec in the family adds 30 per level, and the exact item's spec adds 280 per level (30 shared plus 250 specific).",
     "Spec does not change the resource return rate. Return rate comes only from the city, focus and the daily bonus.",
-    "Higher crafting spec also raises your chance of better item quality, which sells for more.",
+    "Quality (from Korn, Sandbox Interactive, on the official forum): with no quality bonus a craft makes one roll on the quality table: Normal 68.8%, Good 25%, Outstanding 5%, Excellent 1.1%, Masterpiece 0.1%. Tier does not matter. A crafting quality bonus of X% gives an X% chance of a second roll, and the best roll counts, so a 100% bonus is one free reroll on every craft. Repairing does not upgrade quality.",
     "Gathering: each level adds +0.5% gathering yield and faster gathering for that resource and tier.",
     "Farming: crop, herb and animal tiers unlock in order on the Destiny Board, so your spec decides the highest tier you can plant or raise.",
   ],
   link: "https://wiki.albiononline.com/wiki/Specializations",
 });
+
+/* ---------- Spec growth ----------
+   Curve shape: cumulative fame by level, taken from a published 0-100 node table
+   (25k at 1, 288k at 10, 1.19M at 30, 4.02M at 60, 14.74M at 100) and scaled to each node's own total.
+   Node totals: Adept Ore Smelter 0-100 is 2.90M fame and crafting mastery 0-100 is 6.44M (published);
+   item, higher refining tiers and farming nodes use estimates the player can overwrite.
+   Fame per resource is an estimate; the game shows exact fame per item in the crafting window.
+   Farming: each harvested plant gives 100 fame, 150 with premium (official wiki). Premium adds 50% fame. */
+ABP.FAME = {
+  curve: [[0, 0], [1, 0.0017], [10, 0.0195], [30, 0.0807], [60, 0.2727], [100, 1]],
+  perResource: { 4: 22.5, 5: 90, 6: 270, 7: 645, 8: 1395 },
+  premium: 1.5,
+  perHarvest: 150,
+  totals: { refineTier: 2.9e6, craftMastery: 6.44e6, craftItem: 2.9e6, farm: 3.0e6 },
+};
+ABP.fameAt = (level, total) => {
+  const c = ABP.FAME.curve;
+  const L = Math.max(0, Math.min(100, level));
+  for (let i = 1; i < c.length; i++) if (L <= c[i][0]) {
+    const [l0, f0] = c[i - 1], [l1, f1] = c[i];
+    return total * (f0 + (f1 - f0) * (L - l0) / (l1 - l0));
+  }
+  return total;
+};
+ABP.levelAt = (fame, total) => {
+  const share = Math.min(1, fame / total), c = ABP.FAME.curve;
+  for (let i = 1; i < c.length; i++) if (share <= c[i][1]) {
+    const [l0, f0] = c[i - 1], [l1, f1] = c[i];
+    return l0 + (l1 - l0) * (share - f0) / (f1 - f0);
+  }
+  return 100;
+};
+
+/* ---------- Crafting quality ----------
+   Source: posts by Korn (Sandbox Interactive) in the official forum thread "Crafting quality chance".
+   Only the developer's numbers are used. One roll at 0% bonus; an X% bonus is an X% chance of one more
+   roll and the best roll counts. Bonus above 100% is read as one guaranteed extra roll per full 100%. */
+ABP.QUALITY = {
+  names: ["Normal", "Good", "Outstanding", "Excellent", "Masterpiece"],
+  base: [0.688, 0.25, 0.05, 0.011, 0.001],
+  source: "https://forum.albiononline.com/index.php/Thread/67684-Crafting-quality-chance/?postID=723852#post723852",
+};
+ABP.qualityOdds = (bonusPct) => {
+  const b = Math.max(0, +bonusPct || 0) / 100;
+  const n = 1 + Math.floor(b), f = b - Math.floor(b);
+  const base = ABP.QUALITY.base;
+  const cum = base.map((_, k) => base.slice(0, k + 1).reduce((a, x) => a + x, 0));
+  const atMost = cum.map((c) => (1 - f) * Math.pow(c, n) + f * Math.pow(c, n + 1));
+  return atMost.map((c, k) => c - (k ? atMost[k - 1] : 0));
+};

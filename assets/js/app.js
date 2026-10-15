@@ -151,14 +151,16 @@
     if (best === 0) return { factor: 1, set: false, eff: 0 };
     return { factor: Math.max(0.5, Math.min(2, Math.pow(2, (best - 10000) / 10000))), set: true, eff: best };
   }
-  function simulate(prof, start, hours, skill, days = ABP.DAYS) {
-    const ff = focusFactor().factor;
+  const ffFromEff = (eff) => Math.max(0.5, Math.min(2, Math.pow(2, (eff - 10000) / 10000)));
+  function simulate(prof, start, hours, skill, days = ABP.DAYS, ffDay = null) {
+    const ff0 = focusFactor().factor;
     let cap = start;
     const pts = [{ x: 0, y: cap }];
     const phaseDays = [0, null, null, null];
     let hit = null;
     for (let d = 1; d <= days; d++) {
       const P = prof.phases[phaseIdx(cap)];
+      const ff = ffDay ? ffDay(d) : ff0;
       cap += hours * P.active * skill + Math.min(cap, P.cap) * P.roi * skill + P.passive * (0.5 + 0.5 * ff);
       const pi = phaseIdx(cap);
       if (pi > 0 && phaseDays[pi] == null) for (let i = 1; i <= pi; i++) if (phaseDays[i] == null) phaseDays[i] = d;
@@ -190,6 +192,28 @@
         <div class="stats" id="pl-stats"></div>
         <canvas class="chart" id="pl-chart" aria-label="Projected silver over the year"></canvas>
         <p class="small muted" id="pl-note"></p>
+      </div>
+      <div class="box stack" id="whatif">
+        <div class="row spread"><h3>What if: your routine for a set number of days</h3><span class="small muted">Starts from your spec under Calculators</span></div>
+        <p class="small muted">Set a daily routine and a number of days. The app adds up the fame you earn, turns it into spec levels on each Destiny Board node, lowers your focus cost as you level, and runs your net worth with that rising spec day by day.</p>
+        <div class="controls">
+          <label class="field"><span>Days</span><input type="number" id="wi-days" min="1" max="365" step="1"></label>
+          <label class="field"><span>Refining line</span><select id="wi-res">${ABP.RESOURCES.map((r) => `<option value="${r.key}">${r.refinedName}</option>`).join("")}</select></label>
+          <label class="field"><span>Refine tier</span><select id="wi-tier">${[4, 5, 6, 7, 8].map((t) => `<option value="${t}">T${t}</option>`).join("")}</select></label>
+          <label class="field"><span>Enchantment</span><select id="wi-ench">${[0, 1, 2, 3].map((e) => `<option value="${e}">.${e}</option>`).join("")}</select></label>
+          <label class="field"><span>Focus a day on refining</span><input type="number" id="wi-frefine" min="0" step="100"></label>
+          <label class="field"><span>Fame per refine (estimate)</span><input type="number" id="wi-fame-r" min="0" step="any"></label>
+          <label class="field"><span>Focus a day on crafting</span><input type="number" id="wi-fcraft" min="0" step="100"></label>
+          <label class="field"><span>Crafts a day without focus</span><input type="number" id="wi-crafts" min="0" step="1"></label>
+          <label class="field"><span>Fame per craft (estimate)</span><input type="number" id="wi-fame-c" min="0" step="any"></label>
+          <label class="field"><span>Plants harvested a day</span><input type="number" id="wi-plants" min="0" step="1"></label>
+          <label class="field"><span>Crop you farm</span><select id="wi-crop">${ABP.CROPS.concat(ABP.HERBS).map((c, i) => `<option value="${i}">T${c.tier} ${c.name}</option>`).join("")}</select></label>
+          <label class="field"><span>Current level of that farmer node</span><input type="number" id="wi-farmlvl" min="0" max="100" step="1"></label>
+        </div>
+        <p class="small muted">Fame per refine and per craft are base values before premium; the app adds premium's +50%. The game shows the exact fame for each item in the crafting window, so swap in that number. Plants harvested give 150 fame each with premium. Premium gives 10,000 focus a day.</p>
+        <div class="stats" id="wi-stats"></div>
+        <div id="wi-table"></div>
+        <p class="small muted" id="wi-note"></p>
       </div>
       <div class="stack">
         <h3>Your four phases</h3>
@@ -224,6 +248,7 @@
     $("#pl-hours").addEventListener("input", (e) => { plan.hours = Math.max(0, +e.target.value || 0); savePlan(); updatePlan(); });
     $("#pl-skill").addEventListener("change", (e) => { plan.skill = +e.target.value; savePlan(); updatePlan(); });
     $("#pl-date").addEventListener("change", (e) => { plan.date = e.target.value || todayISO(); savePlan(); updatePlan(); });
+    bindWhatIf();
     renderDaily();
     updatePlan();
   }
@@ -266,6 +291,94 @@
       const t = $("#m-" + a.dataset.method); if (t) { t.open = true; t.scrollIntoView({ behavior: "smooth", block: "start" }); }
     }));
     drawPlanChart();
+    renderWhatIf();
+  }
+
+  /* ---------- What if: spec growth over Y days ---------- */
+  const wi = Object.assign({ days: 30, res: null, tier: 6, ench: 0, frefine: 10000, fameR: null, fcraft: 0, crafts: 0, fameC: 1500, plants: 72, crop: 4, farmlvl: 0 }, store.get("whatif", {}));
+  if (!wi.res) {
+    const best = Object.entries(ABP.spec.refine).sort((a, b) => b[1].reduce((x, y) => x + y, 0) - a[1].reduce((x, y) => x + y, 0))[0];
+    wi.res = best[1].some((v) => v) ? best[0] : "wood";
+  }
+  const defFameR = (t) => ABP.FAME.perResource[t] * ABP.REFINE_RAW[t];
+  function bindWhatIf() {
+    const fields = { days: [1, 365], res: null, tier: null, ench: null, frefine: [0, 30000], fameR: [0, 1e7], fcraft: [0, 30000], crafts: [0, 10000], fameC: [0, 1e7], plants: [0, 10000], crop: null, farmlvl: [0, 100] };
+    const idOf = (k) => "#wi-" + ({ fameR: "fame-r", fameC: "fame-c" }[k] || k);
+    for (const [k, lim] of Object.entries(fields)) {
+      const elx = $(idOf(k));
+      elx.value = k === "fameR" ? (wi.fameR ?? defFameR(wi.tier)) : wi[k];
+      elx.addEventListener("change", () => {
+        if (k === "res") wi.res = elx.value;
+        else if (k === "fameR") wi.fameR = elx.value === "" ? null : Math.max(lim[0], Math.min(lim[1], +elx.value || 0));
+        else if (lim) { wi[k] = Math.max(lim[0], Math.min(lim[1], +elx.value || 0)); elx.value = wi[k]; }
+        else wi[k] = +elx.value;
+        if (k === "tier" && wi.fameR == null) $("#wi-fame-r").value = defFameR(wi.tier);
+        store.set("whatif", wi); renderWhatIf();
+      });
+    }
+  }
+  function growSpec() {
+    const F = ABP.FAME, SP = ABP.spec, prem = F.premium;
+    const line = SP.refine[wi.res].slice();
+    const t = wi.tier, ti = t - 4;
+    const fameR = (wi.fameR ?? defFameR(t)) * prem, fameC = wi.fameC * prem;
+    let rFame = ABP.fameAt(line[ti], F.totals.refineTier);
+    let iFame = ABP.fameAt(SP.craft.item, F.totals.craftItem), mFame = ABP.fameAt(SP.craft.mastery, F.totals.craftMastery);
+    const crops = ABP.CROPS.concat(ABP.HERBS);
+    let cropI = Math.min(wi.crop, crops.length - 1), farmFame = ABP.fameAt(wi.farmlvl, F.totals.farm);
+    const start = { refine: line[ti], item: SP.craft.item, mastery: SP.craft.mastery, farm: wi.farmlvl, crop: cropI };
+    const effs = [], refines = [], crafts = [];
+    const otherBest = Math.max(0, ...Object.entries(SP.refine).filter(([k]) => k !== wi.res).map(([, sp]) => ABP.refineEfficiency(sp, 6)));
+    const ffs = [];
+    let craftLvl = { item: SP.craft.item, mastery: SP.craft.mastery };
+    for (let d = 1; d <= wi.days; d++) {
+      const eff = ABP.refineEfficiency(line, t);
+      const fc = ABP.focusCost(ABP.REFINE_FOCUS[t][wi.ench], eff);
+      const nR = wi.frefine / fc;
+      const ce = craftLvl.mastery * 30 + SP.craft.others * 30 + craftLvl.item * 280;
+      const cfc = ABP.focusCost(SP.craft.base || 1, ce);
+      const nC = wi.fcraft / cfc + wi.crafts;
+      refines.push(nR); crafts.push(nC); effs.push(eff);
+      rFame += nR * fameR;
+      line[ti] = Math.floor(ABP.levelAt(rFame, F.totals.refineTier));
+      iFame += nC * fameC; mFame += nC * fameC;
+      craftLvl = { item: Math.floor(ABP.levelAt(iFame, F.totals.craftItem)), mastery: Math.floor(ABP.levelAt(mFame, F.totals.craftMastery)) };
+      farmFame += wi.plants * F.perHarvest;
+      while (farmFame >= F.totals.farm && cropI < crops.length - 1 && (cropI + 1 < ABP.CROPS.length) === (cropI < ABP.CROPS.length)) { farmFame -= F.totals.farm; cropI++; }
+      ffs.push(ffFromEff(Math.max(otherBest, ABP.refineEfficiency(line, 6))));
+    }
+    const endEff = ABP.refineEfficiency(line, t);
+    return {
+      start, crops, line,
+      end: { refine: line[ti], item: craftLvl.item, mastery: craftLvl.mastery, farm: ABP.levelAt(farmFame, F.totals.farm), crop: cropI },
+      eff0: effs[0], eff1: endEff,
+      fc0: ABP.focusCost(ABP.REFINE_FOCUS[t][wi.ench], effs[0]), fc1: ABP.focusCost(ABP.REFINE_FOCUS[t][wi.ench], endEff),
+      refines: refines.reduce((a, x) => a + x, 0), crafts: crafts.reduce((a, x) => a + x, 0),
+      ffStart: ffFromEff(Math.max(otherBest, ABP.refineEfficiency(ABP.spec.refine[wi.res], 6))), ffs,
+    };
+  }
+  function renderWhatIf() {
+    if (!$("#wi-stats")) return;
+    const g = growSpec();
+    const prof = profileOf(plan.profile), hours = plan.hours ?? prof.hours;
+    const flat = simulate(prof, plan.start, hours, plan.skill, wi.days, () => g.ffStart);
+    const grow = simulate(prof, plan.start, hours, plan.skill, wi.days, (d) => g.ffs[d - 1]);
+    const gain = grow.end - plan.start;
+    const res = ABP.RESOURCES.find((r) => r.key === wi.res);
+    const lv = (x) => Math.floor(x);
+    const rowsHtml = [
+      [`${res.refinedName} T${wi.tier} refiner`, g.start.refine, g.end.refine, `${full(g.refines)} refines; focus per T${wi.tier}.${wi.ench} refine ${g.fc0.toFixed(1)} → ${g.fc1.toFixed(1)}`],
+      ["Crafting item spec", g.start.item, g.end.item, `${full(g.crafts)} crafts`],
+      ["Crafting family node", g.start.mastery, g.end.mastery, "same craft fame"],
+      [`T${g.crops[g.start.crop].tier} ${g.crops[g.start.crop].name} farmer`, g.start.farm, g.end.crop === g.start.crop ? g.end.farm : 100, g.end.crop !== g.start.crop ? `maxed; now leveling T${g.crops[g.end.crop].tier} ${g.crops[g.end.crop].name} (level ${lv(g.end.farm)})` : `${full(wi.plants * wi.days)} plants`],
+    ];
+    $("#wi-stats").innerHTML = `
+      <div class="stat key"><span class="label">Net worth after ${wi.days} days</span><span class="v money">${fmt(grow.end)}</span><span class="small muted">${plan.start > 0 ? `+${pct(gain / plan.start, 0)} from ${fmt(plan.start)}` : `+${fmt(gain)} from zero`}</span></div>
+      <div class="stat"><span class="label">Silver gained</span><span class="v">${fmt(gain)}</span><span class="small muted">${fmt(gain / wi.days)} a day on average</span></div>
+      <div class="stat"><span class="label">Extra from rising spec</span><span class="v">${fmt(grow.end - flat.end)}</span><span class="small muted">vs keeping today's spec</span></div>
+      <div class="stat"><span class="label">Refining efficiency</span><span class="v">${full(g.eff0)} → ${full(g.eff1)}</span><span class="small muted">focus worth ${g.ffStart.toFixed(2)}× → ${g.ffs[g.ffs.length - 1].toFixed(2)}×</span></div>`;
+    $("#wi-table").innerHTML = `<div class="table-wrap"><table><thead><tr><th>Node</th><th>Level now</th><th>After ${wi.days} days</th><th>Gain</th><th>From</th></tr></thead><tbody>${rowsHtml.map(([n, a, b, why]) => `<tr><td>${esc(n)}</td><td class="num">${lv(a)}</td><td class="num">${lv(b)}</td><td class="num">+${Math.max(0, lv(b) - lv(a))}</td><td class="small">${esc(why)}</td></tr>`).join("")}</tbody></table></div>`;
+    $("#wi-note").textContent = `Net worth uses your ${prof.name} plan at ${hours} active hours a day, with daily focus income scaled by your refining efficiency as it rises. Levels convert fame with the Destiny Board curve: about ${fmt(ABP.FAME.totals.refineTier)} fame takes a refining tier node from 0 to 100, ${fmt(ABP.FAME.totals.craftMastery)} for a crafting family node. Fame figures for items and higher tiers are estimates, so treat levels as a guide and correct the fame inputs from the game.`;
   }
   function drawPlanChart() {
     const c = $("#pl-chart"); if (!c || !lastSim) return;
@@ -575,6 +688,13 @@
   /* ---------- Calculators ---------- */
   const rateOf = (bonusCity, focus, daily) => { const b = 0.18 + (bonusCity ? 0.4 : 0) + (focus ? 0.59 : 0) + daily; return b / (1 + b); };
 
+  /* Quality odds from Korn's (Sandbox Interactive) forum posts: best of the rolls a quality bonus grants. */
+  function qualityTable(bonus) {
+    const q = ABP.qualityOdds(bonus), q0 = ABP.qualityOdds(0);
+    return `<div class="table-wrap"><table><thead><tr><th>Quality</th><th>At ${esc(String(+bonus))}% bonus</th><th>With no bonus</th></tr></thead><tbody>${ABP.QUALITY.names.map((n, i) => `<tr><td>${n}</td><td class="num">${pct(q[i], 2)}</td><td class="num">${pct(q0[i], 2)}</td></tr>`).join("")}</tbody></table></div>
+      <p class="small muted">Odds use the quality table and roll rule posted by Korn of Sandbox Interactive on the <a href="${ABP.QUALITY.source}" target="_blank" rel="noopener">official forum</a>: an X% bonus is an X% chance of a second roll, and the best roll counts. His posts do not say how many bonus points each spec level gives, so enter the quality bonus your crafting window shows.</p>`;
+  }
+
   function renderCalc() {
     const p = $("#panel-calc");
     const rf = Object.assign({ res: "wood", ench: 0, buyCity: "Fort Sterling", refineCity: "Fort Sterling", sellCity: "Fort Sterling", buyMode: "order", sellMode: "order", daily: 0, fee: 0, focus: {} }, store.get("calc.refine", {}));
@@ -603,6 +723,7 @@
               <label class="field"><span>This item's spec</span><input type="number" min="0" max="100" step="1" id="sp-ci"></label>
               <label class="field"><span>Other item specs in family, added up</span><input type="number" min="0" step="1" id="sp-co"></label>
               <label class="field"><span>Base focus cost (from game)</span><input type="number" min="1" step="any" id="sp-cb"></label>
+              <label class="field"><span>Quality bonus % (from game)</span><input type="number" min="0" max="1000" step="any" id="sp-cq"></label>
             </div>
             <div id="sp-craft-out" class="small"></div>
           </div>
@@ -670,7 +791,7 @@
     spRes.value = rf.res;
     const fillRefine = () => [4, 5, 6, 7, 8].forEach((t) => ($("#sp-r" + t).value = SP.refine[spRes.value][t - 4]));
     fillRefine();
-    $("#sp-cm").value = SP.craft.mastery; $("#sp-ci").value = SP.craft.item; $("#sp-co").value = SP.craft.others; $("#sp-cb").value = SP.craft.base;
+    $("#sp-cm").value = SP.craft.mastery; $("#sp-ci").value = SP.craft.item; $("#sp-co").value = SP.craft.others; $("#sp-cb").value = SP.craft.base; $("#sp-cq").value = SP.craft.quality || 0;
     $("#sp-fc").value = SP.farm.crop; $("#sp-fh").value = SP.farm.herb; $("#sp-g").value = SP.gather;
     const clamp = (v, max = 100) => Math.max(0, Math.min(max, Math.round(+v || 0)));
     function specOut() {
@@ -683,7 +804,7 @@
       }).join("")}</tbody></table></div>`;
       const ce = SP.craft.mastery * 30 + SP.craft.others * 30 + SP.craft.item * 280;
       const cf = ABP.focusCost(SP.craft.base || 0, ce);
-      $("#sp-craft-out").innerHTML = `Efficiency <strong>${full(ce)}</strong>: each craft costs <strong>${cf.toFixed(1)}</strong> focus instead of ${full(SP.craft.base)}, so 10,000 focus covers <strong>${full(10000 / (cf || 1))}</strong> crafts. Higher item spec also improves your chance of better quality.`;
+      $("#sp-craft-out").innerHTML = `Efficiency <strong>${full(ce)}</strong>: each craft costs <strong>${cf.toFixed(1)}</strong> focus instead of ${full(SP.craft.base)}, so 10,000 focus covers <strong>${full(10000 / (cf || 1))}</strong> crafts.${qualityTable(SP.craft.quality || 0)}`;
       $("#sp-farm-out").innerHTML = `Best picks only recommends crops up to T${SP.farm.crop} and herbs up to T${SP.farm.herb}. Your gathering spec adds <strong>+${(SP.gather * 0.5).toFixed(1)}%</strong> yield on top of premium's +50%.`;
     }
     function specChanged() {
@@ -695,6 +816,7 @@
     spRes.addEventListener("change", () => { fillRefine(); specOut(); });
     [4, 5, 6, 7, 8].forEach((t) => $("#sp-r" + t).addEventListener("change", (e) => { SP.refine[spRes.value][t - 4] = clamp(e.target.value); e.target.value = SP.refine[spRes.value][t - 4]; specChanged(); }));
     [["sp-cm", "mastery", 100], ["sp-ci", "item", 100], ["sp-co", "others", 10000], ["sp-cb", "base", 1e7]].forEach(([id, k, max]) => $("#" + id).addEventListener("change", (e) => { SP.craft[k] = k === "base" ? Math.max(1, +e.target.value || 1) : clamp(e.target.value, max); specChanged(); }));
+    $("#sp-cq").addEventListener("change", (e) => { SP.craft.quality = Math.max(0, Math.min(1000, +e.target.value || 0)); specChanged(); });
     $("#sp-fc").addEventListener("change", (e) => { SP.farm.crop = +e.target.value; specChanged(); });
     $("#sp-fh").addEventListener("change", (e) => { SP.farm.herb = +e.target.value; specChanged(); });
     $("#sp-g").addEventListener("change", (e) => { SP.gather = clamp(e.target.value); specChanged(); });
