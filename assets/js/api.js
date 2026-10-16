@@ -17,27 +17,40 @@ ABP.api = (() => {
     return (ABP.SERVERS.find((s) => s.id === server) || ABP.SERVERS[0]).host;
   }
 
-  async function getJSON(url) {
-    const hit = cache.get(url);
-    if (hit && Date.now() - hit.t < TTL) return hit.v;
+  /* Requests share one queue: at most 6 at a time (the server allows about 180 a minute), identical
+     requests in flight are made once, and a rate-limit answer is retried once after a short wait. */
+  const inflight = new Map();
+  let active = 0;
+  const waiting = [];
+  const slot = () => new Promise((go) => (active < 6 ? (active++, go()) : waiting.push(go)));
+  const release = () => { const next = waiting.shift(); next ? next() : active--; };
+  async function fetchJSON(url, retry = true) {
+    await slot();
     let res;
     try {
       // no-store: this file keeps its own 5-minute cache, so a refresh must never get a stale copy from the HTTP cache.
       res = await fetch(url, { cache: "no-store" });
     } catch (e) {
-      const err = new Error("This page cannot reach the price server. Open the app from its GitHub Pages address to load live prices.");
+      const err = new Error("The app can't reach the price server. Check your internet connection and refresh.");
       err.code = "blocked";
       throw err;
-    }
+    } finally { release(); }
+    if (res.status === 429 && retry) { await new Promise((r) => setTimeout(r, 2500)); return fetchJSON(url, false); }
     if (res.status === 429) {
       const err = new Error("The price server is rate limiting requests. Wait a minute and refresh.");
       err.code = "rate";
       throw err;
     }
     if (!res.ok) throw new Error("The price server answered " + res.status + ". Try again shortly.");
-    const v = await res.json();
-    cache.set(url, { t: Date.now(), v });
-    return v;
+    return res.json();
+  }
+  async function getJSON(url) {
+    const hit = cache.get(url);
+    if (hit && Date.now() - hit.t < TTL) return hit.v;
+    if (inflight.has(url)) return inflight.get(url);
+    const p = fetchJSON(url).then((v) => { cache.set(url, { t: Date.now(), v }); return v; }).finally(() => inflight.delete(url));
+    inflight.set(url, p);
+    return p;
   }
 
   /* Albion's own game info API (official, public): character search and lifetime fame.
