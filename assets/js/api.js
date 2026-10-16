@@ -22,7 +22,8 @@ ABP.api = (() => {
     if (hit && Date.now() - hit.t < TTL) return hit.v;
     let res;
     try {
-      res = await fetch(url);
+      // no-store: this file keeps its own 5-minute cache, so a refresh must never get a stale copy from the HTTP cache.
+      res = await fetch(url, { cache: "no-store" });
     } catch (e) {
       const err = new Error("This page cannot reach the price server. Open the app from its GitHub Pages address to load live prices.");
       err.code = "blocked";

@@ -516,7 +516,7 @@
     $("#mk-server").addEventListener("change", (e) => { ABP.api.server = e.target.value; loadGold(); loadMarket(); });
     [["preset", "mk-preset"], ["tier", "mk-tier"], ["ench", "mk-ench"], ["quality", "mk-quality"], ["from", "mk-from"]].forEach(([k, id]) =>
       $("#" + id).addEventListener("change", (e) => { mk[k] = ["ench", "quality"].includes(k) ? +e.target.value : e.target.value; saveMk(); sync(); loadMarket(); }));
-    $("#mk-load").addEventListener("click", loadMarket);
+    $("#mk-load").addEventListener("click", () => { ABP.api.clearCache(); loadMarket(); });
     setupSearch();
     setupAlerts();
     loadGold();
@@ -1084,7 +1084,7 @@
       const x = $("#wl-" + k); x.value = wealth[k];
       x.addEventListener("change", () => { wealth[k] = x.value; saveWealth(); k === "sort" ? drawItems() : priceWealth(); });
     }
-    $("#wl-refresh").addEventListener("click", priceWealth);
+    $("#wl-refresh").addEventListener("click", () => { ABP.api.clearCache(); priceWealth(); });
     const merged = () => { const t = wealthTotals(); return { coin: t.total - t.goldS, gold: wealth.gold, t }; };
     $("#wl-to-log").addEventListener("click", () => {
       const m = merged();
@@ -1477,7 +1477,7 @@
           <details class="how"><summary>How this is ranked</summary><p class="small">${k.how}</p></details>
           <div class="pick-body"><p class="muted">Waiting to load…</p></div>
         </section>`).join("")}</div>`;
-    $("#pk-refresh").addEventListener("click", loadPicks);
+    $("#pk-refresh").addEventListener("click", () => { ABP.api.clearCache(); loadPicks(); });
     $$("#pk-list [data-go]").forEach((a) => a.addEventListener("click", (e) => {
       e.preventDefault();
       const [tab, preset] = a.dataset.go.split(",");
@@ -1489,15 +1489,23 @@
     }));
     loadPicks();
   }
-  function loadPicks() {
-    $("#pk-time").textContent = "Updated " + new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-    PICKS.forEach(loadPick);
+  /* Each pick remembers which load it belongs to, so a slow answer from an earlier load can't overwrite a newer one. */
+  const pickGen = {};
+  async function loadPicks() {
+    const btn = $("#pk-refresh"), time = $("#pk-time");
+    btn.disabled = true; time.textContent = "Loading fresh prices…";
+    await Promise.all(PICKS.map(loadPick));
+    if (!btn.isConnected) return;
+    btn.disabled = false;
+    time.textContent = "Updated " + new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
   }
   async function loadPick(k) {
     const body = $(`#pk-${k.key} .pick-body`);
+    const gen = pickGen[k.key] = (pickGen[k.key] || 0) + 1;
     body.innerHTML = `<p class="muted">Checking prices and sales…</p>`;
     try {
       const { rows } = await k.run();
+      if (gen !== pickGen[k.key] || !body.isConnected) return;
       if (!rows.length) { body.innerHTML = `<p class="muted">Nothing clears a profit with fresh prices right now. ${esc(STATIC_WHY[k.key])}</p>`; return; }
       const [top, ...rest] = rows;
       body.innerHTML = `
@@ -1509,6 +1517,7 @@
         </div>
         <ol class="runners" start="2">${rest.slice(0, 4).map((r) => `<li><details><summary><strong>${esc(k.name(r))}</strong> <span class="muted small">${esc(k.line(r))}</span></summary><ul class="why">${r.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details></li>`).join("")}</ol>`;
     } catch (e) {
+      if (gen !== pickGen[k.key] || !body.isConnected) return;
       body.innerHTML = `<div class="notice"><strong>${esc(e.message)}</strong><p class="small">${esc(STATIC_WHY[k.key])}</p></div>`;
     }
   }
