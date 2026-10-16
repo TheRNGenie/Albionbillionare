@@ -415,3 +415,9 @@ tr.on td { background: var(--gold-soft); }
 .toast.on { opacity: 1; transform: translate(-50%, 0); }
 .pull { position: fixed; left: 50%; top: calc(8px + env(safe-area-inset-top, 0px)); transform: translate(-50%, -60px); background: var(--surface); color: var(--accent); border: 1px solid var(--line); border-radius: 14px; padding: 4px 12px; font-size: 0.8rem; z-index: 60; transition: transform .15s; }
 .pull.on { transform: translate(-50%, 0); }
+
+/* Wide screens (the Windows app and desktop browsers): use more of the width */
+@media (min-width: 1300px) { .wrap { max-width: 1400px; } }
+@media (min-width: 1900px) { .wrap { max-width: 1640px; } }
+/* With a mouse there's no swipe, so let the tab bar wrap instead of hiding tabs off the edge */
+@media (min-width: 1000px) and (hover: hover) { .tabs { flex-wrap: wrap; overflow-x: visible; row-gap: 0; gap: 0; } .tabs button { padding-inline: 9px; letter-spacing: 0.05em; } }

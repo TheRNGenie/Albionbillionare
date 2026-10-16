@@ -44,3 +44,17 @@ The same app is packaged for Android with [Capacitor](https://capacitorjs.com/).
 - In the app, live prices and the character lookup go through Android's own network stack, so nothing is blocked the way a browser can block it. Price alerts arrive as phone notifications.
 - Recipes, base focus costs and item weights come from Albion's item data (`assets/data/recipes.json`). Rebuild it after a game patch with `python3 tools/build_recipes.py items.json`, using `items.json` from [ao-bin-dumps](https://github.com/ao-data/ao-bin-dumps).
 - Build it yourself: `npm ci`, `npm run android:sync`, then open `android/` in Android Studio.
+
+## Windows app
+
+The same app runs as a Windows desktop program, built with Electron by `.github/workflows/windows.yml` on every push.
+Each build is attached to a `windows-build-N` release:
+
+- `Albion-Billionaire-Setup.exe` installs it with Start menu and desktop shortcuts.
+- `Albion-Billionaire-portable.exe` runs without installing.
+
+After download it never contacts GitHub. Item names and recipes ship inside the app, there is no auto-updater, and the only network calls are the Albion Online Data Project prices, Albion's player lookup and Google Fonts.
+Your data lives in the app on that PC; use **Tools → Backup** to move it between your phone and PC.
+Windows may warn that the app is unsigned: choose **More info → Run anyway**.
+
+Run it locally with `npm install && npm run desktop`; build the Windows files with `npm run desktop:win`.

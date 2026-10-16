@@ -1,0 +1,61 @@
+name: Windows app
+
+# Builds the Windows desktop app (an Electron window around this web app) and attaches it to a GitHub release.
+# Once downloaded, the app never contacts GitHub: it has no auto-updater and ships its own data files.
+on:
+  push:
+    branches: [main, claude/albion-billionaire-app]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Version the build
+        shell: bash
+        run: npm version "1.0.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+
+      - name: Build the Windows app
+        run: npm run desktop:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: albion-billionaire-windows
+          path: |
+            dist/Albion-Billionaire-portable.exe
+            dist/Albion-Billionaire-Setup.exe
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: windows-build-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: Albion Billionaire for Windows, build ${{ github.run_number }}
+          make_latest: false
+          files: |
+            dist/Albion-Billionaire-portable.exe
+            dist/Albion-Billionaire-Setup.exe
+          body: |
+            Albion-Billionaire-Setup.exe installs the app with a Start menu and desktop shortcut.
+            Albion-Billionaire-portable.exe runs without installing (handy on a USB stick); it starts a little slower.
+            Windows may say it "protected your PC" because the app isn't code-signed: click More info, then Run anyway.
+            Built from ${{ github.sha }}.

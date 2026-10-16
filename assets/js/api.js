@@ -5,7 +5,8 @@ window.ABP = window.ABP || {};
 ABP.api = (() => {
   const TTL = 5 * 60 * 1000;
   const cache = new Map();
-  const ITEM_NAMES_URL = "https://raw.githubusercontent.com/ao-data/ao-bin-dumps/master/formatted/items.txt";
+  // Item names ship with the app (built by tools/build_names.py) so nothing is fetched from GitHub.
+  const ITEM_NAMES_URL = "assets/data/names.json";
   let server = "west";
   let names = null;
   let namesPromise = null;
@@ -136,12 +137,8 @@ ABP.api = (() => {
   async function itemNames() {
     if (names) return names;
     if (!namesPromise) {
-      namesPromise = fetch(ITEM_NAMES_URL).then((r) => r.text()).then((txt) => {
-        const list = [];
-        for (const line of txt.split("\n")) {
-          const m = line.match(/^\s*\d+:\s*(\S+)\s*:\s*(.+?)\s*$/);
-          if (m) list.push({ id: m[1], name: m[2] });
-        }
+      namesPromise = (window.ABP_NAMES ? Promise.resolve(window.ABP_NAMES) : fetch(ITEM_NAMES_URL).then((r) => r.json())).then((rows) => {
+        const list = rows.map(([id, name]) => ({ id, name }));
         names = list;
         return list;
       }).catch((e) => { namesPromise = null; throw e; });

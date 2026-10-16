@@ -1594,7 +1594,17 @@
     "NO. Farm it in silver.", "NO. Buy premium with gold instead.", "NO. Your island says hi.",
     "NO. Go refine something.", "NO. That money is a T8 bag in disguise.", "NO. The Black Market will provide.",
   ];
-  const wheel = { rot: 0, spinning: false, tally: Object.assign({ yes: 0, no: 0 }, store.get("wheel", {})) };
+  const WHEEL_COOLDOWN = 4 * 3600 * 1000; /* one spin every 4 hours */
+  const wheel = { rot: 0, spinning: false, timer: null, tally: Object.assign({ yes: 0, no: 0, last: 0, said: "" }, store.get("wheel", {})) };
+  function wheelWait() { return Math.max(0, (wheel.tally.last || 0) + WHEEL_COOLDOWN - Date.now()); }
+  function wheelCooldown() {
+    const wait = wheelWait(), btn = $("#wh-spin"), note = $("#wh-wait");
+    if (wheel.spinning) return;
+    btn.disabled = wait > 0;
+    if (!wait) { note.textContent = ""; return; }
+    const mins = Math.ceil(wait / 60000), h = Math.floor(mins / 60), m = mins % 60;
+    note.textContent = `The wheel needs ${[h && h + "h", m && m + "m"].filter(Boolean).join(" ")} to rest. Next spin at ${vanTime(new Date(Date.now() + wait))} Vancouver time.`;
+  }
   function drawWheel() {
     const c = $("#wh-canvas"); const dpr = window.devicePixelRatio || 1;
     const size = c.clientWidth || 300;
@@ -1623,7 +1633,7 @@
     $("#wh-tally").textContent = t.yes + t.no ? `Your spins so far: ${t.yes} yes, ${t.no} no.` : "";
   }
   function spinWheel() {
-    if (wheel.spinning) return;
+    if (wheel.spinning || wheelWait() > 0) return;
     /* Pick the slice first with a fair random draw: slice 0 is YES (1 in 30), the other 29 are NO. */
     const buf = new Uint32Array(1); let pick;
     do { crypto.getRandomValues(buf); } while (buf[0] >= Math.floor(2 ** 32 / WHEEL_SLICES) * WHEEL_SLICES);
@@ -1638,24 +1648,31 @@
     const out = $("#wh-result");
     out.className = "wheel-result"; out.innerHTML = "&nbsp;";
     wheel.spinning = true; $("#wh-spin").disabled = true;
+    wheel.tally.last = Date.now(); store.set("wheel", wheel.tally); /* the cooldown starts at the spin, so closing mid-spin can't skip it */
     const tick = (now) => {
       const k = Math.min(1, (now - t0) / dur);
       wheel.rot = from + delta * (1 - Math.pow(1 - k, 4));
       drawWheel();
       if (k < 1) return requestAnimationFrame(tick);
-      wheel.spinning = false; $("#wh-spin").disabled = false;
-      wheel.tally[yes ? "yes" : "no"]++; store.set("wheel", wheel.tally); wheelTally();
+      wheel.spinning = false;
+      const said = yes ? "YES. The wheel has spoken." : NO_LINES[Math.floor(Math.random() * NO_LINES.length)];
+      wheel.tally[yes ? "yes" : "no"]++; wheel.tally.said = said; store.set("wheel", wheel.tally); wheelTally();
       out.className = "wheel-result " + (yes ? "yes" : "no");
-      out.textContent = yes ? "YES. The wheel has spoken." : NO_LINES[Math.floor(Math.random() * NO_LINES.length)];
+      out.textContent = said;
+      wheelCooldown();
     };
     requestAnimationFrame(tick);
   }
   let wheelReturn = null;
   function openWheel() {
     wheelReturn = document.activeElement;
-    $("#wheel").hidden = false; drawWheel(); wheelTally(); $("#wh-spin").focus();
+    $("#wheel").hidden = false; drawWheel(); wheelTally();
+    const out = $("#wh-result");
+    if (wheelWait() > 0 && wheel.tally.said) { out.className = "wheel-result " + (wheel.tally.said.startsWith("YES") ? "yes" : "no"); out.textContent = wheel.tally.said; }
+    wheelCooldown(); clearInterval(wheel.timer); wheel.timer = setInterval(wheelCooldown, 30000);
+    ($("#wh-spin").disabled ? $("#wh-close") : $("#wh-spin")).focus();
   }
-  function closeWheel() { if (wheel.spinning) return; $("#wheel").hidden = true; wheelReturn?.focus?.(); }
+  function closeWheel() { if (wheel.spinning) return; clearInterval(wheel.timer); $("#wheel").hidden = true; wheelReturn?.focus?.(); }
   $("#wheelOpen").addEventListener("click", openWheel);
   $("#wh-spin").addEventListener("click", spinWheel);
   $("#wh-close").addEventListener("click", closeWheel);

@@ -36,6 +36,8 @@ jobs:
 
       - name: Install
         run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
 
       - name: Build the web app and the Android project
         run: |
