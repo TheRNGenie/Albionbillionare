@@ -45,7 +45,7 @@
     if (tab === "wealth") drawHistory();
     store.set("tab", tab);
   }
-  $$(".tabs button").forEach((b) => b.addEventListener("click", () => {
+  $$(".tabs button[role=tab]").forEach((b) => b.addEventListener("click", () => {
     history.replaceState(null, "", "#" + b.dataset.tab);
     show(b.dataset.tab);
   }));
@@ -135,12 +135,13 @@
     root.addEventListener("click", (e) => { if (e.target.classList.contains("use-live") && goldRate.live) setRate(goldRate.live, false); });
     $$(".rate-note", root).forEach((n) => (n.innerHTML = rateNote()));
   }
-  ABP.api.gold().then((rows) => {
+  const refreshGold = () => ABP.api.gold().then((rows) => {
     if (!rows?.length) return;
     const last = rows[rows.length - 1];
     goldRate.live = last.price; goldRate.liveAt = last.timestamp; store.set("gold", goldRate);
     setRate(goldRate.manual ? goldRate.rate : last.price, goldRate.manual);
   }).catch(() => {});
+  refreshGold();
   const profileOf = (id) => ABP.PROFILES.find((p) => p.id === id) || ABP.PROFILES[0];
   const phaseIdx = (cap) => ABP.PHASES.findIndex((p) => cap < p.until);
 
@@ -2262,6 +2263,46 @@
   $("#paceOpen").addEventListener("click", openPace);
   $("#pace").addEventListener("click", (e) => { if (e.target.id === "pace") closePace(); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#pace").hidden) closePace(); });
+
+  /* ---------- Refresh everything: header button and pull down at the top of the page ---------- */
+  let refreshing = false;
+  async function refreshAll() {
+    if (refreshing) return;
+    refreshing = true;
+    const btn = $("#refreshAll"); btn.disabled = true; btn.textContent = "Refreshing…";
+    ABP.api.clearCache();
+    const cur = TABS.find((t) => !$("#panel-" + t).hidden) || "plan";
+    for (const t of TABS) rendered[t] = false;
+    $("#panel-progress").dataset.ready = "";
+    await refreshGold();
+    show(cur);
+    await checkAlerts(false);
+    tickClock(); goalMeter();
+    btn.disabled = false; btn.textContent = "Refresh";
+    toast(`Updated ${vanTime(new Date())}`);
+    refreshing = false;
+  }
+  function toast(msg) {
+    let t = $("#toast");
+    if (!t) { t = document.createElement("div"); t.id = "toast"; t.className = "toast"; t.setAttribute("role", "status"); document.body.appendChild(t); }
+    t.textContent = msg; t.classList.add("on");
+    clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("on"), 2200);
+  }
+  $("#refreshAll").addEventListener("click", refreshAll);
+  (() => {
+    let y0 = null, x0 = 0, dy = 0;
+    const pull = document.createElement("div"); pull.className = "pull"; pull.textContent = "Pull to refresh"; document.body.appendChild(pull);
+    const modalOpen = () => $$(".welcome-back").some((m) => !m.hidden);
+    window.addEventListener("touchstart", (e) => { if (window.scrollY <= 0 && !modalOpen() && e.touches.length === 1) { y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; dy = 0; } }, { passive: true });
+    window.addEventListener("touchmove", (e) => {
+      if (y0 == null) return;
+      dy = e.touches[0].clientY - y0;
+      if (Math.abs(e.touches[0].clientX - x0) > Math.abs(dy) || window.scrollY > 0) { y0 = null; pull.classList.remove("on"); return; }
+      pull.classList.toggle("on", dy > 30);
+      pull.textContent = dy > 90 ? "Release to refresh" : "Pull to refresh";
+    }, { passive: true });
+    window.addEventListener("touchend", () => { if (y0 != null && dy > 90) refreshAll(); y0 = null; pull.classList.remove("on"); }, { passive: true });
+  })();
 
   const RENDER = { plan: renderPlan, picks: renderPicks, methods: renderMethods, market: renderMarket, calc: renderCalc, wiki: renderWiki, wealth: renderWealth, progress: renderProgress, tools: renderTools, times: renderTimes };
   tickClock();

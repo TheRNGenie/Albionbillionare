@@ -158,6 +158,7 @@ ABP.api = (() => {
   return {
     character,
     hourly,
+    clearCache() { cache.clear(); },
     get server() { return server; },
     set server(v) { server = v; cache.clear(); try { localStorage.setItem("abp.server", v); } catch (e) {} },
     host, prices, index, history, volumes, gold, itemNames, nameOf,

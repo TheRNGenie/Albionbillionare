@@ -411,3 +411,7 @@ tr.on td { background: var(--gold-soft); }
 .hb .hl { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); font-size: 0.68rem; color: var(--muted); white-space: nowrap; padding-top: 4px; }
 .hb:hover .bar, .hb:focus .bar { filter: brightness(1.15); }
 .tabs button[data-badge]:not([data-badge=""])::after { content: attr(data-badge); margin-left: 6px; background: var(--button); color: var(--button-ink); border-radius: 9px; padding: 0 6px; font-size: 0.72rem; }
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, 20px); background: var(--surface); color: var(--fg); border: 1px solid var(--gold); border-radius: 4px; padding: 8px 14px; font-size: 0.9rem; box-shadow: 0 6px 18px var(--shadow); opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 60; }
+.toast.on { opacity: 1; transform: translate(-50%, 0); }
+.pull { position: fixed; left: 50%; top: calc(8px + env(safe-area-inset-top, 0px)); transform: translate(-50%, -60px); background: var(--surface); color: var(--accent); border: 1px solid var(--line); border-radius: 14px; padding: 4px 12px; font-size: 0.8rem; z-index: 60; transition: transform .15s; }
+.pull.on { transform: translate(-50%, 0); }
