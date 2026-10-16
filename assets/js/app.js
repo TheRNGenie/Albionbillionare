@@ -1435,20 +1435,53 @@
 
 
 
+  /* ---------- Best time of day for a trade: same test as Times → Best hours, run on each leg of a strategy ---------- */
+  async function timeLegs(legs) {
+    return Promise.all(legs.map(async (l) => {
+      try { return { ...l, eff: hourEffect(await ABP.api.hourly(l.id, l.city)) }; }
+      catch (e) { return { ...l, err: e.message }; }
+    }));
+  }
+  function legVerdict(l) {
+    const e = l.eff, d = (m) => ((m - 1) * 100).toFixed(1) + "%";
+    if (l.err) return { ok: false, text: `hourly sales didn't load (${l.err})` };
+    if (!e || e.days < 3) return { ok: false, text: `not enough hourly sales in ${l.city} to tell` };
+    if (l.role === "sell" && e.highSig) return { ok: true, h: e.high.h, text: `around ${hourLabel(e.high.h)} (${d(e.high.mean)} vs the day's average, higher on ${Math.round(e.high.aboveShare * 100)}% of ${e.days} days)` };
+    if (l.role === "buy" && e.lowSig) return { ok: true, h: e.low.h, text: `around ${hourLabel(e.low.h)} (${d(e.low.mean)} vs the day's average, lower on ${Math.round((1 - e.low.aboveShare) * 100)}% of ${e.days} days)` };
+    return { ok: false, text: `any time: over ${e.days} days no hour beats normal noise` };
+  }
+  function busiestHours(legs) {
+    const sell = legs.find((l) => l.role === "sell" && l.eff?.totalVol);
+    if (!sell) return "";
+    const avg = sell.eff.totalVol / 24;
+    const top = sell.eff.stats.filter((s) => s.vol >= avg * 1.5).sort((a, b) => b.vol - a.vol).slice(0, 3).sort((a, b) => a.h - b.h);
+    return top.length ? `Most sales in ${sell.city} happen around ${top.map((s) => hourLabel(s.h)).join(", ")}, so have sell orders up before then.` : "";
+  }
+  function timeHtml(legs) {
+    const lines = legs.map((l) => { const v = legVerdict(l); return `<li><strong>${l.role === "sell" ? "Sell" : "Buy"} ${esc(l.what)}:</strong> ${v.ok ? "" : '<span class="muted">'}${esc(v.text)}${v.ok ? "" : "</span>"}</li>`; });
+    const busy = busiestHours(legs);
+    return `<span class="label">Best time (Vancouver)</span><ul class="why">${lines.join("")}</ul>${busy ? `<p class="muted">${esc(busy)}</p>` : ""}`;
+  }
+
   /* ---------- Best picks ---------- */
   const assume = Object.assign({ plots: 8, perPlant: 9, seedReturn: 70 }, store.get("assume", {}));
   const PICKS = [
     { key: "crops", title: "Island: what to plant", how: "Ranked by profit per day across all your plots after seed costs, using the best city to sell in. A crop only counts as much as the market can absorb (half its daily sales), so a pricey crop nobody buys does not win.",
       run: () => ABP.advisor.crops({ plots: assume.plots, perPlant: assume.perPlant, seedReturn: assume.seedReturn / 100 }),
+      legs: (r) => [{ role: "sell", id: r.crop, city: r.sell.city, what: "your crop" }, { role: "buy", id: r.seed, city: r.seed.city, what: "seeds" }],
       line: (r) => `${fmt(r.daily)} a day · sells ${full(r.sell.sell)} in ${r.sell.city}`, name: (r) => `T${r.tier} ${r.name}`, link: ["market", "crops"] },
     { key: "refining", title: "Refining: what to spend focus on", how: "Every resource from T4 to T8 at .0 to .2 enchant, refined with focus in its bonus city. Focus cost comes from your refining spec (Calculators → Your spec). Ranked by what your 10,000 daily focus earns: the extra profit focus adds per refine, times how many refines your focus covers, capped at half of what the market sells per day.",
-      run: () => ABP.advisor.refining(), line: (r) => `${fmt(r.score)} a day from focus · ${r.spf.toFixed(1)} silver per focus · ${r.city}`, name: (r) => r.label, link: ["calc"] },
+      run: () => ABP.advisor.refining(),
+      legs: (r) => [{ role: "sell", id: r.outId, city: r.city, what: "the refined output" }, { role: "buy", id: r.rawId, city: r.city, what: "raw resources" }], line: (r) => `${fmt(r.score)} a day from focus · ${r.spf.toFixed(1)} silver per focus · ${r.city}`, name: (r) => r.label, link: ["calc"] },
     { key: "bm", title: "Black Market: what to flip", how: "All Black Market gear from T4 to T8 at .0 to .2. Only Black Market prices from the last 12 hours count. Ranked by profit per flip times how many the Black Market actually bought per day (up to 10).",
-      run: () => ABP.advisor.blackMarket(), line: (r) => `${full(r.profit)} each · buy in ${r.src.city}`, name: (r) => r.label, link: ["market", "bm"] },
+      run: () => ABP.advisor.blackMarket(),
+      legs: (r) => [{ role: "buy", id: r.id, city: r.src.city, what: "the item" }, { role: "sell", id: r.id, city: ABP.BM, what: "into Black Market orders" }], line: (r) => `${full(r.profit)} each · buy in ${r.src.city}`, name: (r) => r.label, link: ["market", "bm"] },
     { key: "flips", title: "Order flips: what to buy and relist", how: "Refined and raw resources (T4 to T8, .0 to .2), crops, herbs and common T4 to T6 gear in every city. Profit is the cheapest listing minus the top buy order after the 2.5% fee on both orders and the 4% tax. Ranked by that profit times a fifth of the daily sales, the share you can realistically fill. Items selling fewer than 5 a day are dropped.",
-      run: () => ABP.advisor.flips(), line: (r) => `${full(r.profit)} each · ${pct(r.margin, 0)} · in ${r.city}`, name: (r) => r.label },
+      run: () => ABP.advisor.flips(),
+      legs: (r) => [{ role: "buy", id: r.id, city: r.city, what: "via buy orders" }, { role: "sell", id: r.id, city: r.city, what: "your relist" }], line: (r) => `${full(r.profit)} each · ${pct(r.margin, 0)} · in ${r.city}`, name: (r) => r.label },
     { key: "journals", title: "Journals: which to fill", how: "Full journal sell price minus empty journal cost, after fees, in the best cities. Weighed down when fewer than 3 full journals sell per day.",
-      run: () => ABP.advisor.journals(), line: (r) => `${full(r.profit)} per journal`, name: (r) => r.label },
+      run: () => ABP.advisor.journals(),
+      legs: (r) => [{ role: "sell", id: r.id, city: r.full.city, what: "full journals" }, { role: "buy", id: r.id.replace(/_FULL$/, "_EMPTY"), city: r.empty.city, what: "empty journals" }], line: (r) => `${full(r.profit)} per journal`, name: (r) => r.label },
   ];
   const STATIC_WHY = {
     crops: "Without live prices: higher tiers sell for more per plant but need more Farming spec, and herbs feed potion makers so their demand is steadier than most crops. Plant the highest tier you can farm whose daily sales are at least twice your harvest.",
@@ -1497,7 +1530,7 @@
     await Promise.all(PICKS.map(loadPick));
     if (!btn.isConnected) return;
     btn.disabled = false;
-    time.textContent = "Updated " + new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    time.textContent = `Updated ${vanTime(new Date())} Vancouver time`;
   }
   async function loadPick(k) {
     const body = $(`#pk-${k.key} .pick-body`);
@@ -1514,8 +1547,12 @@
           <h4>${esc(k.name(top))}</h4>
           <p class="pick-line">${esc(k.line(top))}</p>
           <ul class="why">${top.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+          <div class="pick-time small"><span class="muted">Checking the best time of day…</span></div>
         </div>
         <ol class="runners" start="2">${rest.slice(0, 4).map((r) => `<li><details><summary><strong>${esc(k.name(r))}</strong> <span class="muted small">${esc(k.line(r))}</span></summary><ul class="why">${r.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details></li>`).join("")}</ol>`;
+      const legs = await timeLegs(k.legs(top));
+      if (gen !== pickGen[k.key] || !body.isConnected) return;
+      body.querySelector(".pick-time").innerHTML = timeHtml(legs);
     } catch (e) {
       if (gen !== pickGen[k.key] || !body.isConnected) return;
       body.innerHTML = `<div class="notice"><strong>${esc(e.message)}</strong><p class="small">${esc(STATIC_WHY[k.key])}</p></div>`;
@@ -1757,6 +1794,11 @@
           <div id="tm-miles"></div>
         </div>
       </div>
+      <div class="box stack" id="strattimes">
+        <div class="row spread"><h3>Best times by strategy</h3><button class="btn" type="button" id="st-go">Check every strategy</button></div>
+        <p class="small muted">Takes today's top pick for each strategy from Best picks and runs the test below on every buy and sell step. An hour only shows when it beat the day's average by more than the noise on most of the last week's days; otherwise it says any time is fine.</p>
+        <div id="st-out"></div>
+      </div>
       <div class="box stack" id="besthours">
         <h3>Best hours to buy and sell</h3>
         <p class="small muted">This checks whether the time of day really changes the price. It takes the last week of hourly sales, compares each hour with that day's average so a rising or falling market doesn't skew it, and only calls an hour better when the gap is bigger than the day-to-day noise and shows up on most days.</p>
@@ -1795,6 +1837,7 @@
     $("#bh-custom").addEventListener("change", (e) => { bh.custom = e.target.value.trim().toUpperCase(); store.set("besthours", bh); });
     $("#bh-city").addEventListener("change", (e) => { bh.city = e.target.value; store.set("besthours", bh); });
     $("#bh-go").addEventListener("click", bestHours);
+    $("#st-go").addEventListener("click", strategyTimes);
     syncBh();
     drawTimes();
   }
@@ -1875,6 +1918,29 @@
     const sig = (s, dir) => s && (dir > 0 ? s.mean - 1 > 2 * s.se && s.aboveShare >= 0.6 : 1 - s.mean > 2 * s.se && s.aboveShare <= 0.4);
     const high = ok.slice().sort((a, b) => b.mean - a.mean)[0], low = ok.slice().sort((a, b) => a.mean - b.mean)[0];
     return { stats, days, totalVol, high, low, highSig: sig(high, 1) && high.mean - 1 >= 0.01, lowSig: sig(low, -1) && 1 - low.mean >= 0.01 };
+  }
+  async function strategyTimes() {
+    const out = $("#st-out"), btn = $("#st-go");
+    btn.disabled = true; out.innerHTML = `<p class="small muted">Finding today's top picks and a week of hourly sales for each…</p>`;
+    const goldLegs = async () => {
+      try {
+        const pts = (await ABP.api.gold(24 * 14)).map((r) => ({ t: new Date(r.timestamp + (r.timestamp.endsWith("Z") ? "" : "Z")), price: r.price, count: 1 }));
+        const eff = hourEffect(pts);
+        return [{ role: "buy", what: "gold", city: "the gold market", eff }, { role: "sell", what: "gold", city: "the gold market", eff }];
+      } catch (e) { return [{ role: "buy", what: "gold", err: e.message }, { role: "sell", what: "gold", err: e.message }]; }
+    };
+    const rows = await Promise.all([...PICKS.map(async (k) => {
+      try {
+        const { rows } = await k.run();
+        if (!rows.length) return { title: k.title, name: "Nothing profitable right now", legs: [] };
+        return { title: k.title, name: k.name(rows[0]), legs: await timeLegs(k.legs(rows[0])) };
+      } catch (e) { return { title: k.title, name: e.message, legs: [] }; }
+    }), goldLegs().then((legs) => ({ title: "Gold: buying or selling", name: "Gold", legs }))]);
+    if (!out.isConnected) return;
+    btn.disabled = false;
+    const cell = (l) => { if (!l) return "–"; const v = legVerdict(l); return v.ok ? `<strong>${esc(hourLabel(v.h))}</strong><br><span class="small muted">${esc(v.text.replace(/^around \S+ \S+ /, ""))}</span>` : `<span class="small muted">${esc(v.text)}</span>`; };
+    out.innerHTML = `<div class="table-wrap"><table class="st-table"><thead><tr><th>Strategy</th><th>Today's pick</th><th>Best time to buy</th><th>Best time to sell</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.title.split(":")[0])}</td><td>${esc(r.name)}</td><td>${cell(r.legs.find((l) => l.role === "buy"))}</td><td>${cell(r.legs.find((l) => l.role === "sell"))}</td></tr>`).join("")}</tbody></table></div>
+      <p class="small muted">Checked ${vanTime(new Date())} Vancouver time. Hours are in Vancouver time. Busy items give clearer answers; thin markets usually say any time.</p>`;
   }
   async function bestHours() {
     const t = bhTarget(), out = $("#bh-out");
@@ -2291,10 +2357,10 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#pace").hidden) closePace(); });
 
   /* ---------- Refresh everything: header button and pull down at the top of the page ---------- */
-  let refreshing = false;
+  let refreshing = false, lastRefresh = Date.now();
   async function refreshAll() {
     if (refreshing) return;
-    refreshing = true;
+    refreshing = true; lastRefresh = Date.now();
     const btn = $("#refreshAll"); btn.disabled = true; btn.textContent = "Refreshing…";
     ABP.api.clearCache();
     const cur = TABS.find((t) => !$("#panel-" + t).hidden) || "plan";
@@ -2315,6 +2381,8 @@
     clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("on"), 2200);
   }
   $("#refreshAll").addEventListener("click", refreshAll);
+  /* Coming back to the app after 15 minutes or more refreshes everything, so what's on screen is never old prices. */
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - lastRefresh > 15 * 60 * 1000) refreshAll(); });
   (() => {
     let y0 = null, x0 = 0, dy = 0;
     const pull = document.createElement("div"); pull.className = "pull"; pull.textContent = "Pull to refresh"; document.body.appendChild(pull);

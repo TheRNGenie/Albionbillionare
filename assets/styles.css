@@ -421,3 +421,7 @@ tr.on td { background: var(--gold-soft); }
 @media (min-width: 1900px) { .wrap { max-width: 1640px; } }
 /* With a mouse there's no swipe, so let the tab bar wrap instead of hiding tabs off the edge */
 @media (min-width: 1000px) and (hover: hover) { .tabs { flex-wrap: wrap; overflow-x: visible; row-gap: 0; gap: 0; } .tabs button { padding-inline: 9px; letter-spacing: 0.05em; } }
+.st-table th, .st-table td { white-space: normal; text-align: left; vertical-align: top; }
+.st-table td:nth-child(3), .st-table td:nth-child(4) { min-width: 150px; }
+.pick-time { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.pick-time .why { margin-top: 4px; }
