@@ -676,3 +676,43 @@ ABP.TIMES = {
     { label: "AlbionZVZ downtime monitor (Asia downtime starts about 23:00 UTC)", url: "https://www.albionzvz.com/albion-downtime" },
   ],
 };
+
+/* ---------- Resource return by place (official wiki, "Resource return rate") ----------
+   Return = production bonus / (1 + bonus). Royal cities give 18% (15.2% back); a city's refining bonus
+   lifts that to 36.7%, its crafting bonus to 24.8%; focus adds about 59 points. Islands have no base bonus. */
+ABP.RETURN = {
+  source: "https://wiki.albiononline.com/wiki/Resource_return_rate",
+  city: { none: 0.152, focus: 0.435 },
+  refineBonus: { none: 0.367, focus: 0.539 },
+  craftBonus: { none: 0.248, focus: 0.479 },
+  island: { none: 0, focus: 0.371 },
+};
+/* Which city boosts which crafting category (shop subcategory from Albion's item data). */
+ABP.CRAFT_CITY = {
+  crossbow: "Bridgewatch", dagger: "Bridgewatch", cursestaff: "Bridgewatch", plate_armor: "Bridgewatch", cloth_shoes: "Bridgewatch",
+  hammer: "Fort Sterling", spear: "Fort Sterling", holystaff: "Fort Sterling", plate_helmet: "Fort Sterling", cloth_armor: "Fort Sterling",
+  sword: "Lymhurst", bow: "Lymhurst", arcanestaff: "Lymhurst", leather_helmet: "Lymhurst", leather_shoes: "Lymhurst",
+  axe: "Martlock", quarterstaff: "Martlock", froststaff: "Martlock", plate_shoes: "Martlock", booktype: "Martlock", shieldtype: "Martlock", torchtype: "Martlock",
+  mace: "Thetford", naturestaff: "Thetford", firestaff: "Thetford", leather_armor: "Thetford", cloth_helmet: "Thetford",
+  knuckles: "Caerleon", shapeshifterstaff: "Caerleon", food: "Caerleon", fiber: "Caerleon", fish: "Caerleon", hide: "Caerleon", ore: "Caerleon", rock: "Caerleon", wood: "Caerleon", tracking: "Caerleon",
+  bags: "Brecilien", satchels: "Brecilien", potions: "Brecilien",
+};
+
+/* ---------- Laborers (official wiki, "Laborer") ----------
+   A laborer needs 100 happiness per journal tier for 100% yield; each point above adds 0.5%, up to +50%.
+   Returns take 22 hours. What each full journal brings back comes from assets/data/laborers.json. */
+ABP.LABORERS = {
+  source: "https://wiki.albiononline.com/wiki/Laborer",
+  hours: 22,
+  types: [
+    { key: "WOOD", name: "Lumberjack" }, { key: "STONE", name: "Stonecutter" }, { key: "ORE", name: "Prospector" },
+    { key: "FIBER", name: "Cropper" }, { key: "HIDE", name: "Gamekeeper" }, { key: "FISHING", name: "Fisherman" },
+    { key: "WARRIOR", name: "Blacksmith" }, { key: "HUNTER", name: "Fletcher" }, { key: "MAGE", name: "Imbuer" },
+    { key: "TOOLMAKER", name: "Tinker" }, { key: "MERCENARY", name: "Mercenary" },
+  ],
+};
+ABP.laborerYield = (happiness, tier) => {
+  const need = 100 * tier;
+  if (happiness >= need) return Math.min(1.5, 1 + 0.005 * (happiness - need));
+  return Math.max(0, happiness / need); /* the wiki says yield is penalized below this but gives no scale; this assumes a straight line */
+};

@@ -1,8 +1,11 @@
 // Albion Billionaire for Windows: an Electron window around the same web app the Android build uses.
 // The app is served from inside the package on app://albion, so it never contacts GitHub;
 // the only network calls are the Albion price and player APIs (plus Google Fonts for the lettering).
-const { app, BrowserWindow, protocol, net, session, shell, Menu } = require("electron");
+const { app, BrowserWindow, protocol, net, session, shell, Menu, ipcMain, dialog } = require("electron");
 const path = require("node:path");
+const fs = require("node:fs");
+const http = require("node:http");
+const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 
 const WEB = path.join(__dirname, "..", "www");
@@ -37,6 +40,115 @@ function allowGameinfo() {
   );
 }
 
+/* ---------- Albion Data Client link ----------
+   The official client can send what it captures to extra "private" addresses with -p, on top of its normal
+   upload to the public project (-i, untouched). We listen on this PC only and keep the newest order prices. */
+const PORT = 47811;
+const INGEST = `http://127.0.0.1:${PORT}`;
+const CITY = { "0007": "Thetford", "1002": "Lymhurst", "2004": "Bridgewatch", "3003": "Black Market", "3005": "Caerleon", "3008": "Martlock", "4002": "Fort Sterling", "5003": "Brecilien" };
+const local = { prices: new Map(), received: 0, lastAt: 0, listening: false, error: null, child: null, gold: null };
+const storeFile = () => path.join(app.getPath("userData"), "data-client-prices.json");
+function loadLocal() {
+  try {
+    const rows = JSON.parse(fs.readFileSync(storeFile(), "utf8"));
+    const cutoff = Date.now() - 48 * 3600e3;
+    for (const [k, v] of rows) if (Math.max(v.sellAt || 0, v.buyAt || 0) > cutoff) local.prices.set(k, v);
+  } catch (e) { /* first run */ }
+}
+let saveTimer = null;
+function saveLocal() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { try { fs.writeFileSync(storeFile(), JSON.stringify([...local.prices])); } catch (e) { /* disk full or locked */ } }, 5000);
+}
+function cityOf(loc) {
+  const id = String(loc ?? "").split("-")[0].padStart(4, "0");
+  if (CITY[id]) return CITY[id];
+  if (id === "3013") return "Caerleon"; /* Caerleon's second market */
+  return null; /* portals, rests and smugglers' dens are separate markets */
+}
+function takeOrders(body) {
+  const orders = (body && body.Orders) || [];
+  const batch = new Map();
+  for (const o of orders) {
+    const city = cityOf(o.LocationId);
+    if (!city || !o.ItemTypeId || !o.UnitPriceSilver) continue;
+    const lvl = +o.EnchantmentLevel || 0;
+    const id = lvl && !o.ItemTypeId.includes("@") ? `${o.ItemTypeId}@${lvl}` : o.ItemTypeId;
+    const key = `${id}|${city}|${o.QualityLevel || 1}`;
+    const price = o.UnitPriceSilver / 10000; /* the game counts in ten-thousandths of a silver */
+    const b = batch.get(key) || { sell: null, buy: null };
+    if (o.AuctionType === "offer") b.sell = b.sell == null ? price : Math.min(b.sell, price);
+    else if (o.AuctionType === "request") b.buy = b.buy == null ? price : Math.max(b.buy, price);
+    batch.set(key, b);
+  }
+  const now = Date.now();
+  for (const [key, b] of batch) {
+    const cur = local.prices.get(key) || {};
+    if (b.sell != null) { cur.sell = b.sell; cur.sellAt = now; }
+    if (b.buy != null) { cur.buy = b.buy; cur.buyAt = now; }
+    local.prices.set(key, cur);
+  }
+  if (batch.size) { local.received += batch.size; local.lastAt = now; saveLocal(); }
+}
+function startIngest() {
+  const server = http.createServer((req, res) => {
+    if (req.method !== "POST") { res.writeHead(200); res.end("Albion Billionaire is listening"); return; }
+    let size = 0; const chunks = [];
+    req.on("data", (c) => { size += c.length; if (size > 20e6) req.destroy(); else chunks.push(c); });
+    req.on("end", () => {
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        if (req.url.startsWith("/marketorders.ingest")) takeOrders(body);
+        else if (req.url.startsWith("/goldprices.ingest") && body.Prices?.length) local.gold = { price: body.Prices[body.Prices.length - 1] / 10000, at: Date.now() };
+      } catch (e) { /* ignore bad uploads */ }
+      res.writeHead(200); res.end("ok");
+    });
+  });
+  server.on("error", (e) => { local.error = e.code === "EADDRINUSE" ? `Port ${PORT} is already in use. Close other copies of the app.` : e.message; local.listening = false; });
+  server.listen(PORT, "127.0.0.1", () => { local.listening = true; local.error = null; });
+}
+const CLIENT_PATHS = () => [
+  path.join(process.env.ProgramFiles || "C:\\Program Files", "Albion Data Client", "albiondata-client.exe"),
+  path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Albion Data Client", "albiondata-client.exe"),
+  path.join(process.env.LOCALAPPDATA || "", "Programs", "Albion Data Client", "albiondata-client.exe"),
+];
+let clientPath = null;
+function findClient() {
+  try { const saved = fs.readFileSync(path.join(app.getPath("userData"), "data-client-path.txt"), "utf8").trim(); if (saved && fs.existsSync(saved)) return saved; } catch (e) { /* none saved */ }
+  return CLIENT_PATHS().find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } }) || null;
+}
+function launchClient(exe) {
+  if (local.child && local.child.exitCode == null) return { ok: true, already: true };
+  try {
+    /* -p adds our private address; the public upload (-i default) carries on as normal. */
+    local.child = spawn(exe, ["-p", INGEST, "-minimize"], { cwd: path.dirname(exe), detached: false, windowsHide: false });
+    local.child.on("exit", () => { local.child = null; });
+    local.child.on("error", (e) => { local.error = "Couldn't start the Data Client: " + e.message; local.child = null; });
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+function setupIpc() {
+  ipcMain.handle("dc:status", () => ({ listening: local.listening, error: local.error, ingest: INGEST, received: local.received, lastAt: local.lastAt, count: local.prices.size, running: !!(local.child && local.child.exitCode == null), clientPath: clientPath || (clientPath = findClient()), gold: local.gold }));
+  ipcMain.handle("dc:prices", (e, ids, cities, qualities) => {
+    const out = [];
+    for (const id of ids || []) for (const c of cities || []) for (const q of qualities || [1]) {
+      const v = local.prices.get(`${id}|${c}|${q}`);
+      if (v) out.push({ id, city: c, quality: q, ...v });
+    }
+    return out;
+  });
+  ipcMain.handle("dc:start", async (e, pick) => {
+    let exe = pick ? null : clientPath || (clientPath = findClient());
+    if (!exe) {
+      const r = await dialog.showOpenDialog({ title: "Find albiondata-client.exe", filters: [{ name: "Albion Data Client", extensions: ["exe"] }], properties: ["openFile"] });
+      if (r.canceled || !r.filePaths[0]) return { ok: false, error: "No file chosen." };
+      exe = clientPath = r.filePaths[0];
+      try { fs.writeFileSync(path.join(app.getPath("userData"), "data-client-path.txt"), exe); } catch (err) { /* keep in memory */ }
+    }
+    return launchClient(exe);
+  });
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1440, height: 940, minWidth: 900, minHeight: 600,
@@ -44,7 +156,7 @@ function createWindow() {
     title: "Albion Billionaire",
     icon: path.join(__dirname, "icon.png"),
     autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, sandbox: true, spellcheck: false },
+    webPreferences: { contextIsolation: true, sandbox: true, spellcheck: false, preload: path.join(__dirname, "preload.js") },
   });
   // Links (wiki, forum, sources) open in the normal browser, not inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -70,6 +182,14 @@ app.whenReady().then(() => {
   ]));
   serveApp();
   allowGameinfo();
+  loadLocal();
+  startIngest();
+  setupIpc();
   createWindow();
 });
 app.on("window-all-closed", () => app.quit());
+app.on("before-quit", () => {
+  try { fs.writeFileSync(storeFile(), JSON.stringify([...local.prices])); } catch (e) { /* ignore */ }
+  /* the Data Client keeps running if the user started it themselves; only stop the copy we launched */
+  if (local.child && local.child.exitCode == null) try { local.child.kill(); } catch (e) { /* already gone */ }
+});

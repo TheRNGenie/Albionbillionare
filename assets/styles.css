@@ -428,3 +428,11 @@ tr.on td { background: var(--gold-soft); }
 .toggle { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; font-weight: 600; background: var(--surface); }
 .toggle input { width: 18px; height: 18px; accent-color: var(--gold); margin: 0; }
 .toggle:has(input:checked) { border-color: var(--gold); color: var(--gold); background: var(--gold-soft); }
+.box-lite { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; background: var(--surface); }
+.box-lite > summary { cursor: pointer; }
+.box-lite[open] > summary { margin-bottom: 8px; }
+.remind { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 12px; display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; }
+.remind legend { padding: 0 4px; color: var(--muted); font-weight: 600; }
+.remind label { display: inline-flex; gap: 6px; align-items: center; }
+.remind input { accent-color: var(--gold); }
+#tm-miles td { white-space: normal; }

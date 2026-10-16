@@ -3,7 +3,8 @@
 Usage: python3 tools/build_recipes.py path/to/items.json
 Source: https://raw.githubusercontent.com/ao-data/ao-bin-dumps/master/items.json
 
-Output: {"v": <date>, "w": {base_id: weight_kg}, "r": {market_id: [focus, amount_crafted, [[market_id, count, no_return], ...]]}}
+Output: {"v": <date>, "w": {base_id: weight_kg}, "r": {market_id: [focus, amount_crafted, [[market_id, count, no_return], ...]]},
+         "c": {base_id: shop_subcategory}}  (the category decides which city gives the crafting bonus)
 Market ids follow the Albion Data Project form: T6_MAIN_SWORD@1, T5_PLANKS_LEVEL2@2.
 """
 import datetime
@@ -32,7 +33,7 @@ def recipe(cr):
 
 def main(path):
     items = json.load(open(path, encoding="utf-8"))["items"]
-    weights, recipes = {}, {}
+    weights, recipes, cats = {}, {}, {}
     for group, arr in items.items():
         if not isinstance(arr, list):
             continue
@@ -42,6 +43,8 @@ def main(path):
                 continue
             if it.get("@weight"):
                 weights[uid] = float(it["@weight"])
+            if it.get("craftingrequirements") and it.get("@shopsubcategory1"):
+                cats[uid] = it["@shopsubcategory1"]
             if group in ("furnitureitem", "mountskin", "journalitem", "labourercontract", "trackingitem", "rewardtoken", "killtrophy", "siegebanner", "crystalleagueitem"):
                 continue
             cr = it.get("craftingrequirements")
@@ -61,7 +64,7 @@ def main(path):
                         # Resources carry the level in the id (T5_PLANKS_LEVEL1@1); gear does not (T6_MAIN_SWORD@1).
                         key = f"{uid}_LEVEL{lvl}@{lvl}" if group == "simpleitem" else f"{uid}@{lvl}"
                         recipes[key] = r
-    out = {"v": datetime.date.today().isoformat(), "w": weights, "r": recipes}
+    out = {"v": datetime.date.today().isoformat(), "w": weights, "r": recipes, "c": cats}
     json.dump(out, open("assets/data/recipes.json", "w"), separators=(",", ":"))
     print(len(weights), "weights,", len(recipes), "recipes")
 

@@ -1580,7 +1580,7 @@
         <ol class="runners" start="2">${rest.slice(0, k.more || 4).map((r) => `<li><details><summary><strong>${esc(k.name(r))}</strong> <span class="muted small">${esc(k.line(r))}</span></summary><ul class="why">${r.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details></li>`).join("")}</ol>`;
       const legs = await timeLegs(k.legs(top), top.margin ?? null);
       if (gen !== pickGen[k.key] || !body.isConnected) return;
-      body.querySelector(".pick-time").innerHTML = timeHtml(legs);
+      body.querySelector(".pick-time").innerHTML = timeHtml(legs) + riskNote(legs);
     } catch (e) {
       if (gen !== pickGen[k.key] || !body.isConnected) return;
       body.innerHTML = `<div class="notice"><strong>${esc(e.message)}</strong><p class="small">${esc(STATIC_WHY[k.key])}</p></div>`;
@@ -1785,8 +1785,15 @@
   }
   setInterval(tickClock, 30000);
 
-  const timers = Object.assign({ planted: null, focus: null, focusAt: null, premiumStart: null }, store.get("timers", {}));
-  const saveTimers = () => store.set("timers", timers);
+  const timers = Object.assign({ planted: null, focus: null, focusAt: null, premiumStart: null, laborers: null, remind: { harvest: true, laborers: true, focus: true, reset: false } }, store.get("timers", {}));
+  const saveTimers = () => { store.set("timers", timers); scheduleReminders(); };
+  const ISLAND_DAILY = [
+    "Harvest and replant every plot",
+    "Collect laborer returns and hand in full journals",
+    "Spend focus before it reaches the 30,000 cap",
+    "Sell the harvest or turn it into food or feed",
+    "Check your buy and sell orders",
+  ];
   const bh = Object.assign({ preset: "crop", custom: "", city: "Caerleon" }, store.get("besthours", {}));
 
   function renderTimes() {
@@ -1810,9 +1817,22 @@
             <label class="field"><span>Island planted (hours ago)</span><input type="number" id="tm-planted" min="0" max="72" step="0.25" placeholder="0 = just now"></label>
             <div class="field"><span>&nbsp;</span><button class="btn ghost" type="button" id="tm-plant-now">Planted just now</button></div>
             <label class="field"><span>Focus you have now</span><input type="number" id="tm-focus" min="0" max="30000" step="100"></label>
+            <div class="field"><span>&nbsp;</span><button class="btn ghost" type="button" id="tm-lab-now">Laborers sent just now</button></div>
           </div>
+          <fieldset class="remind"><legend class="small">Phone or desktop reminders</legend>
+            <label><input type="checkbox" data-remind="harvest"> Crops ready</label>
+            <label><input type="checkbox" data-remind="laborers"> Laborers back</label>
+            <label><input type="checkbox" data-remind="focus"> Focus nearly full</label>
+            <label><input type="checkbox" data-remind="reset"> 30 min before server reset</label>
+          </fieldset>
+          <p class="small muted" id="tm-remind-note"></p>
           <div class="stats" id="tm-timers"></div>
           <p class="small muted">Crops and herbs are ready about ${ABP.TIMES.cropHours} hours after planting. Premium refills ${full(ABP.TIMES.focusPerDay)} focus a day up to ${full(ABP.TIMES.focusMax)}; focus that would go past the cap is wasted, so spend it before it fills.</p>
+        </div>
+        <div class="box stack">
+          <div class="row spread"><h3>Island checklist</h3><span class="small muted" id="tm-isl-day"></span></div>
+          <ul class="checklist" id="tm-island"></ul>
+          <p class="small muted">Ticks reset each day at midnight Vancouver time.</p>
         </div>
         <div class="box stack">
           <h3>Milestones</h3>
@@ -1847,6 +1867,22 @@
     $("#tm-planted").value = timers.planted ? +((Date.now() - timers.planted) / 36e5).toFixed(2) : "";
     $("#tm-planted").addEventListener("change", (e) => { timers.planted = e.target.value === "" ? null : Date.now() - (+e.target.value || 0) * 36e5; saveTimers(); drawTimes(); });
     $("#tm-plant-now").addEventListener("click", () => { timers.planted = Date.now(); $("#tm-planted").value = 0; saveTimers(); drawTimes(); });
+    $("#tm-lab-now").addEventListener("click", () => { timers.laborers = Date.now(); saveTimers(); drawTimes(); });
+    $$("[data-remind]").forEach((cb) => {
+      cb.checked = !!timers.remind[cb.dataset.remind];
+      cb.addEventListener("change", async () => {
+        timers.remind[cb.dataset.remind] = cb.checked;
+        if (cb.checked) await askNotifyPermission();
+        saveTimers(); drawTimes();
+      });
+    });
+    const islKey = "island." + vanKey(new Date());
+    const islDone = store.get(islKey, []);
+    $("#tm-isl-day").textContent = van(new Date(), { weekday: "long", month: "short", day: "numeric" });
+    $("#tm-island").innerHTML = ISLAND_DAILY.map((t, i) => `<li><label><input type="checkbox" data-isl="${i}" ${islDone.includes(i) ? "checked" : ""}><span>${esc(t)}</span></label></li>`).join("");
+    $$("[data-isl]").forEach((cb) => cb.addEventListener("change", () => {
+      const cur = new Set(store.get(islKey, [])); cb.checked ? cur.add(+cb.dataset.isl) : cur.delete(+cb.dataset.isl); store.set(islKey, [...cur]);
+    }));
     $("#tm-focus").value = timers.focus != null ? Math.round(focusNow()) : "";
     $("#tm-focus").addEventListener("change", (e) => { timers.focus = e.target.value === "" ? null : Math.max(0, Math.min(ABP.TIMES.focusMax, +e.target.value || 0)); timers.focusAt = Date.now(); saveTimers(); drawTimes(); });
     $("#tm-prem").value = timers.premiumStart || plan.date;
@@ -1892,6 +1928,12 @@
       const full_ = new Date(Date.now() + ((ABP.TIMES.focusMax - f) / ABP.TIMES.focusPerDay) * 864e5);
       cards.push(`<div class="stat ${f >= ABP.TIMES.focusMax ? "key" : ""}"><span class="label">Focus now</span><span class="v">${full(f)}</span><span class="small muted">${f >= ABP.TIMES.focusMax ? "Full: you are wasting regen" : `full ${vanDay(full_)}, ${vanTime(full_)}`}</span></div>`);
     }
+    if (timers.laborers) {
+      const back = new Date(timers.laborers + ABP.LABORERS.hours * 36e5);
+      cards.push(`<div class="stat ${back <= now ? "key" : ""}"><span class="label">Laborers</span><span class="v">${back <= now ? "Back" : until(back - now)}</span><span class="small muted">${back <= now ? "since " : ""}${vanDay(back)}, ${vanTime(back)}</span></div>`);
+    }
+    const nr = $("#tm-remind-note");
+    if (nr) { const list = upcomingReminders().filter((r) => r.at > Date.now()); nr.textContent = list.length ? "Next reminder: " + list.sort((a, b) => a.at - b.at).slice(0, 2).map((r) => `${r.title.toLowerCase()} at ${vanDay(new Date(r.at))}, ${vanTime(new Date(r.at))}`).join("; ") + "." : "No reminders waiting. Set a timer above and tick what you want to hear about."; }
     $("#tm-timers").innerHTML = cards.join("") || `<p class="small muted">Enter when you planted or how much focus you have and the countdowns appear here.</p>`;
     const prof = profileOf(plan.profile);
     const sim = simulate(prof, plan.start, plan.hours ?? prof.hours, plan.skill);
@@ -1999,6 +2041,40 @@
       <details><summary class="small">Table view</summary><div class="table-wrap"><table><thead><tr><th>Hour</th><th>Vs day average</th><th>± noise</th><th>Days above</th><th>Samples</th>${t.gold ? "" : "<th>Sold</th>"}</tr></thead><tbody>${eff.stats.filter((s) => s.mean != null).map((s) => `<tr><td>${hourLabel(s.h)}</td><td class="num">${pctOf(s.mean)}</td><td class="num">${(2 * s.se * 100).toFixed(1)}%</td><td class="num">${Math.round(s.aboveShare * 100)}%</td><td class="num">${s.n}</td>${t.gold ? "" : `<td class="num">${full(s.vol)}</td>`}</tr>`).join("")}</tbody></table></div></details>`;
   }
 
+  /* ---------- Reminders: scheduled phone notifications in the Android app, timers while open elsewhere ---------- */
+  const REMIND_IDS = { harvest: 7101, laborers: 7102, focus: 7103, reset: 7104 };
+  function upcomingReminders() {
+    const out = [], r = timers.remind || {};
+    if (r.harvest && timers.planted) out.push({ key: "harvest", at: timers.planted + ABP.TIMES.cropHours * 36e5, title: "Crops ready", body: "Your island is ready to harvest and replant." });
+    if (r.laborers && timers.laborers) out.push({ key: "laborers", at: timers.laborers + ABP.LABORERS.hours * 36e5, title: "Laborers back", body: "Collect their returns and hand in fresh journals." });
+    const f = focusNow();
+    if (r.focus && f != null) out.push({ key: "focus", at: Date.now() + Math.max(0, (ABP.TIMES.focusMax * 0.95 - f) / ABP.TIMES.focusPerDay) * 864e5, title: "Focus nearly full", body: "Spend it before it hits the cap and goes to waste." });
+    if (r.reset) { const ri = resetInfo(serverNow(), new Date()); if (!ri.down) out.push({ key: "reset", at: ri.at.getTime() - 30 * 6e4, title: "Server reset in 30 minutes", body: "Don't start a long transport or a dungeon now." }); }
+    return out;
+  }
+  async function askNotifyPermission() {
+    try {
+      if (isNative() && plugin("LocalNotifications")) { const p = await plugin("LocalNotifications").requestPermissions(); return p.display === "granted"; }
+      if ("Notification" in window && Notification.permission === "default") return (await Notification.requestPermission()) === "granted";
+      return "Notification" in window && Notification.permission === "granted";
+    } catch (e) { return false; }
+  }
+  const webReminders = [];
+  async function scheduleReminders() {
+    const list = upcomingReminders().filter((r) => r.at > Date.now() + 5000);
+    if (isNative() && plugin("LocalNotifications")) {
+      const LN = plugin("LocalNotifications");
+      try {
+        await LN.cancel({ notifications: Object.values(REMIND_IDS).map((id) => ({ id })) });
+        if (list.length) await LN.schedule({ notifications: list.map((r) => ({ id: REMIND_IDS[r.key], title: r.title, body: r.body, schedule: { at: new Date(r.at), allowWhileIdle: true } })) });
+      } catch (e) { /* notifications off */ }
+      return;
+    }
+    /* Desktop and browser: fire while the app is open (the Windows app keeps running in the background if minimised). */
+    webReminders.splice(0).forEach(clearTimeout);
+    for (const r of list) if (r.at - Date.now() < 2 ** 31 - 1) webReminders.push(setTimeout(() => { notify(r.title, r.body).then((ok) => { if (!ok) toast(r.title); }); }, r.at - Date.now()));
+  }
+
   /* ---------- Native helpers: the Android app (Capacitor) gets real notifications and file sharing ---------- */
   const isNative = () => !!window.Capacitor?.isNativePlatform?.();
   const plugin = (n) => (isNative() ? window.Capacitor.Plugins?.[n] || window.Capacitor.registerPlugin?.(n) : null);
@@ -2038,6 +2114,12 @@
     if (!recipesP) recipesP = fetch("assets/data/recipes.json").then((r) => { if (!r.ok) throw new Error("Recipe data did not load."); return r.json(); }).catch((e) => { recipesP = null; throw e; });
     return recipesP;
   }
+  let laborersP = null;
+  function laborerData() {
+    if (window.ABP_LABORERS) return Promise.resolve(window.ABP_LABORERS);
+    if (!laborersP) laborersP = fetch("assets/data/laborers.json").then((r) => { if (!r.ok) throw new Error("Laborer data did not load."); return r.json(); }).catch((e) => { laborersP = null; throw e; });
+    return laborersP;
+  }
   const weightOf = (R, id) => R.w[id.split("@")[0]] ?? null;
 
   /* Item picker shared by the tools: name search with an id fallback. */
@@ -2065,6 +2147,18 @@
 
   /* ---------- Tools tab: haul planner, crafting shopping list, backup ---------- */
   const haul = Object.assign({ id: "T5_PLANKS", from: "Fort Sterling", to: "Caerleon", buyMode: "instant", sellMode: "order", cap: 1000, budget: 10000000, quality: 1 }, store.get("haul", {}));
+  const fb = Object.assign({ focus: null, crafts: "T6_MAIN_SWORD, T5_BAG", otherName: "Island (farming with focus)", otherFocus: 0, otherSilver: 0, otherTimes: 0 }, store.get("focusplan", {}));
+  const LOSS_KINDS = ["Black Market or Caerleon haul", "Brecilien or the Mists", "Open-world gathering", "Dungeons, Avalon or PvP", "Other"];
+  let losses = Object.assign({ log: [], trips: {} }, store.get("losses", {}));
+  const saveLosses = () => store.set("losses", losses);
+  function lossStats() {
+    const by = {};
+    for (const k of LOSS_KINDS) by[k] = { kind: k, trips: losses.trips[k] || 0, lost: 0, deaths: 0 };
+    for (const l of losses.log) { const b = by[l.kind] || (by[l.kind] = { kind: l.kind, trips: 0, lost: 0, deaths: 0 }); b.lost += l.value; b.deaths++; }
+    Object.values(by).forEach((b) => { b.perTrip = b.trips ? b.lost / b.trips : null; b.rate = b.trips ? b.deaths / b.trips : null; });
+    return by;
+  }
+  const lab = Object.assign({ happiness: 700, maxTier: 8, count: 3 }, store.get("laborers", {}));
   const safeSt = Object.assign({ id: "T5_PLANKS", city: "Fort Sterling", margin: null }, store.get("safe", {}));
   const shop = Object.assign({ id: "T6_MAIN_SWORD", ench: 0, qty: 10, rr: 0, craftCity: "Lymhurst" }, store.get("shop", {}));
   const cityOpts = (cur, withBM) => ABP.CITIES.concat(withBM ? [ABP.BM] : []).map((c) => `<option ${c === cur ? "selected" : ""}>${c}</option>`).join("");
@@ -2075,6 +2169,150 @@
     return { level: "Low", text: "Royal cities link through blue and yellow zones. Taking that path, you cannot lose your cargo." };
   }
 
+  function drawLosses() {
+    const st = lossStats();
+    $("#ls-trips").innerHTML = `<span class="small muted">Count a finished run (lost or not):</span>` + LOSS_KINDS.map((k) => `<button class="chip" type="button" data-trip="${esc(k)}">+1 ${esc(k.split(" ")[0] === "Black" ? "BM/Caerleon" : k.split(",")[0].split(" or ")[0])} <small>(${st[k].trips})</small></button>`).join("");
+    $$("[data-trip]").forEach((b) => b.addEventListener("click", () => { losses.trips[b.dataset.trip] = (losses.trips[b.dataset.trip] || 0) + 1; saveLosses(); drawLosses(); rendered.picks = false; }));
+    const rows = Object.values(st).filter((b) => b.trips || b.lost);
+    const total = losses.log.reduce((a, l) => a + l.value, 0);
+    const month = losses.log.filter((l) => l.date.slice(0, 7) === todayISO().slice(0, 7)).reduce((a, l) => a + l.value, 0);
+    $("#ls-out").innerHTML = rows.length ? `
+      <div class="stats">
+        <div class="stat key"><span class="label">Lost in total</span><span class="v money">${fmt(total)}</span><span class="small muted">${losses.log.length} loss${losses.log.length === 1 ? "" : "es"} logged</span></div>
+        <div class="stat"><span class="label">This month</span><span class="v">${fmt(month)}</span><span class="small muted">${van(new Date(), { month: "long" })}</span></div>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Where</th><th>Runs</th><th>Times lost</th><th>Lost</th><th>Average per run</th></tr></thead><tbody>${rows.map((b) => `<tr><td>${esc(b.kind)}</td><td class="num">${full(b.trips)}</td><td class="num">${full(b.deaths)}${b.rate != null ? ` <small class="muted">(${pct(b.rate, 0)})</small>` : ""}</td><td class="num">${full(b.lost)}</td><td class="num money">${b.perTrip != null ? full(b.perTrip) : "count your runs"}</td></tr>`).join("")}</tbody></table></div>
+      <details><summary class="small">Every loss</summary><div class="table-wrap"><table><thead><tr><th>Date</th><th>Where</th><th>What</th><th>Value</th><th></th></tr></thead><tbody>${losses.log.slice().reverse().map((l, i) => `<tr><td>${esc(l.date)}</td><td>${esc(l.kind)}</td><td>${esc(l.what)}</td><td class="num">${full(l.value)}</td><td><button class="btn ghost small" type="button" data-rmloss="${losses.log.length - 1 - i}">Remove</button></td></tr>`).join("")}</tbody></table></div></details>` : `<p class="small muted">Nothing logged yet. Count each risky run with the buttons above, and log a loss when it happens.</p>`;
+    $$("[data-rmloss]").forEach((b) => b.addEventListener("click", () => { losses.log.splice(+b.dataset.rmloss, 1); saveLosses(); drawLosses(); rendered.picks = false; }));
+  }
+  /* Average loss per run for a pick that crosses dangerous ground, from the user's own loss log. */
+  function riskNote(legs) {
+    const risky = legs.some((l) => ["Caerleon", ABP.BM].includes(l.city)) ? "Black Market or Caerleon haul" : legs.some((l) => l.city === "Brecilien") ? "Brecilien or the Mists" : null;
+    if (!risky) return "";
+    const b = lossStats()[risky];
+    if (!b.trips) return `<p class="muted">This trip crosses dangerous zones. Log your runs and losses under Tools → Loss budget and the app will show your real cost per trip here.</p>`;
+    return `<p><strong>Your loss budget:</strong> ${full(b.lost)} lost over ${full(b.trips)} ${esc(risky.toLowerCase())} run${b.trips === 1 ? "" : "s"}, about <strong>${full(b.perTrip)} a run</strong>. Take that off each trip's profit before comparing with Safe Options.</p>`;
+  }
+  let dcTimer = null;
+  async function dcStatus() {
+    let st; try { st = await window.albionDesktop.status(); } catch (e) { return; }
+    const el = $("#dc-state"); if (!el) return;
+    $("#dc-flag").textContent = "-p " + st.ingest;
+    const fresh = st.lastAt && Date.now() - st.lastAt < 15 * 60 * 1000;
+    el.className = "small " + (st.error ? "bad" : fresh ? "good" : "muted");
+    el.textContent = st.error ? st.error : !st.listening ? "Starting the link…" : fresh ? `Live: last prices ${agoText((Date.now() - st.lastAt) / 36e5)}, ${full(st.count)} saved` : st.received ? `Linked, nothing new for a while (${full(st.count)} saved)` : st.running ? "Client running; open a market in-game" : "Waiting for the Data Client";
+    $("#dc-start").textContent = st.running ? "Data Client is running" : "Start the Data Client linked";
+    $("#dc-start").disabled = st.running;
+  }
+  async function focusPlan() {
+    const out = $("#fb-out");
+    const budget = Math.max(0, +$("#fb-focus").value || 0);
+    out.innerHTML = `<p class="small muted">Pricing refines and crafts…</p>`;
+    const uses = [];
+    try {
+      const { rows } = await ABP.advisor.refining();
+      rows.slice(0, 12).forEach((x) => {
+        const gain = x.pF - Math.max(0, x.pNo);
+        if (gain <= 0) return;
+        uses.push({ kind: "Refine", name: `${x.label}`, where: x.city, focusEach: x.fc, gainEach: gain, cap: x.perDay == null ? Math.floor(x.perFocus * 0.3) : Math.floor(x.perDay * 0.5), unit: "refines",
+          note: x.pNo > 0 ? "pays without focus too; focus adds the extra return" : "only pays with focus" });
+      });
+    } catch (e) { uses.push({ error: "Refining prices didn't load: " + e.message }); }
+    const ids = String(fb.crafts || "").split(",").map((x) => x.trim().toUpperCase()).filter((x) => /^T\d_/.test(x));
+    if (ids.length) {
+      try {
+        const R = await recipes();
+        const matIds = new Set(ids);
+        ids.forEach((id) => (R.r[id]?.[2] || []).forEach((m) => matIds.add(m[0])));
+        const idx = ABP.api.index(await ABP.api.prices([...matIds], ABP.CITIES));
+        let vol = {};
+        try { vol = await ABP.api.volumes(ids, ABP.CITIES); } catch (e) { /* no caps */ }
+        const eff = ABP.spec.craft.mastery * 30 + ABP.spec.craft.others * 30 + ABP.spec.craft.item * 280;
+        for (const id of ids) {
+          const rec = R.r[id];
+          if (!rec) { uses.push({ error: `No recipe for ${id}.` }); continue; }
+          const [baseFocus, made, mats] = rec;
+          const b = bonusCityOf(R, id);
+          const rates = b.city ? (b.kind === "refine" ? ABP.RETURN.refineBonus : ABP.RETURN.craftBonus) : ABP.RETURN.city;
+          let matCost = 0, ok = true;
+          for (const [m, count, noRet] of mats) {
+            let lo = null; for (const c of ABP.CITIES) { const r = idx[m]?.[c]; if (r?.sell && (!lo || r.sell < lo)) lo = r.sell; }
+            if (!lo) { ok = false; break; }
+            if (!noRet) matCost += lo * count;
+          }
+          if (!ok) { uses.push({ error: `Some materials for ${itemLabel(id)} have no price.` }); continue; }
+          const gain = matCost * (rates.focus - rates.none);
+          const fc = ABP.focusCost(baseFocus, eff);
+          const perDay = Math.max(0, ...Object.values(vol[id] || {}).map((v) => v.perDay || 0));
+          uses.push({ kind: "Craft", name: itemLabel(id), where: b.city || "any royal city", focusEach: fc, gainEach: gain, cap: perDay ? Math.max(1, Math.floor(perDay * 0.25 / made)) : 10, unit: "crafts",
+            note: `focus raises returns from ${pct(rates.none)} to ${pct(rates.focus)}${b.city ? " in its bonus city" : ""}` });
+        }
+      } catch (e) { uses.push({ error: "Crafting prices didn't load: " + e.message }); }
+    }
+    if (fb.otherFocus > 0 && fb.otherSilver > 0) uses.push({ kind: "Other", name: fb.otherName || "Other", where: "", focusEach: fb.otherFocus, gainEach: fb.otherSilver, cap: fb.otherTimes > 0 ? fb.otherTimes : Infinity, unit: "times", note: "your own numbers" });
+    const valid = uses.filter((u) => !u.error && u.focusEach > 0 && u.gainEach > 0).map((u) => ({ ...u, spf: u.gainEach / u.focusEach }));
+    valid.sort((a, b) => b.spf - a.spf);
+    let left = budget; const plan = [];
+    for (const u of valid) {
+      if (left < u.focusEach) continue;
+      const n = Math.min(u.cap, Math.floor(left / u.focusEach));
+      if (n <= 0) continue;
+      plan.push({ ...u, n, focus: n * u.focusEach, silver: n * u.gainEach });
+      left -= n * u.focusEach;
+    }
+    const total = plan.reduce((a, p) => a + p.silver, 0);
+    const errs = uses.filter((u) => u.error).map((u) => u.error);
+    out.innerHTML = plan.length ? `
+      <div class="stats">
+        <div class="stat key"><span class="label">Extra silver from focus</span><span class="v money">${fmt(total)}</span><span class="small muted">from ${full(budget - left)} of ${full(budget)} focus</span></div>
+        <div class="stat"><span class="label">Silver per focus</span><span class="v">${(total / Math.max(1, budget - left)).toFixed(1)}</span><span class="small muted">average across the plan</span></div>
+        <div class="stat"><span class="label">Left over</span><span class="v">${full(left)}</span><span class="small muted">${left > 500 ? "markets are full; spend the rest on the next best or save it" : "all spent"}</span></div>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Use</th><th>Where</th><th>How many</th><th>Focus</th><th>Silver per focus</th><th>Extra silver</th></tr></thead><tbody>${plan.map((p) => `
+        <tr><td>${esc(p.kind)}: ${esc(p.name)}<br><small class="muted">${esc(p.note)}</small></td><td>${esc(p.where)}</td><td class="num">${full(p.n)} ${esc(p.n === 1 ? p.unit.replace(/s$/, "") : p.unit)}${p.n >= p.cap ? `<br><small class="muted">market cap</small>` : ""}</td><td class="num">${full(p.focus)}</td><td class="num">${p.spf.toFixed(1)}</td><td class="num money">${full(p.silver)}</td></tr>`).join("")}</tbody></table></div>
+      <p class="small muted">"Extra silver" is what focus adds over doing the same work without it. Refine caps are half a day's sales of the output; craft caps a quarter. Focus costs use your spec from Calculators → Your spec.</p>
+      ${errs.length ? `<p class="small muted">${errs.map(esc).join(" ")}</p>` : ""}` : `<p class="small">Nothing to plan yet. ${errs.map(esc).join(" ") || "Enter your focus and at least one craft, or check that prices load."}</p>`;
+  }
+  async function laborerPlan() {
+    const out = $("#lb-out");
+    out.innerHTML = `<p class="small muted">Pricing every journal and what it returns…</p>`;
+    let L;
+    try { L = await laborerData(); } catch (e) { out.innerHTML = `<p class="small">${esc(e.message)}</p>`; return; }
+    const journals = Object.entries(L).filter(([, j]) => j.t >= 3 && j.t <= lab.maxTier);
+    const ids = new Set();
+    journals.forEach(([id, j]) => { ids.add(id + "_FULL"); j.loot.forEach((l) => ids.add(l[0])); });
+    const cities = ABP.advisor.safeOnly ? ABP.CITIES.filter((c) => !ABP.advisor.UNSAFE.includes(c)) : ABP.CITIES;
+    let idx;
+    try { idx = ABP.api.index(await ABP.api.prices([...ids], cities)); } catch (e) { out.innerHTML = `<p class="small">${esc(e.message)}</p>`; return; }
+    const keep = 1 - FEES.salesTaxPremium - FEES.setupFee;
+    const best = (id, dir) => { let b = null; for (const c of cities) { const r = idx[id]?.[c]; if (r?.sell && (!b || (dir > 0 ? r.sell > b.sell : r.sell < b.sell))) b = { city: c, sell: r.sell }; } return b; };
+    const rows = journals.map(([id, j]) => {
+      const y = ABP.laborerYield(lab.happiness, j.t);
+      let value = 0, priced = 0, wsum = 0, top = null;
+      if (j.silver) { value = j.silver * j.n * y; priced = 1; wsum = 1; }
+      else for (const [item, amt, w] of j.loot) {
+        wsum += w; const p = best(item, 1);
+        if (p) { value += (w * amt * p.sell * keep); priced += w; if (!top || w > top.w) top = { item, w, city: p.city }; }
+      }
+      if (!j.silver) value = priced ? (value / priced) * j.n * y : 0;
+      const full = best(id + "_FULL", -1), sellFull = best(id + "_FULL", 1);
+      const type = ABP.LABORERS.types.find((t) => id.endsWith("_" + t.key));
+      return { id, t: j.t, name: `T${j.t} ${type?.name || id}`, y, value, coverage: wsum ? priced / wsum : 0, buy: full, sell: sellFull, profitBuy: full ? value - full.sell : null, vsSell: sellFull ? value - sellFull.sell * keep : null, top };
+    }).filter((r) => r.value > 0 && r.coverage >= 0.8);
+    if (!rows.length) { out.innerHTML = `<p class="small">No journal returns had prices. Try again after a refresh.</p>`; return; }
+    const byBuy = rows.filter((r) => r.profitBuy != null).sort((a, b) => b.profitBuy - a.profitBuy);
+    const byOwn = rows.filter((r) => r.vsSell != null).sort((a, b) => b.vsSell - a.vsSell);
+    const yNote = rows[0] ? `At ${full(lab.happiness)} happiness, yield is ${[...new Set(rows.map((r) => r.t))].sort().map((t) => `T${t} ${Math.round(ABP.laborerYield(lab.happiness, t) * 100)}%`).join(", ")}.` : "";
+    const top = byBuy[0];
+    out.innerHTML = `
+      ${top ? `<div class="notice"><p><strong>Best buy: ${esc(top.name)} journals.</strong> A full one costs ${full(top.buy.sell)} in ${esc(top.buy.city)}; a laborer brings back about ${full(top.value)} of goods (sold after fees), so ${full(top.profitBuy)} profit each. With ${lab.count} laborer${lab.count > 1 ? "s" : ""} on this every ${ABP.LABORERS.hours} hours, about ${fmt(Math.max(0, top.profitBuy) * lab.count)} a day.</p></div>` : ""}
+      <p class="small muted">${yNote} Below ${100}× the tier the wiki says yield drops but gives no scale, so the app assumes a straight line; check the laborer window's own figure.</p>
+      <div class="table-wrap"><table><thead><tr><th>Journal</th><th>Yield</th><th>Returns worth</th><th>Buy full</th><th>Profit if bought</th><th>Vs selling yours</th></tr></thead><tbody>${byBuy.concat(byOwn.filter((r) => r.profitBuy == null)).slice(0, 15).map((r) => `
+        <tr><td>${esc(r.name)}${r.top ? `<br><small class="muted">mostly ${esc(itemLabel(r.top.item))}</small>` : ""}</td><td class="num">${Math.round(r.y * 100)}%</td><td class="num">${full(r.value)}</td><td class="num">${r.buy ? `${full(r.buy.sell)}<br><small class="muted">${esc(r.buy.city)}</small>` : "–"}</td>
+          <td class="num ${r.profitBuy > 0 ? "good" : "bad"}">${r.profitBuy != null ? full(r.profitBuy) : "–"}</td><td class="num ${r.vsSell > 0 ? "good" : "bad"}">${r.vsSell != null ? full(r.vsSell) : "–"}</td></tr>`).join("")}</tbody></table></div>
+      ${byOwn[0] ? `<p class="small">For journals you fill yourself, "Vs selling yours" is what handing one to a laborer earns over selling it full: best is <strong>${esc(byOwn[0].name)}</strong> (+${full(byOwn[0].vsSell)}). Where it's negative, sell the full journal instead.</p>` : ""}
+      <p class="small muted">Returns are valued at the best sell order${ABP.advisor.safeOnly ? " in the royal cities (Safe Options is on)" : ""} after tax and listing fee. Sources: <a href="${ABP.LABORERS.source}" target="_blank" rel="noopener">official wiki</a>, Albion's item data for amounts.</p>`;
+  }
   async function safeAmount() {
     const out = $("#sf-out"), id = safeSt.id, city = safeSt.city;
     out.innerHTML = `<p class="small muted">Loading four weeks of daily sales for ${esc(id)} in ${esc(city)}…</p>`;
@@ -2101,6 +2339,33 @@
         <span class="label">Workshop</span>
         <h2>Tools</h2>
         <p>Plan a trade run, get a shopping list for a craft, and back up everything you have entered. Weights, recipes and focus costs come from Albion's own item data.</p>
+      </div>
+      ${window.albionDesktop ? `<div class="box stack" id="dataclient">
+        <div class="row spread"><h3>Albion Data Client link</h3><span class="small" id="dc-state"></span></div>
+        <p class="small muted">Run the official Albion Data Client next to this app. It keeps uploading to the public project as normal, and also hands this app every price you look at in-game, so your own markets are always the freshest in your picks, alerts and tools.</p>
+        <div class="row"><button class="btn" type="button" id="dc-start">Start the Data Client linked</button><button class="btn ghost" type="button" id="dc-pick">Find the client myself</button></div>
+        <details class="small"><summary>Already start the client yourself?</summary>
+          <p>Close it, then add <code id="dc-flag"></code> to the end of its shortcut's Target (right-click the shortcut → Properties), so it reads like <code>"...\\albiondata-client.exe" -p http://127.0.0.1:47811</code>. It then sends to both the public project and this app. Don't run two copies of the client at once.</p>
+          <p>The client needs <a href="https://www.albion-online-data.com/" target="_blank" rel="noopener">its own install</a> (it uses Npcap to read the game's market traffic, which Sandbox Interactive allows).</p>
+        </details>
+        <p class="small" id="dc-msg"></p>
+      </div>` : ""}
+      <div class="box stack" id="focusplan">
+        <h3>Focus budget planner</h3>
+        <p class="small muted">Splits your focus across refining, the crafts you list and anything else you spend it on, so every point goes where it adds the most silver. Each use is capped at what its market can take in a day.</p>
+        <div class="controls">
+          <label class="field"><span>Focus to spend</span><input type="number" id="fb-focus" min="0" step="100" placeholder="10000"></label>
+          <label class="field" style="grid-column: span 2"><span>Crafts to consider (item ids, comma separated)</span><input type="text" id="fb-crafts" placeholder="e.g. T6_MAIN_SWORD, T5_BAG@1"></label>
+        </div>
+        <div class="controls">
+          <label class="field"><span>Other focus use</span><input type="text" id="fb-oname"></label>
+          <label class="field"><span>Focus each time</span><input type="number" id="fb-ofocus" min="0" step="any"></label>
+          <label class="field"><span>Silver it adds each time</span><input type="number" id="fb-osilver" step="any"></label>
+          <label class="field"><span>Times a day (max)</span><input type="number" id="fb-otimes" min="0" step="1"></label>
+          <div class="field"><span>&nbsp;</span><button class="btn" type="button" id="fb-go">Plan my focus</button></div>
+        </div>
+        <p class="small muted">For the island, use the extra seeds and crops you get when you farm with focus, as the game shows them; Albion doesn't publish those numbers, so the app can't guess them.</p>
+        <div id="fb-out"></div>
       </div>
       <div class="box stack" id="haul">
         <h3>Haul planner</h3>
@@ -2131,6 +2396,17 @@
         </div>
         <div id="sh-out"></div>
       </div>
+      <div class="box stack" id="laborers">
+        <h3>Laborer optimizer</h3>
+        <p class="small muted">Which full journal earns the most in a laborer's hands, using what each journal really returns (Albion's item data) and today's prices. A laborer needs 100 happiness per journal tier for full yield; each point above adds 0.5%, up to +50% (official wiki).</p>
+        <div class="controls">
+          <label class="field"><span>Laborer happiness</span><input type="number" id="lb-happy" min="0" step="10"></label>
+          <label class="field"><span>Highest tier they take</span><select id="lb-tier">${[3, 4, 5, 6, 7, 8].map((t) => `<option value="${t}">T${t}</option>`).join("")}</select></label>
+          <label class="field"><span>How many laborers</span><input type="number" id="lb-count" min="1" step="1"></label>
+          <div class="field"><span>&nbsp;</span><button class="btn" type="button" id="lb-go">Rank journals</button></div>
+        </div>
+        <div id="lb-out"></div>
+      </div>
       <div class="box stack" id="safe">
         <h3>Safe daily amount</h3>
         <p class="small muted">How many you can add to a market each day, buying or selling, before you start moving its price. Uses up to four weeks of daily sales for that item and market.</p>
@@ -2141,6 +2417,19 @@
           <div class="field"><span>&nbsp;</span><button class="btn" type="button" id="sf-go">Work it out</button></div>
         </div>
         <div id="sf-out"></div>
+      </div>
+      <div class="box stack" id="lossbudget">
+        <h3>Loss budget</h3>
+        <p class="small muted">Log what you lose on risky runs and count the runs you make. The app then knows your real average loss per trip and takes it off risky Best picks, so you can see whether Safe Options would have paid more.</p>
+        <form class="controls" id="ls-form">
+          <label class="field"><span>Date</span><input type="date" id="ls-date" required></label>
+          <label class="field"><span>Where</span><select id="ls-kind">${LOSS_KINDS.map((k) => `<option>${esc(k)}</option>`).join("")}</select></label>
+          <label class="field"><span>What you lost</span><input type="text" id="ls-what" placeholder="e.g. T6 ox + 40 T6 bags"></label>
+          <label class="field"><span>Value (silver)</span><input type="number" id="ls-value" min="0" step="any" required></label>
+          <button class="btn" type="submit">Log a loss</button>
+        </form>
+        <div class="row" id="ls-trips"></div>
+        <div id="ls-out"></div>
       </div>
       <div class="box stack" id="backup">
         <h3>Backup and restore</h3>
@@ -2164,6 +2453,43 @@
     [["ench", "#sh-ench"], ["qty", "#sh-qty"], ["rr", "#sh-rr"], ["craftCity", "#sh-city"]].forEach(([k, sel]) => $(sel).addEventListener("change", (e) => { shop[k] = k === "craftCity" ? e.target.value : Math.max(k === "qty" ? 1 : 0, +e.target.value || 0); store.set("shop", shop); }));
     itemPicker("#sh-item", "#sh-results", "#sh-wrap", (id) => { shop.id = id.split("@")[0]; if (id.includes("@")) { shop.ench = +id.split("@")[1]; $("#sh-ench").value = shop.ench; } store.set("shop", shop); shoppingList(); });
     $("#sh-go").addEventListener("click", () => { const v = $("#sh-item").value.trim().toUpperCase(); if (/^T\d_/.test(v)) shop.id = v.split("@")[0]; store.set("shop", shop); shoppingList(); });
+
+    /* Data Client link (Windows app only) */
+    if (window.albionDesktop) {
+      const go = async (pick) => {
+        $("#dc-msg").textContent = "Starting…";
+        const r = await window.albionDesktop.startClient(pick);
+        $("#dc-msg").textContent = r.ok ? (r.already ? "It's already running from this app." : "Started. Open any market in-game and prices flow in within seconds.") : `${r.error || "It didn't start."} If Windows says it needs administrator rights, use the shortcut method below instead.`;
+        dcStatus();
+      };
+      $("#dc-start").addEventListener("click", () => go(false));
+      $("#dc-pick").addEventListener("click", () => go(true));
+      dcStatus(); clearInterval(dcTimer); dcTimer = setInterval(() => { if ($("#dc-state")) dcStatus(); else clearInterval(dcTimer); }, 5000);
+    }
+
+    /* Focus planner */
+    $("#fb-focus").value = fb.focus ?? (typeof focusNow === "function" && focusNow() != null ? Math.round(focusNow()) : 10000);
+    [["focus", "#fb-focus", 1], ["crafts", "#fb-crafts", 0], ["otherName", "#fb-oname", 0], ["otherFocus", "#fb-ofocus", 1], ["otherSilver", "#fb-osilver", 1], ["otherTimes", "#fb-otimes", 1]].forEach(([k, sel, num]) => {
+      $(sel).value = fb[k] ?? ""; if (k === "focus") $(sel).value = fb.focus ?? $(sel).value;
+      $(sel).addEventListener("change", (e) => { fb[k] = num ? (e.target.value === "" ? null : +e.target.value || 0) : e.target.value; store.set("focusplan", fb); });
+    });
+    $("#fb-focus").value = fb.focus ?? (focusNow() != null ? Math.round(focusNow()) : 10000);
+    $("#fb-go").addEventListener("click", focusPlan);
+
+    /* Loss budget */
+    $("#ls-date").value = todayISO();
+    $("#ls-form").addEventListener("submit", (e) => {
+      e.preventDefault();
+      losses.log.push({ date: $("#ls-date").value, kind: $("#ls-kind").value, what: $("#ls-what").value.trim(), value: Math.max(0, +$("#ls-value").value || 0) });
+      losses.log.sort((a, b) => a.date.localeCompare(b.date));
+      saveLosses(); $("#ls-what").value = ""; $("#ls-value").value = ""; drawLosses(); rendered.picks = false;
+    });
+    drawLosses();
+
+    /* Laborers */
+    $("#lb-happy").value = lab.happiness; $("#lb-tier").value = lab.maxTier; $("#lb-count").value = lab.count;
+    [["happiness", "#lb-happy"], ["maxTier", "#lb-tier"], ["count", "#lb-count"]].forEach(([k, sel]) => $(sel).addEventListener("change", (e) => { lab[k] = Math.max(k === "count" ? 1 : 0, +e.target.value || 0); store.set("laborers", lab); }));
+    $("#lb-go").addEventListener("click", laborerPlan);
 
     /* Safe daily amount */
     $("#sf-item").value = safeSt.id; $("#sf-margin").value = safeSt.margin ?? "";
@@ -2265,7 +2591,29 @@
         <div class="stat"><span class="label">Sells for</span><span class="v">${revenue != null ? fmt(revenue) : "–"}</span><span class="small muted">${sellEach ? `${full(sellEach)} each in ${esc(shop.craftCity)}, after fees` : "no price in " + esc(shop.craftCity)}</span></div>
         <div class="stat"><span class="label">Profit</span><span class="v ${revenue != null && revenue - total >= 0 ? "good" : "bad"}">${revenue != null && !missing ? fmt(revenue - total) : "–"}</span><span class="small muted">before station fees</span></div>
       </div>
+      ${returnTable(R, key, lines, crafts)}
       ${rr ? `<p class="small muted">Returns are an average: with ${pct(rr)} back you buy less in total, but you need the full amount for the first crafts. Materials marked "never returned" (artifacts, tokens) always count in full.</p>` : ""}`;
+  }
+
+  /* Return rate in every city for one recipe: which city's bonus applies, and what the materials cost there. */
+  function bonusCityOf(R, key) {
+    const base = key.split("@")[0].replace(/_LEVEL\d$/, "");
+    const cat = R.c?.[base];
+    if (cat === "refinedresources") { const r = ABP.RESOURCES.find((x) => base.endsWith("_" + x.refined)); return { kind: "refine", city: r?.city || null, cat }; }
+    return { kind: "craft", city: ABP.CRAFT_CITY[cat] || null, cat };
+  }
+  function returnTable(R, key, lines, crafts) {
+    const b = bonusCityOf(R, key);
+    const places = ABP.CITIES.map((c) => ({ place: c, rates: c === b.city ? (b.kind === "refine" ? ABP.RETURN.refineBonus : ABP.RETURN.craftBonus) : ABP.RETURN.city, bonus: c === b.city }))
+      .concat([{ place: "Your island", rates: ABP.RETURN.island, bonus: false }]);
+    const costAt = (rate) => lines.reduce((a, l) => a + (l.best ? l.best.sell * (l.noRet ? l.need : Math.ceil(l.need * (1 - rate))) : 0), 0);
+    const priced = lines.every((l) => l.best);
+    const rows = places.map((p) => ({ ...p, none: costAt(p.rates.none), focus: costAt(p.rates.focus) }));
+    const best = rows.slice().sort((a, b2) => a.focus - b2.focus)[0];
+    return `<details class="box-lite" ${b.city ? "open" : ""}><summary><strong>Return rate by city</strong> <span class="small muted">${b.city ? `${esc(b.city)} has the ${b.kind === "refine" ? "refining" : "crafting"} bonus for this item` : "no city has a bonus for this item"}</span></summary>
+      <div class="table-wrap"><table><thead><tr><th>Where</th><th>Return</th><th>With focus</th>${priced ? "<th>Materials cost</th><th>With focus</th>" : ""}</tr></thead><tbody>${rows.map((r) => `
+        <tr class="${r.bonus ? "on" : ""}"><td>${esc(r.place)}${r.bonus ? ` <small class="muted">(bonus city)</small>` : ""}</td><td class="num">${pct(r.rates.none)}</td><td class="num">${pct(r.rates.focus)}</td>${priced ? `<td class="num">${full(r.none)}</td><td class="num money">${full(r.focus)}</td>` : ""}</tr>`).join("")}</tbody></table></div>
+      <p class="small muted">${priced ? `Cheapest place to craft these ${crafts} with focus: ${esc(best.place)}. ` : ""}Rates from the official wiki's <a href="${ABP.RETURN.source}" target="_blank" rel="noopener">resource return rate</a> page; daily production bonuses add more on the days the game shows them.</p></details>`;
   }
 
   /* ---------- Profit ledger: what each method really pays you ---------- */
@@ -2466,6 +2814,7 @@
 
   const RENDER = { plan: renderPlan, picks: renderPicks, methods: renderMethods, market: renderMarket, calc: renderCalc, wiki: renderWiki, wealth: renderWealth, progress: renderProgress, tools: renderTools, times: renderTimes };
   tickClock();
+  scheduleReminders();
 
   let rz;
   window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { drawPlanChart(); if (!$("#panel-progress").hidden) renderProgress(); }, 150); });

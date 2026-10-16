@@ -81,7 +81,7 @@ ABP.api = (() => {
     const results = await Promise.all(parts.map((p) =>
       getJSON(`${host()}/api/v2/stats/prices/${p.map(encodeURIComponent).join(",")}.json?locations=${loc}&qualities=${qualities.join(",")}`)
     ));
-    return results.flat().map((r) => ({
+    const rows = results.flat().map((r) => ({
       id: r.item_id,
       city: r.city,
       quality: r.quality,
@@ -90,6 +90,26 @@ ABP.api = (() => {
       buy: r.buy_price_max || 0,
       buyDate: isDate(r.buy_price_max_date) ? r.buy_price_max_date : null,
     }));
+    return mergeLocal(rows, ids, locations, qualities);
+  }
+
+  /* Windows app: prices your own Albion Data Client captured on this PC win whenever they're newer. */
+  const iso = (t) => new Date(t).toISOString().slice(0, 19);
+  const newer = (t, d) => t && (!d || t > Date.parse(d + (d.endsWith("Z") ? "" : "Z")));
+  async function mergeLocal(rows, ids, locations, qualities) {
+    if (!window.albionDesktop) return rows;
+    let mine = [];
+    try { mine = await window.albionDesktop.prices([...new Set(ids)], locations, qualities); } catch (e) { return rows; }
+    if (!mine.length) return rows;
+    const byKey = new Map(rows.map((r) => [`${r.id}|${r.city}|${r.quality}`, r]));
+    for (const m of mine) {
+      const key = `${m.id}|${m.city}|${m.quality}`;
+      let r = byKey.get(key);
+      if (!r) { r = { id: m.id, city: m.city, quality: m.quality, sell: 0, sellDate: null, buy: 0, buyDate: null }; rows.push(r); byKey.set(key, r); }
+      if (m.sell && newer(m.sellAt, r.sellDate)) { r.sell = Math.round(m.sell); r.sellDate = iso(m.sellAt); r.local = true; }
+      if (m.buy && newer(m.buyAt, r.buyDate)) { r.buy = Math.round(m.buy); r.buyDate = iso(m.buyAt); r.local = true; }
+    }
+    return rows;
   }
 
   /* Index rows as map[id][city] = row. */

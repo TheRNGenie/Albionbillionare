@@ -52,6 +52,14 @@ The same app is packaged for Android with [Capacitor](https://capacitorjs.com/).
 
 - **Safe Options** (Best picks toggle): only royal cities, linked by blue and yellow zones. Black Market flips are swapped for safe royal-city hauls so the page keeps the same number of picks.
 
+## Island, focus, laborers and losses
+
+- **Focus budget planner** (Tools): spends your focus on the refines and crafts that add the most silver per point, each capped at what its market takes in a day.
+- **Island timers and checklist** (Times): harvest, laborer and focus timers with reminders (scheduled phone notifications in the Android app; desktop notifications while the Windows app runs) and a daily island checklist.
+- **Laborer optimizer** (Tools): what each full journal returns, from `assets/data/laborers.json` (built by `tools/build_laborers.py` from Albion's item data), at your laborers' happiness (100 per tier for full yield, +0.5% per point above, up to +50%, per the official wiki).
+- **Return rate by city** (Tools → Crafting shopping list): every city's return rate for the recipe, its bonus city, and the materials cost in each.
+- **Loss budget** (Tools): log losses and count risky runs; risky Best picks then show your real average loss per run.
+
 ## Windows app
 
 The same app runs as a Windows desktop program, built with Electron by `.github/workflows/windows.yml` on every push.
@@ -59,6 +67,8 @@ Each build is attached to a `windows-build-N` release:
 
 - `Albion-Billionaire-Setup.exe` installs it with Start menu and desktop shortcuts.
 - `Albion-Billionaire-portable.exe` runs without installing.
+
+**Albion Data Client link:** Tools → Albion Data Client link starts the official client with `-p http://127.0.0.1:47811`, so it keeps uploading to the public project and also sends this app every market order you view. Those prices replace the public ones whenever they're newer. You can instead add that flag to the client's own shortcut.
 
 After download it never contacts GitHub. Item names and recipes ship inside the app, there is no auto-updater, and the only network calls are the Albion Online Data Project prices, Albion's player lookup and Google Fonts.
 Your data lives in the app on that PC; use **Tools → Backup** to move it between your phone and PC.
