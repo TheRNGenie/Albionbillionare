@@ -425,3 +425,6 @@ tr.on td { background: var(--gold-soft); }
 .st-table td:nth-child(3), .st-table td:nth-child(4) { min-width: 150px; }
 .pick-time { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
 .pick-time .why { margin-top: 4px; }
+.toggle { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; font-weight: 600; background: var(--surface); }
+.toggle input { width: 18px; height: 18px; accent-color: var(--gold); margin: 0; }
+.toggle:has(input:checked) { border-color: var(--gold); color: var(--gold); background: var(--gold-soft); }

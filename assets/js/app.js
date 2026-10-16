@@ -1489,11 +1489,20 @@
     { key: "journals", title: "Journals: which to fill", how: "Full journal sell price minus empty journal cost, after fees, in the best cities. Weighed down when fewer than 3 full journals sell per day.",
       run: () => ABP.advisor.journals(),
       legs: (r) => [{ role: "sell", id: r.id, city: r.full.city, what: "full journals" }, { role: "buy", id: r.id.replace(/_FULL$/, "_EMPTY"), city: r.empty.city, what: "empty journals" }], line: (r) => `${full(r.profit)} per journal`, name: (r) => r.label },
-    { key: "gems", more: 11, title: "Hidden gems: big margins, small amounts", how: "Order flips, Black Market flips and city-to-city trades across gear, refined resources and crops, keeping only margins of 25% or more (30% between cities) on prices under a day old that sell fewer than 5 a day. Each must have sold at least 3 last week at an average within 15% of the price used, so it really trades there. Ranked by profit per item times the few you can take a day.",
+    { key: "gems", more: 11, title: "Hidden gems: big margins, small amounts", how: "Order flips, Black Market flips and city-to-city trades across gear, refined resources and crops, keeping margins of 25% or more (30% between cities) on prices under a day old, then filling the list with 15% to 25% ones if needed (they're marked) that sell fewer than 5 a day. Each must have sold at least 3 last week at an average within 15% of the price used, so it really trades there. Ranked by profit per item times the few you can take a day.",
       run: () => ABP.advisor.gems(),
       legs: (r) => [{ role: "buy", id: r.id, city: r.buyCity, what: r.kind === "Order flip" ? "via buy orders" : "the item" }, { role: "sell", id: r.id, city: r.sellCity, what: r.sellCity === ABP.BM ? "into Black Market orders" : "your listing" }],
       line: (r) => `${full(r.profit)} each · ${pct(r.margin, 0)} · about ${r.take} a day`, name: (r) => `${r.label} (${r.kind.toLowerCase()})` },
   ];
+  /* Safe Options: no trips through Caerleon, Brecilien or the Black Market. Black Market flips are swapped for
+     royal-city hauls so the page keeps the same number of picks. */
+  let safeMode = !!store.get("safeMode", false);
+  ABP.advisor.safeOnly = safeMode;
+  const SAFE_BM = { key: "bm", title: "Safe hauls: buy in one royal city, sell in another", how: "Safe Options swaps Black Market flips (which need Caerleon) for trades between the royal cities, which link through blue and yellow zones only. Gear and refined resources from T4 to T8 at .0 to .2, instant-bought where cheapest and listed where dearest, with at least 8% left after tax and fees. Ranked by profit per item times a fifth of daily sales there.",
+    run: () => ABP.advisor.royalHauls(),
+    legs: (r) => [{ role: "buy", id: r.id, city: r.src.city, what: "the item" }, { role: "sell", id: r.id, city: r.dst.city, what: "your listing" }],
+    line: (r) => `${full(r.profit)} each · ${pct(r.margin, 0)} · ${r.src.city} to ${r.dst.city}`, name: (r) => r.label };
+  const activePicks = () => PICKS.map((k) => (safeMode && k.key === "bm" ? SAFE_BM : k));
   const STATIC_WHY = {
     crops: "Without live prices: higher tiers sell for more per plant but need more Farming spec, and herbs feed potion makers so their demand is steadier than most crops. Plant the highest tier you can farm whose daily sales are at least twice your harvest.",
     refining: "Without live prices: refine in the resource's bonus city with focus (53.9% return). Mid tiers (T5 and T6) at .1 or .2 usually have the best mix of margin and sales volume; T8 margins can be large but sell slowly.",
@@ -1509,9 +1518,12 @@
         <span class="label">Live recommendations</span>
         <h2>Best picks today</h2>
         <p>Instead of "plant the best crop", this page works out which one it is from today's prices, last week's sales and your spec, and says why. Set your spec under Calculators → Your spec. Rankings use the ${esc(ABP.SERVERS.find((s) => s.id === ABP.api.server).label)} server; change it on the Market tab.</p>
-        <div class="row"><button class="btn" id="pk-refresh">Refresh picks</button><span class="small muted" id="pk-time"></span></div>
+        <div class="row"><button class="btn" id="pk-refresh">Refresh picks</button>
+          <label class="toggle"><input type="checkbox" id="pk-safe" ${safeMode ? "checked" : ""}><span>Safe Options</span></label>
+          <span class="small muted" id="pk-time"></span></div>
+        <p class="small muted" id="pk-safe-note">${safeMode ? "Safe Options is on: only royal cities, linked by blue and yellow zones, so no trip can cost you your load. Black Market flips are replaced by safe hauls." : "Turn on Safe Options to skip anything that means travelling through Caerleon, Brecilien or to the Black Market."}</p>
       </div>
-      <div class="stack" id="pk-list">${PICKS.map((k) => `
+      <div class="stack" id="pk-list">${activePicks().map((k) => `
         <section class="box pick" id="pk-${k.key}">
           <div class="row spread"><h3>${k.title}</h3>${k.link ? `<a href="#${k.link[0]}" class="small" data-go="${k.link.join(",")}">See the full table</a>` : ""}</div>
           ${k.key === "crops" ? `<div class="controls">
@@ -1523,6 +1535,10 @@
           <div class="pick-body"><p class="muted">Waiting to load…</p></div>
         </section>`).join("")}</div>`;
     $("#pk-refresh").addEventListener("click", () => { ABP.api.clearCache(); loadPicks(); });
+    $("#pk-safe").addEventListener("change", (e) => {
+      safeMode = e.target.checked; ABP.advisor.safeOnly = safeMode; store.set("safeMode", safeMode);
+      renderPicks(); rendered.times = false;
+    });
     $$("#pk-list [data-go]").forEach((a) => a.addEventListener("click", (e) => {
       e.preventDefault();
       const [tab, preset] = a.dataset.go.split(",");
@@ -1539,7 +1555,7 @@
   async function loadPicks() {
     const btn = $("#pk-refresh"), time = $("#pk-time");
     btn.disabled = true; time.textContent = "Loading fresh prices…";
-    await Promise.all(PICKS.map(loadPick));
+    await Promise.all(activePicks().map(loadPick));
     if (!btn.isConnected) return;
     btn.disabled = false;
     time.textContent = `Updated ${vanTime(new Date())} Vancouver time`;
@@ -1941,7 +1957,7 @@
         return [{ role: "buy", what: "gold", city: "the gold market", eff }, { role: "sell", what: "gold", city: "the gold market", eff }];
       } catch (e) { return [{ role: "buy", what: "gold", err: e.message }, { role: "sell", what: "gold", err: e.message }]; }
     };
-    const rows = await Promise.all([...PICKS.map(async (k) => {
+    const rows = await Promise.all([...activePicks().map(async (k) => {
       try {
         const { rows } = await k.run();
         if (!rows.length) return { title: k.title, name: "Nothing profitable right now", legs: [] };

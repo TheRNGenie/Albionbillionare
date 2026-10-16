@@ -18,6 +18,10 @@ ABP.JOURNALS = [
 
 ABP.advisor = (() => {
   const F = () => ABP.FEES;
+  /* Safe Options: only royal cities, reached through blue and yellow zones, so a trip can't cost you the load. */
+  const UNSAFE = ["Caerleon", "Brecilien", "Black Market"];
+  let safeOnly = false;
+  const CITIES = () => (safeOnly ? ABP.CITIES.filter((c) => !UNSAFE.includes(c)) : ABP.CITIES);
   const MAX_AGE_H = 48;
   const ageH = (iso) => (iso ? (Date.now() - new Date(iso + (iso.endsWith("Z") ? "" : "Z")).getTime()) / 36e5 : null);
   const fresh = (r, field = "sellDate") => r && ageH(r[field]) != null && ageH(r[field]) <= MAX_AGE_H;
@@ -49,12 +53,12 @@ ABP.advisor = (() => {
     const all = ABP.CROPS.map((c) => ({ ...c, kind: "crop" })).concat(ABP.HERBS.map((h) => ({ ...h, kind: "herb" })));
     const can = (c) => c.tier <= (c.kind === "herb" ? ABP.spec.farm.herb : ABP.spec.farm.crop);
     const list = all;
-    const idx = ABP.api.index(await ABP.api.prices(list.flatMap((c) => [c.crop, c.seed]), ABP.CITIES));
+    const idx = ABP.api.index(await ABP.api.prices(list.flatMap((c) => [c.crop, c.seed]), CITIES()));
     const plants = plots * plantsPerPlot;
     const harvest = plants * perPlant;
     let rows = list.map((c) => {
-      const sell = dearest(idx[c.crop], ABP.CITIES);
-      const seed = cheapest(idx[c.seed], ABP.CITIES);
+      const sell = dearest(idx[c.crop], CITIES());
+      const seed = cheapest(idx[c.seed], CITIES());
       if (!sell || !seed) return { ...c, missing: true };
       const net = sell.sell * keepOrder();
       const seedsBought = plants * (1 - seedReturn);
@@ -102,7 +106,7 @@ ABP.advisor = (() => {
       ids.push(`T${t}_${r.raw}${e ? `_LEVEL${e}@${e}` : ""}`, `T${t}_${r.refined}${e ? `_LEVEL${e}@${e}` : ""}`);
       ids.push(`T${t - 1}_${r.refined}${e && t > 4 ? `_LEVEL${e}@${e}` : ""}`);
     }
-    const idx = ABP.api.index(await ABP.api.prices(ids, ABP.CITIES));
+    const idx = ABP.api.index(await ABP.api.prices(ids, CITIES()));
     const b = (bonus, focus) => { const x = 0.18 + (bonus ? 0.4 : 0) + (focus ? 0.59 : 0) + daily; return x / (1 + x); };
     const rF = b(true, true), rNo = b(true, false);
     const rows = [];
@@ -160,13 +164,13 @@ ABP.advisor = (() => {
   async function blackMarket({ tiers = [4, 5, 6, 7, 8], enchants = [0, 1, 2], quality = 1 } = {}) {
     const ids = [];
     for (const t of tiers) for (const e of enchants) for (const [b] of ABP.BM_GEAR) ids.push(`T${t}_${b}${e ? "@" + e : ""}`);
-    const idx = ABP.api.index(await ABP.api.prices(ids, [...ABP.CITIES, ABP.BM], [quality]));
+    const idx = ABP.api.index(await ABP.api.prices(ids, [...CITIES(), ABP.BM], [quality]));
     const names = Object.fromEntries(ABP.BM_GEAR);
     let rows = [];
     for (const id of ids) {
       const bm = idx[id]?.[ABP.BM];
       if (!bm?.buy || !fresh(bm, "buyDate") || ageH(bm.buyDate) > 12) continue;
-      const src = cheapest(idx[id], ABP.CITIES);
+      const src = cheapest(idx[id], CITIES());
       if (!src) continue;
       const keep = bm.buy * (1 - F().salesTaxPremium);
       const profit = keep - src.sell;
@@ -197,18 +201,18 @@ ABP.advisor = (() => {
   async function journals() {
     const ids = [];
     for (const j of ABP.JOURNALS) for (let t = 3; t <= 8; t++) ids.push(`T${t}_JOURNAL_${j.key}_EMPTY`, `T${t}_JOURNAL_${j.key}_FULL`);
-    const idx = ABP.api.index(await ABP.api.prices(ids, ABP.CITIES));
+    const idx = ABP.api.index(await ABP.api.prices(ids, CITIES()));
     let rows = [];
     for (const j of ABP.JOURNALS) for (let t = 3; t <= 8; t++) {
-      const empty = cheapest(idx[`T${t}_JOURNAL_${j.key}_EMPTY`], ABP.CITIES);
-      const full = dearest(idx[`T${t}_JOURNAL_${j.key}_FULL`], ABP.CITIES);
+      const empty = cheapest(idx[`T${t}_JOURNAL_${j.key}_EMPTY`], CITIES());
+      const full = dearest(idx[`T${t}_JOURNAL_${j.key}_FULL`], CITIES());
       if (!empty || !full) continue;
       const keep = full.sell * keepOrder();
       const profit = keep - empty.sell;
       rows.push({ j, t, id: `T${t}_JOURNAL_${j.key}_FULL`, label: `T${t} ${j.labourer} journal`, empty, full, keep, profit });
     }
     rows.sort((a, b) => b.profit - a.profit);
-    rows = rows.slice(0, 15);
+    rows = rows.slice(0, 30);
     try {
       const byCity = {};
       rows.forEach((r) => (byCity[r.full.city] = byCity[r.full.city] || []).push(r.id));
@@ -238,7 +242,7 @@ ABP.advisor = (() => {
     }
     ABP.CROPS.concat(ABP.HERBS).forEach((c) => ids.push(c.crop));
     for (const t of [4, 5, 6]) for (const [b] of ABP.BM_GEAR) ids.push(`T${t}_${b}`);
-    const rows0 = await ABP.api.prices(ids, ABP.CITIES);
+    const rows0 = await ABP.api.prices(ids, CITIES());
     let rows = [];
     for (const x of rows0) {
       if (!x.sell || !x.buy || !fresh(x) || !fresh(x, "buyDate")) continue;
@@ -249,7 +253,7 @@ ABP.advisor = (() => {
       rows.push({ id: x.id, city: x.city, buy: x.buy, sell: x.sell, cost, keep, profit, margin: profit / cost, date: x.sellDate });
     }
     rows.sort((a, b) => b.margin - a.margin);
-    rows = rows.slice(0, 40);
+    rows = rows.slice(0, 80);
     try {
       const byCity = {};
       rows.forEach((r) => (byCity[r.city] = byCity[r.city] || []).push(r.id));
@@ -341,35 +345,35 @@ ABP.advisor = (() => {
     for (const r of ABP.RESOURCES) for (let t = 4; t <= 8; t++) for (const e of [0, 1, 2]) resIds.push(`T${t}_${r.refined}${e ? `_LEVEL${e}@${e}` : ""}`);
     ABP.CROPS.concat(ABP.HERBS).forEach((c) => resIds.push(c.crop));
     const ids = gearIds.concat(resIds);
-    const idx = ABP.api.index(await ABP.api.prices(ids, [...ABP.CITIES, ABP.BM]));
+    const idx = ABP.api.index(await ABP.api.prices(ids, [...CITIES(), ABP.BM]));
     const young = (iso) => iso && ageH(iso) <= 24;
     const cand = [];
     for (const id of ids) {
       const by = idx[id]; if (!by) continue;
       /* same-city order flip */
-      for (const c of ABP.CITIES) {
+      for (const c of CITIES()) {
         const x = by[c]; if (!x?.sell || !x.buy || !young(x.sellDate) || !young(x.buyDate) || x.sell > x.buy * 3) continue;
         const cost = x.buy * (1 + F().setupFee), keep = x.sell * keepOrder(), profit = keep - cost;
-        if (profit / cost >= 0.25) cand.push({ kind: "Order flip", id, buyCity: c, sellCity: c, buyHow: "a buy order", sellHow: "a sell order", cost, keep, ref: x.sell, profit, margin: profit / cost, date: x.sellDate });
+        if (profit / cost >= 0.15) cand.push({ kind: "Order flip", id, buyCity: c, sellCity: c, buyHow: "a buy order", sellHow: "a sell order", cost, keep, ref: x.sell, profit, margin: profit / cost, date: x.sellDate });
       }
       /* Black Market: instant buy in a city, sell into the BM order */
       const bm = by[ABP.BM];
-      if (bm?.buy && young(bm.buyDate)) {
-        const src = cheapest(by, ABP.CITIES);
+      if (!safeOnly && bm?.buy && young(bm.buyDate)) {
+        const src = cheapest(by, CITIES());
         if (src && young(src.sellDate)) {
           const keep = bm.buy * (1 - F().salesTaxPremium), profit = keep - src.sell;
-          if (profit / src.sell >= 0.25 && bm.buy < src.sell * 3) cand.push({ kind: "Black Market", id, buyCity: src.city, sellCity: ABP.BM, buyHow: "instant buy", sellHow: "the Black Market order", cost: src.sell, keep, ref: bm.buy, profit, margin: profit / src.sell, date: bm.buyDate });
+          if (profit / src.sell >= 0.15 && bm.buy < src.sell * 3) cand.push({ kind: "Black Market", id, buyCity: src.city, sellCity: ABP.BM, buyHow: "instant buy", sellHow: "the Black Market order", cost: src.sell, keep, ref: bm.buy, profit, margin: profit / src.sell, date: bm.buyDate });
         }
       }
       /* city to city: instant buy where cheapest, list where dearest */
-      const lo = cheapest(by, ABP.CITIES), hi = dearest(by, ABP.CITIES);
+      const lo = cheapest(by, CITIES()), hi = dearest(by, CITIES());
       if (lo && hi && lo.city !== hi.city && young(lo.sellDate) && young(hi.sellDate) && hi.sell < lo.sell * 3) {
         const keep = hi.sell * keepOrder(), profit = keep - lo.sell;
-        if (profit / lo.sell >= 0.3) cand.push({ kind: "City to city", id, buyCity: lo.city, sellCity: hi.city, buyHow: "instant buy", sellHow: "a sell order", cost: lo.sell, keep, ref: hi.sell, profit, margin: profit / lo.sell, date: hi.sellDate });
+        if (profit / lo.sell >= 0.2) cand.push({ kind: "City to city", id, buyCity: lo.city, sellCity: hi.city, buyHow: "instant buy", sellHow: "a sell order", cost: lo.sell, keep, ref: hi.sell, profit, margin: profit / lo.sell, date: hi.sellDate });
       }
     }
     cand.sort((a, b) => b.profit - a.profit);
-    let rows = cand.slice(0, 60);
+    let rows = cand.slice(0, 150);
     const byCity = {};
     rows.forEach((r) => (byCity[r.sellCity] = byCity[r.sellCity] || new Set()).add(r.id));
     const vols = Object.fromEntries(await Promise.all(Object.entries(byCity).map(([c, set]) => ABP.api.volumes([...set], [c]).then((v) => [c, v]).catch(() => [c, {}]))));
@@ -378,15 +382,53 @@ ABP.advisor = (() => {
     rows = rows.filter((r) => r.sold >= 3 && r.perDay < 5 && r.avg && r.avg >= r.ref * 0.85);
     const seen = new Set();
     rows = rows.filter((r) => { const k = r.id + r.kind; if (seen.has(k)) return false; seen.add(k); return true; });
-    rows.forEach((r) => { r.take = Math.max(1, Math.floor(r.perDay * 0.3)); r.daily = r.profit * r.take; r.label = itemName(r.id); });
-    rows.sort((a, b) => b.daily - a.daily);
-    rows = rows.slice(0, 12);
+    rows.forEach((r) => { r.take = Math.max(1, Math.floor(r.perDay * 0.3)); r.daily = r.profit * r.take; r.label = itemName(r.id); r.strong = r.margin >= (r.kind === "City to city" ? 0.3 : 0.25); });
+    /* full-size gems first; smaller-margin ones (15% or 20% between cities) only fill the list up */
+    rows.sort((a, b) => (b.strong - a.strong) || (b.daily - a.daily));
+    rows = rows.slice(0, 20);
     rows.forEach((r) => {
       r.reasons = [
         `${r.kind === "Order flip" ? `In ${r.buyCity}, buy with ${r.buyHow} at ${n(r.cost)} (fee included) and relist` : `Instant-buy it in ${r.buyCity} for ${n(r.cost)} and ${r.sellCity === ABP.BM ? "sell it into the Black Market order" : `list it in ${r.sellCity}`}`}: you keep ${n(r.keep)}, so ${n(r.profit)} each (${pct(r.margin)}).`,
         `Proof it works: ${n(r.sold)} sold in ${r.sellCity} over the last week, at an average of ${n(r.avg)}, close to the ${n(r.ref)} used here (${age(r.date)}).`,
         `Only about ${r.perDay.toFixed(1)} sell a day, so this doesn't scale: plan on ${r.take} a day${r.take === 1 ? " at most" : ""}, worth about ${short(r.daily)}. Do more and you become the market.`,
+        ...(r.strong ? [] : [`Its margin is under the usual gem bar, shown to fill the list; it still has proven sales.`]),
         r.buyCity !== r.sellCity && [r.buyCity, r.sellCity].some((c) => c === "Caerleon" || c === ABP.BM || c === "Brecilien") ? `The trip crosses red or black zones. Carry only what you can lose.` : r.buyCity !== r.sellCity ? `${r.buyCity} to ${r.sellCity} is through safe zones.` : `No travel: both orders sit in ${r.buyCity}.`,
+      ];
+    });
+    return { rows };
+  }
+
+  /* ---- Safe hauls between royal cities: the Safe Options stand-in for Black Market flips ---- */
+  async function royalHauls() {
+    const ids = [];
+    for (const t of [4, 5, 6, 7, 8]) for (const e of [0, 1, 2]) for (const [b] of ABP.BM_GEAR) ids.push(`T${t}_${b}${e ? "@" + e : ""}`);
+    for (const r of ABP.RESOURCES) for (let t = 4; t <= 8; t++) for (const e of [0, 1, 2]) ids.push(`T${t}_${r.refined}${e ? `_LEVEL${e}@${e}` : ""}`);
+    const cities = ABP.CITIES.filter((c) => !UNSAFE.includes(c));
+    const idx = ABP.api.index(await ABP.api.prices(ids, cities));
+    let rows = [];
+    for (const id of ids) {
+      const lo = cheapest(idx[id], cities), hi = dearest(idx[id], cities);
+      if (!lo || !hi || lo.city === hi.city || hi.sell > lo.sell * 3) continue;
+      const keep = hi.sell * keepOrder(), profit = keep - lo.sell;
+      if (profit / lo.sell < 0.08) continue;
+      rows.push({ id, src: lo, dst: hi, keep, profit, margin: profit / lo.sell });
+    }
+    rows.sort((a, b) => b.profit - a.profit);
+    rows = rows.slice(0, 80);
+    try {
+      const byCity = {};
+      rows.forEach((r) => (byCity[r.dst.city] = byCity[r.dst.city] || new Set()).add(r.id));
+      const vols = Object.fromEntries(await Promise.all(Object.entries(byCity).map(([c, set]) => ABP.api.volumes([...set], [c]).then((v) => [c, v]))));
+      rows.forEach((r) => { r.perDay = vols[r.dst.city]?.[r.id]?.[r.dst.city]?.perDay ?? null; });
+    } catch (e) { /* no volume */ }
+    rows = rows.filter((r) => r.perDay == null || r.perDay >= 1);
+    rows.forEach((r) => { r.take = Math.max(1, Math.floor((r.perDay ?? 2) * 0.2)); r.daily = r.profit * r.take; r.label = itemName(r.id); });
+    rows.sort((a, b) => b.daily - a.daily);
+    rows.forEach((r) => {
+      r.reasons = [
+        `Instant-buy it in ${r.src.city} for ${n(r.src.sell)} (${age(r.src.sellDate)}) and list it in ${r.dst.city} at ${n(r.dst.sell)} (${age(r.dst.sellDate)}). After tax and listing fee you keep ${n(r.keep)}: ${n(r.profit)} each (${pct(r.margin)}).`,
+        r.perDay == null ? `No sales history came back for ${r.dst.city}; list one before you carry more.` : `About ${r.perDay.toFixed(1)} sell a day in ${r.dst.city}; taking a fifth of that is about ${r.take} a day, worth ${short(r.daily)}.`,
+        `${r.src.city} to ${r.dst.city} runs through blue and yellow zones only, so you can't lose the load on the way.`,
       ];
     });
     return { rows };
@@ -402,5 +444,6 @@ ABP.advisor = (() => {
     return `T${m[1]}${m[3] ? "." + m[3] : ""} ${name}`;
   }
 
-  return { crops, refining, blackMarket, journals, flips, gems, safeDaily, safeReasons, itemName, short, n, age };
+  return { crops, refining, blackMarket, journals, flips, gems, royalHauls, safeDaily, safeReasons, itemName, short, n, age, UNSAFE,
+    get safeOnly() { return safeOnly; }, set safeOnly(v) { safeOnly = !!v; } };
 })();

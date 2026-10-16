@@ -50,6 +50,8 @@ The same app is packaged for Android with [Capacitor](https://capacitorjs.com/).
 - **Safe daily amount** (Tools, and under each Best pick): how many you can add to a market each day before moving its price. It uses up to 28 days of daily sales: the normal and slow-day volume, a fitted price-vs-volume effect (used only when it beats twice its standard error), and a share of a slow day otherwise. The cap is halved when prices are falling more than 5% a week.
 - **Hidden gems** (Best picks): margins of 25% or more on things that sell under 5 a day, each proven by at least 3 sales last week near the price used.
 
+- **Safe Options** (Best picks toggle): only royal cities, linked by blue and yellow zones. Black Market flips are swapped for safe royal-city hauls so the page keeps the same number of picks.
+
 ## Windows app
 
 The same app runs as a Windows desktop program, built with Electron by `.github/workflows/windows.yml` on every push.
