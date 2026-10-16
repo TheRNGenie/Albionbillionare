@@ -45,6 +45,11 @@ The same app is packaged for Android with [Capacitor](https://capacitorjs.com/).
 - Recipes, base focus costs and item weights come from Albion's item data (`assets/data/recipes.json`). Rebuild it after a game patch with `python3 tools/build_recipes.py items.json`, using `items.json` from [ao-bin-dumps](https://github.com/ao-data/ao-bin-dumps).
 - Build it yourself: `npm ci`, `npm run android:sync`, then open `android/` in Android Studio.
 
+## Safe daily amounts and hidden gems
+
+- **Safe daily amount** (Tools, and under each Best pick): how many you can add to a market each day before moving its price. It uses up to 28 days of daily sales: the normal and slow-day volume, a fitted price-vs-volume effect (used only when it beats twice its standard error), and a share of a slow day otherwise. The cap is halved when prices are falling more than 5% a week.
+- **Hidden gems** (Best picks): margins of 25% or more on things that sell under 5 a day, each proven by at least 3 sales last week near the price used.
+
 ## Windows app
 
 The same app runs as a Windows desktop program, built with Electron by `.github/workflows/windows.yml` on every push.

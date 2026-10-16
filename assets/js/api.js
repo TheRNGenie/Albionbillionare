@@ -112,6 +112,15 @@ ABP.api = (() => {
     return (r?.data || []).map((p) => ({ t: new Date(p.timestamp + (p.timestamp.endsWith("Z") ? "" : "Z")), price: p.avg_price, count: p.item_count }));
   }
 
+  /* Daily sales for one item and market over the last four weeks: [{t: Date, price, count}], oldest first. */
+  async function daily(id, city, quality = 1, days = 28) {
+    const from = new Date(Date.now() - days * 864e5);
+    const date = `${from.getUTCMonth() + 1}-${from.getUTCDate()}-${from.getUTCFullYear()}`;
+    const rows = await getJSON(`${host()}/api/v2/stats/history/${encodeURIComponent(id)}.json?locations=${encodeURIComponent(city)}&qualities=${quality}&time-scale=24&date=${date}`);
+    const r = rows.find((x) => x.location === city) || rows[0];
+    return (r?.data || []).map((p) => ({ t: new Date(p.timestamp + (p.timestamp.endsWith("Z") ? "" : "Z")), price: p.avg_price, count: p.item_count })).sort((a, b) => a.t - b.t);
+  }
+
   /* 7-day sales per item and market: map[id][city] = { sold, perDay, avg }. */
   async function volumes(ids, locations, quality = 1) {
     const loc = encodeURIComponent(locations.join(","));
@@ -159,6 +168,6 @@ ABP.api = (() => {
     clearCache() { cache.clear(); },
     get server() { return server; },
     set server(v) { server = v; cache.clear(); try { localStorage.setItem("abp.server", v); } catch (e) {} },
-    host, prices, index, history, volumes, gold, itemNames, nameOf,
+    host, prices, index, history, hourly, daily, volumes, gold, itemNames, nameOf,
   };
 })();

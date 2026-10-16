@@ -1436,10 +1436,14 @@
 
 
   /* ---------- Best time of day for a trade: same test as Times → Best hours, run on each leg of a strategy ---------- */
-  async function timeLegs(legs) {
+  async function timeLegs(legs, margin = null) {
     return Promise.all(legs.map(async (l) => {
-      try { return { ...l, eff: hourEffect(await ABP.api.hourly(l.id, l.city)) }; }
-      catch (e) { return { ...l, err: e.message }; }
+      const out = { ...l };
+      try { out.eff = hourEffect(await ABP.api.hourly(l.id, l.city)); } catch (e) { out.err = e.message; }
+      if (l.id && l.city !== "the gold market") {
+        try { out.safe = ABP.advisor.safeDaily(await ABP.api.daily(l.id, l.city), { margin }); } catch (e) { /* timing still shows */ }
+      }
+      return out;
     }));
   }
   function legVerdict(l) {
@@ -1460,7 +1464,10 @@
   function timeHtml(legs) {
     const lines = legs.map((l) => { const v = legVerdict(l); return `<li><strong>${l.role === "sell" ? "Sell" : "Buy"} ${esc(l.what)}:</strong> ${v.ok ? "" : '<span class="muted">'}${esc(v.text)}${v.ok ? "" : "</span>"}</li>`; });
     const busy = busiestHours(legs);
-    return `<span class="label">Best time (Vancouver)</span><ul class="why">${lines.join("")}</ul>${busy ? `<p class="muted">${esc(busy)}</p>` : ""}`;
+    const caps = legs.filter((l) => l.safe).map((l) => l.safe.ok
+      ? `<li><strong>${l.role === "sell" ? "Sell" : "Buy"} up to ${full(l.safe.safe)} a day</strong> in ${esc(l.city)} <span class="muted">(normal day ${full(l.safe.med)} traded; ${l.safe.measured ? "measured price effect" : `${Math.round(l.safe.share * 100)}% of a slow day`})</span></li>`
+      : `<li class="muted">${l.role === "sell" ? "Selling" : "Buying"} in ${esc(l.city)}: too few sales days to judge a limit.</li>`);
+    return `<span class="label">Best time (Vancouver)</span><ul class="why">${lines.join("")}</ul>${busy ? `<p class="muted">${esc(busy)}</p>` : ""}${caps.length ? `<span class="label">Daily limit before you move the price</span><ul class="why">${caps.join("")}</ul><p class="muted">Tools → Safe daily amount shows how each limit was worked out.</p>` : ""}`;
   }
 
   /* ---------- Best picks ---------- */
@@ -1482,12 +1489,17 @@
     { key: "journals", title: "Journals: which to fill", how: "Full journal sell price minus empty journal cost, after fees, in the best cities. Weighed down when fewer than 3 full journals sell per day.",
       run: () => ABP.advisor.journals(),
       legs: (r) => [{ role: "sell", id: r.id, city: r.full.city, what: "full journals" }, { role: "buy", id: r.id.replace(/_FULL$/, "_EMPTY"), city: r.empty.city, what: "empty journals" }], line: (r) => `${full(r.profit)} per journal`, name: (r) => r.label },
+    { key: "gems", more: 11, title: "Hidden gems: big margins, small amounts", how: "Order flips, Black Market flips and city-to-city trades across gear, refined resources and crops, keeping only margins of 25% or more (30% between cities) on prices under a day old that sell fewer than 5 a day. Each must have sold at least 3 last week at an average within 15% of the price used, so it really trades there. Ranked by profit per item times the few you can take a day.",
+      run: () => ABP.advisor.gems(),
+      legs: (r) => [{ role: "buy", id: r.id, city: r.buyCity, what: r.kind === "Order flip" ? "via buy orders" : "the item" }, { role: "sell", id: r.id, city: r.sellCity, what: r.sellCity === ABP.BM ? "into Black Market orders" : "your listing" }],
+      line: (r) => `${full(r.profit)} each · ${pct(r.margin, 0)} · about ${r.take} a day`, name: (r) => `${r.label} (${r.kind.toLowerCase()})` },
   ];
   const STATIC_WHY = {
     crops: "Without live prices: higher tiers sell for more per plant but need more Farming spec, and herbs feed potion makers so their demand is steadier than most crops. Plant the highest tier you can farm whose daily sales are at least twice your harvest.",
     refining: "Without live prices: refine in the resource's bonus city with focus (53.9% return). Mid tiers (T5 and T6) at .1 or .2 usually have the best mix of margin and sales volume; T8 margins can be large but sell slowly.",
     bm: "Without live prices: start with items you can buy in Caerleon itself, because there is no hauling risk. Look for Black Market orders updated in the last few hours with at least 10% margin after the 4% tax.",
     flips: "Without live prices: flip items that sell hundreds a day (refined resources, potions, food) where the gap between the top buy order and the cheapest listing is above 12%, which leaves profit after the 9% round-trip cost.",
+    gems: "Without live prices: look for gear and artifacts that sell only a few a day but at 25% or more above what they cost elsewhere. Check last week's sales before buying, and take one or two at a time.",
     journals: "Without live prices: fill the journal for whatever you already do all day. Crafting journals for your crafting line and gathering journals for your gathering line are free extra silver.",
   };
   function renderPicks() {
@@ -1547,10 +1559,10 @@
           <h4>${esc(k.name(top))}</h4>
           <p class="pick-line">${esc(k.line(top))}</p>
           <ul class="why">${top.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
-          <div class="pick-time small"><span class="muted">Checking the best time of day…</span></div>
+          <div class="pick-time small"><span class="muted">Checking the best time of day and how much the market can take…</span></div>
         </div>
-        <ol class="runners" start="2">${rest.slice(0, 4).map((r) => `<li><details><summary><strong>${esc(k.name(r))}</strong> <span class="muted small">${esc(k.line(r))}</span></summary><ul class="why">${r.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details></li>`).join("")}</ol>`;
-      const legs = await timeLegs(k.legs(top));
+        <ol class="runners" start="2">${rest.slice(0, k.more || 4).map((r) => `<li><details><summary><strong>${esc(k.name(r))}</strong> <span class="muted small">${esc(k.line(r))}</span></summary><ul class="why">${r.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></details></li>`).join("")}</ol>`;
+      const legs = await timeLegs(k.legs(top), top.margin ?? null);
       if (gen !== pickGen[k.key] || !body.isConnected) return;
       body.querySelector(".pick-time").innerHTML = timeHtml(legs);
     } catch (e) {
@@ -2037,6 +2049,7 @@
 
   /* ---------- Tools tab: haul planner, crafting shopping list, backup ---------- */
   const haul = Object.assign({ id: "T5_PLANKS", from: "Fort Sterling", to: "Caerleon", buyMode: "instant", sellMode: "order", cap: 1000, budget: 10000000, quality: 1 }, store.get("haul", {}));
+  const safeSt = Object.assign({ id: "T5_PLANKS", city: "Fort Sterling", margin: null }, store.get("safe", {}));
   const shop = Object.assign({ id: "T6_MAIN_SWORD", ench: 0, qty: 10, rr: 0, craftCity: "Lymhurst" }, store.get("shop", {}));
   const cityOpts = (cur, withBM) => ABP.CITIES.concat(withBM ? [ABP.BM] : []).map((c) => `<option ${c === cur ? "selected" : ""}>${c}</option>`).join("");
   function routeRisk(a, b) {
@@ -2046,6 +2059,25 @@
     return { level: "Low", text: "Royal cities link through blue and yellow zones. Taking that path, you cannot lose your cargo." };
   }
 
+  async function safeAmount() {
+    const out = $("#sf-out"), id = safeSt.id, city = safeSt.city;
+    out.innerHTML = `<p class="small muted">Loading four weeks of daily sales for ${esc(id)} in ${esc(city)}…</p>`;
+    let pts;
+    try { pts = await ABP.api.daily(id, city); } catch (e) { out.innerHTML = `<p class="small">${esc(e.message)}</p>`; return; }
+    const s = ABP.advisor.safeDaily(pts, { margin: safeSt.margin != null ? safeSt.margin / 100 : null });
+    const why = ABP.advisor.safeReasons(s, city);
+    if (!s.ok) { out.innerHTML = `<div class="notice"><p>${esc(why[0])}</p></div>`; return; }
+    out.innerHTML = `
+      <div class="stats">
+        <div class="stat key"><span class="label">Safe extra a day</span><span class="v">${full(s.safe)}</span><span class="small muted">buying or selling, on top of the normal trade</span></div>
+        <div class="stat"><span class="label">Normal day</span><span class="v">${full(s.med)}</span><span class="small muted">slow day ${full(s.low)}</span></div>
+        <div class="stat"><span class="label">Price effect</span><span class="v">${s.beta == null ? "–" : (-(Math.pow(1.1, s.beta) - 1) * 100).toFixed(1) + "%"}</span><span class="small muted">${s.measured ? "lower on 10% busier days (clear)" : "not clearly above noise"}</span></div>
+        <div class="stat"><span class="label">Price trend</span><span class="v">${(s.weekly * 100).toFixed(1)}%</span><span class="small muted">a week, at ${full(s.price)} lately</span></div>
+      </div>
+      <ul class="why small">${why.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+      <p class="small muted">Rough guide, not a promise: the data counts sales, not the order book, and other traders react too. If your listings stop filling within a day, halve the amount.</p>
+      <details><summary class="small">Daily sales used (${s.days} days)</summary><div class="table-wrap"><table><thead><tr><th>Day</th><th>Sold</th><th>Average price</th></tr></thead><tbody>${pts.filter((p) => p.count > 0).slice().reverse().map((p) => `<tr><td>${vanDate(p.t)}</td><td class="num">${full(p.count)}</td><td class="num">${full(p.price)}</td></tr>`).join("")}</tbody></table></div></details>`;
+  }
   function renderTools() {
     const p = $("#panel-tools");
     p.innerHTML = `
@@ -2083,6 +2115,17 @@
         </div>
         <div id="sh-out"></div>
       </div>
+      <div class="box stack" id="safe">
+        <h3>Safe daily amount</h3>
+        <p class="small muted">How many you can add to a market each day, buying or selling, before you start moving its price. Uses up to four weeks of daily sales for that item and market.</p>
+        <div class="controls">
+          <div class="search" id="sf-wrap" style="grid-column: span 2"><label class="field"><span>Item</span><input type="search" id="sf-item" autocomplete="off" placeholder="Type an item name"></label><div class="results" id="sf-results" hidden></div></div>
+          <label class="field"><span>Market</span><select id="sf-city">${cityOpts(safeSt.city, true)}</select></label>
+          <label class="field"><span>Your margin (%, optional)</span><input type="number" id="sf-margin" min="0" step="any" placeholder="e.g. 12"></label>
+          <div class="field"><span>&nbsp;</span><button class="btn" type="button" id="sf-go">Work it out</button></div>
+        </div>
+        <div id="sf-out"></div>
+      </div>
       <div class="box stack" id="backup">
         <h3>Backup and restore</h3>
         <p class="small muted">Everything you enter lives on this device: your plan, spec, wealth, logs, ledger, alerts and timers. Save a backup file now and then, and restore it on a new phone or after reinstalling.</p>
@@ -2105,6 +2148,13 @@
     [["ench", "#sh-ench"], ["qty", "#sh-qty"], ["rr", "#sh-rr"], ["craftCity", "#sh-city"]].forEach(([k, sel]) => $(sel).addEventListener("change", (e) => { shop[k] = k === "craftCity" ? e.target.value : Math.max(k === "qty" ? 1 : 0, +e.target.value || 0); store.set("shop", shop); }));
     itemPicker("#sh-item", "#sh-results", "#sh-wrap", (id) => { shop.id = id.split("@")[0]; if (id.includes("@")) { shop.ench = +id.split("@")[1]; $("#sh-ench").value = shop.ench; } store.set("shop", shop); shoppingList(); });
     $("#sh-go").addEventListener("click", () => { const v = $("#sh-item").value.trim().toUpperCase(); if (/^T\d_/.test(v)) shop.id = v.split("@")[0]; store.set("shop", shop); shoppingList(); });
+
+    /* Safe daily amount */
+    $("#sf-item").value = safeSt.id; $("#sf-margin").value = safeSt.margin ?? "";
+    $("#sf-city").addEventListener("change", (e) => { safeSt.city = e.target.value; store.set("safe", safeSt); });
+    $("#sf-margin").addEventListener("change", (e) => { safeSt.margin = e.target.value === "" ? null : Math.max(0, +e.target.value || 0); store.set("safe", safeSt); });
+    itemPicker("#sf-item", "#sf-results", "#sf-wrap", (id) => { safeSt.id = id; store.set("safe", safeSt); safeAmount(); });
+    $("#sf-go").addEventListener("click", () => { const v = $("#sf-item").value.trim().toUpperCase(); if (/^T\d_/.test(v)) safeSt.id = v; store.set("safe", safeSt); safeAmount(); });
 
     /* Backup */
     $("#bk-save").addEventListener("click", async () => {

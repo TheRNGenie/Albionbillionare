@@ -271,6 +271,127 @@ ABP.advisor = (() => {
     });
     return { rows };
   }
+  /* ---- Safe daily amount: how much more you can buy or sell a day before you move the price ----
+     Uses up to four weeks of daily sales for one item in one market.
+     1. Normal and slow days: the median and the 25th-percentile daily volume.
+     2. Price sensitivity: on days when more than usual sold, how far did the price sit from its own
+        7-day trend? A log-log fit gives "1% more volume moves the price b%". When that is clearly
+        negative (beyond twice its standard error) we solve for the extra volume that would cost you
+        the allowed drop (3%, or half your margin if smaller).
+     3. Without a clear measured effect we fall back to a share of a slow day, smaller when daily
+        volume swings a lot, because a jumpy market has less room to absorb you. */
+  function safeDaily(points, { margin = null, maxDrop = 0.03 } = {}) {
+    const days = points.filter((p) => p.count > 0 && p.price > 0);
+    if (days.length < 5) return { ok: false, days: days.length };
+    const vols = days.map((d) => d.count).sort((a, b) => a - b);
+    const q = (f) => vols[Math.min(vols.length - 1, Math.floor(f * (vols.length - 1) + 0.5))];
+    const med = q(0.5), low = q(0.25);
+    const mean = vols.reduce((a, v) => a + v, 0) / vols.length;
+    const cv = Math.sqrt(vols.reduce((a, v) => a + (v - mean) ** 2, 0) / Math.max(1, vols.length - 1)) / mean;
+    /* price vs its own centred 7-day median, so a market drifting up or down doesn't count as a volume effect */
+    const xs = [], ys = [];
+    days.forEach((d, i) => {
+      const win = days.slice(Math.max(0, i - 3), i + 4).map((x) => x.price).sort((a, b) => a - b);
+      const ref = win[Math.floor(win.length / 2)];
+      xs.push(Math.log(d.count / med)); ys.push(Math.log(d.price / ref));
+    });
+    const n = xs.length, mx = xs.reduce((a, x) => a + x, 0) / n, my = ys.reduce((a, y) => a + y, 0) / n;
+    const sxx = xs.reduce((a, x) => a + (x - mx) ** 2, 0);
+    let beta = null, se = null;
+    if (sxx > 1e-9 && n >= 7) {
+      beta = xs.reduce((a, x, i) => a + (x - mx) * (ys[i] - my), 0) / sxx;
+      const resid = ys.reduce((a, y, i) => a + (y - my - beta * (xs[i] - mx)) ** 2, 0);
+      se = Math.sqrt(resid / (n - 2) / sxx);
+    }
+    const drop = Math.max(0.005, Math.min(maxDrop, margin != null && margin > 0 ? margin / 2 : maxDrop));
+    const measured = beta != null && beta < 0 && -beta > 2 * se;
+    const share = cv < 0.35 ? 0.25 : cv < 0.7 ? 0.15 : 0.1;
+    const shareCap = share * low;
+    let safe, method;
+    if (measured) {
+      const extra = med * (Math.exp(Math.log(1 - drop) / beta) - 1);
+      safe = Math.min(extra, 0.5 * med); method = "measured";
+    } else { safe = shareCap; method = "share"; }
+    /* falling prices over the period mean supply already outruns demand: halve the room */
+    const first = days.slice(0, Math.min(7, days.length)), last = days.slice(-Math.min(7, days.length));
+    const avgP = (arr) => arr.reduce((a, d) => a + d.price * d.count, 0) / arr.reduce((a, d) => a + d.count, 0);
+    const trend = avgP(last) / avgP(first) - 1;
+    const weeks = Math.max(1, (days[days.length - 1].t - days[0].t) / (7 * 864e5));
+    const weekly = trend / weeks;
+    if (weekly < -0.05) safe /= 2;
+    return { ok: true, days: n, med, low, mean, cv, beta, se, measured, drop, share, safe: Math.max(med >= 1 ? 1 : 0, Math.floor(safe)), method, weekly, price: avgP(last) };
+  }
+  function safeReasons(s, where) {
+    if (!s.ok) return [`Only ${s.days} days with sales in ${where}, which is too little to judge. Sell one or two and watch.`];
+    const r = [`Over ${s.days} days with sales in ${where}, a normal day sells ${n(s.med)} and a slow day ${n(s.low)}.`];
+    if (s.measured) r.push(`Measured price pressure: on days 10% busier than usual the price sat ${(-(Math.pow(1.1, s.beta) - 1) * 100).toFixed(1)}% lower. Keeping your extra amount under ${n(s.safe)} a day holds that drop to at most ${(s.drop * 100).toFixed(1)}%.`);
+    else r.push(`Busier days didn't clearly move the price${s.beta != null ? " (the effect stayed inside the noise)" : ""}, so the cap is ${Math.round(s.share * 100)}% of a slow day: daily volume ${s.cv < 0.35 ? "is steady" : s.cv < 0.7 ? "swings a fair bit" : "swings a lot"}, so ${s.cv < 0.35 ? "the market has room" : "leave more room"}.`);
+    if (s.weekly < -0.05) r.push(`The price fell about ${Math.round(-s.weekly * 100)}% a week over this period, so supply already outruns demand; the cap is halved.`);
+    else if (s.weekly > 0.05) r.push(`The price rose about ${Math.round(s.weekly * 100)}% a week, so demand is growing; the cap is still kept cautious.`);
+    return r;
+  }
+
+  /* ---- Hidden gems: big margins on things that sell only a few a day ----
+     They won't scale, but each one pays. Every gem must have sold at least 3 in the last week at or
+     near the price used (so it is not a fantasy listing) and use prices under 24 hours old. */
+  async function gems() {
+    const gearIds = [];
+    for (const t of [4, 5, 6, 7, 8]) for (const e of [0, 1, 2]) for (const [b] of ABP.BM_GEAR) gearIds.push(`T${t}_${b}${e ? "@" + e : ""}`);
+    const resIds = [];
+    for (const r of ABP.RESOURCES) for (let t = 4; t <= 8; t++) for (const e of [0, 1, 2]) resIds.push(`T${t}_${r.refined}${e ? `_LEVEL${e}@${e}` : ""}`);
+    ABP.CROPS.concat(ABP.HERBS).forEach((c) => resIds.push(c.crop));
+    const ids = gearIds.concat(resIds);
+    const idx = ABP.api.index(await ABP.api.prices(ids, [...ABP.CITIES, ABP.BM]));
+    const young = (iso) => iso && ageH(iso) <= 24;
+    const cand = [];
+    for (const id of ids) {
+      const by = idx[id]; if (!by) continue;
+      /* same-city order flip */
+      for (const c of ABP.CITIES) {
+        const x = by[c]; if (!x?.sell || !x.buy || !young(x.sellDate) || !young(x.buyDate) || x.sell > x.buy * 3) continue;
+        const cost = x.buy * (1 + F().setupFee), keep = x.sell * keepOrder(), profit = keep - cost;
+        if (profit / cost >= 0.25) cand.push({ kind: "Order flip", id, buyCity: c, sellCity: c, buyHow: "a buy order", sellHow: "a sell order", cost, keep, ref: x.sell, profit, margin: profit / cost, date: x.sellDate });
+      }
+      /* Black Market: instant buy in a city, sell into the BM order */
+      const bm = by[ABP.BM];
+      if (bm?.buy && young(bm.buyDate)) {
+        const src = cheapest(by, ABP.CITIES);
+        if (src && young(src.sellDate)) {
+          const keep = bm.buy * (1 - F().salesTaxPremium), profit = keep - src.sell;
+          if (profit / src.sell >= 0.25 && bm.buy < src.sell * 3) cand.push({ kind: "Black Market", id, buyCity: src.city, sellCity: ABP.BM, buyHow: "instant buy", sellHow: "the Black Market order", cost: src.sell, keep, ref: bm.buy, profit, margin: profit / src.sell, date: bm.buyDate });
+        }
+      }
+      /* city to city: instant buy where cheapest, list where dearest */
+      const lo = cheapest(by, ABP.CITIES), hi = dearest(by, ABP.CITIES);
+      if (lo && hi && lo.city !== hi.city && young(lo.sellDate) && young(hi.sellDate) && hi.sell < lo.sell * 3) {
+        const keep = hi.sell * keepOrder(), profit = keep - lo.sell;
+        if (profit / lo.sell >= 0.3) cand.push({ kind: "City to city", id, buyCity: lo.city, sellCity: hi.city, buyHow: "instant buy", sellHow: "a sell order", cost: lo.sell, keep, ref: hi.sell, profit, margin: profit / lo.sell, date: hi.sellDate });
+      }
+    }
+    cand.sort((a, b) => b.profit - a.profit);
+    let rows = cand.slice(0, 60);
+    const byCity = {};
+    rows.forEach((r) => (byCity[r.sellCity] = byCity[r.sellCity] || new Set()).add(r.id));
+    const vols = Object.fromEntries(await Promise.all(Object.entries(byCity).map(([c, set]) => ABP.api.volumes([...set], [c]).then((v) => [c, v]).catch(() => [c, {}]))));
+    rows.forEach((r) => { const v = vols[r.sellCity]?.[r.id]?.[r.sellCity]; r.sold = v?.sold ?? 0; r.perDay = v?.perDay ?? 0; r.avg = v?.avg ?? null; });
+    /* keep only the low-volume, proven ones: sold 3+ last week, under 5 a day, average sale at least 85% of the price used */
+    rows = rows.filter((r) => r.sold >= 3 && r.perDay < 5 && r.avg && r.avg >= r.ref * 0.85);
+    const seen = new Set();
+    rows = rows.filter((r) => { const k = r.id + r.kind; if (seen.has(k)) return false; seen.add(k); return true; });
+    rows.forEach((r) => { r.take = Math.max(1, Math.floor(r.perDay * 0.3)); r.daily = r.profit * r.take; r.label = itemName(r.id); });
+    rows.sort((a, b) => b.daily - a.daily);
+    rows = rows.slice(0, 12);
+    rows.forEach((r) => {
+      r.reasons = [
+        `${r.kind === "Order flip" ? `In ${r.buyCity}, buy with ${r.buyHow} at ${n(r.cost)} (fee included) and relist` : `Instant-buy it in ${r.buyCity} for ${n(r.cost)} and ${r.sellCity === ABP.BM ? "sell it into the Black Market order" : `list it in ${r.sellCity}`}`}: you keep ${n(r.keep)}, so ${n(r.profit)} each (${pct(r.margin)}).`,
+        `Proof it works: ${n(r.sold)} sold in ${r.sellCity} over the last week, at an average of ${n(r.avg)}, close to the ${n(r.ref)} used here (${age(r.date)}).`,
+        `Only about ${r.perDay.toFixed(1)} sell a day, so this doesn't scale: plan on ${r.take} a day${r.take === 1 ? " at most" : ""}, worth about ${short(r.daily)}. Do more and you become the market.`,
+        r.buyCity !== r.sellCity && [r.buyCity, r.sellCity].some((c) => c === "Caerleon" || c === ABP.BM || c === "Brecilien") ? `The trip crosses red or black zones. Carry only what you can lose.` : r.buyCity !== r.sellCity ? `${r.buyCity} to ${r.sellCity} is through safe zones.` : `No travel: both orders sit in ${r.buyCity}.`,
+      ];
+    });
+    return { rows };
+  }
+
   function itemName(id) {
     const m = id.match(/^T(\d)_(.+?)(?:_LEVEL\d)?(?:@(\d))?$/);
     if (!m) return id;
@@ -281,5 +402,5 @@ ABP.advisor = (() => {
     return `T${m[1]}${m[3] ? "." + m[3] : ""} ${name}`;
   }
 
-  return { crops, refining, blackMarket, journals, flips, short, n, age };
+  return { crops, refining, blackMarket, journals, flips, gems, safeDaily, safeReasons, itemName, short, n, age };
 })();
