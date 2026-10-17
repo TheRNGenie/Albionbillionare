@@ -2986,7 +2986,7 @@
       for (const x of s.sell.slice().sort((a, b) => b.units * b.target - a.units * a.target)) rows.push(`<tr><td>Sell ${L(x.key)}</td><td class="num">${full(x.units)}</td><td>target ${full(x.target)}, never under ${full(x.floor)}</td></tr>`);
       if (!home) for (const b of merge(s.buy, "m")) rows.push(`<tr><td>Buy ${L(b.m)}${later}</td><td class="num">${full(b.qty)}</td><td>${b.max ? `about ${full(b.price)}, max ${full(b.max)}` : `about ${full(b.price)}`}</td></tr>`);
       for (const b of merge(s.raw, "m")) rows.push(`<tr><td>Buy ${L(b.m)} to refine</td><td class="num">${full(b.qty)}</td><td>about ${full(b.price)}</td></tr>`);
-      for (const x of s.refine) rows.push(`<tr><td>Refine ${L(x.m)}${home ? "" : later}</td><td class="num">${full(x.qty)}</td><td>no focus</td></tr>`);
+      for (const x of s.refine) rows.push(`<tr><td>Refine ${L(x.m)} from the raw materials bought on the last loop, no focus</td><td class="num">${full(x.qty)}</td><td>costs about ${full(x.refine.own)} each (${full(x.refine.buy)} to buy)</td></tr>`);
       const verbs = [s.buy.length || s.raw.length ? "buy" : "", s.craft.length ? "craft" : "", s.sell.length ? "sell" : "", s.refine.length ? "refine" : ""].filter(Boolean);
       const kgOut = s.sell.reduce((a, x) => a + x.kg, 0);
       return `<div class="stack"><h4>${i + 1}. ${esc(s.city)}: ${verbs.join(", ")}</h4>
@@ -2997,7 +2997,13 @@
     const refineSave = shop.filter((x) => x.refine).reduce((a, x) => a + x.qty * (x.refine.buy - x.refine.own), 0);
     el.innerHTML = `
       <p>${S.name} (${S.range}): about <strong>${fmt(P.profit)}</strong> a day from ${fmt(P.spent)} of materials${refineSave > 0 ? `, plus about ${fmt(refineSave)} saved by refining your own` : ""}. Do the stops in this order every day.</p>
-      <p class="small muted">On day one, buy everything on the shopping list below before you craft. After that each loop buys tomorrow's materials on the way.</p>
+      ${shop.some((x) => x.refine) ? `<h4>Day one only (nothing to refine yet)</h4>
+      <p class="small">Buy these refined materials ready-made, and skip the refining step today.</p>
+      <div class="table-wrap"><table><thead><tr><th>Buy</th><th>In</th><th>Amount</th><th>Price</th></tr></thead><tbody>
+      ${shop.filter((x) => x.refine).map((x) => { const mx = A.buys.find((b) => b.m === x.m)?.max; return `<tr><td>${L(x.m)}</td><td>${esc(x.refine.buyCity || x.city)}</td><td class="num">${full(x.qty)}</td><td>about ${full(x.price)}${mx ? `, max ${full(mx)}` : ""}</td></tr>`; }).join("")}
+      </tbody></table></div>
+      <h4>Every day after</h4>
+      <p class="small muted">The raw materials are bought along the loop and carried back to ${esc([...new Set(shop.filter((x) => x.refine).map((x) => x.refine.res.city))].join(" and "))}, where they're refined the next morning.</p>` : `<p class="small muted">On day one, buy everything on the shopping list below before you craft. After that each loop buys tomorrow's materials on the way.</p>`}
       ${order.map(stopHtml).join("")}
       ${order.length > 1 ? `<p class="small muted">Ride back to ${esc(craftCity)} carrying about ${full(kgIn)} kg of materials for tomorrow.</p>` : ""}
       <h4>Shopping list</h4>
