@@ -60,6 +60,12 @@ The same app is packaged for Android with [Capacitor](https://capacitorjs.com/).
 - **Return rate by city** (Tools → Crafting shopping list): every city's return rate for the recipe, its bonus city, and the materials cost in each.
 - **Loss budget** (Tools): log losses and count risky runs; risky Best picks then show your real average loss per run.
 
+## Crafting plans
+
+The Crafting tab builds a full plan for one category the player picks (swords, leather jackets, potions and so on); it never shows a single overall best. Every item in the category, up to the highest tier the player can craft and at every enchant, is priced from the last 28 days of Albion Data Project daily history (normal quality, royal cities, plus Caerleon and the Black Market when that toggle is on). Each item is crafted in its bonus city at the wiki's return rates, after 6.5% market fees and a 2% station-fee allowance.
+
+Each stage (spec 0 to 30, 30 to 75, 75 to 100) runs the same day: 10,000 focus on the crafts focus helps most, then the material budget on no-focus crafts with the best return, never more than the safe daily amount per city, and at most 8 different items. The report covers the pick, every item ranked, the route by stage with crafting fame, return rates and focus by spec, a city-by-city loop, the shopping list, refining your own materials, a price sheet with targets and break-even limits, and the risks. The same crafts are re-priced with each of the four weeks to give a worst week. Logic lives in `assets/js/crafting.js`.
+
 ## Windows app
 
 The same app runs as a Windows desktop program, built with Electron by `.github/workflows/windows.yml` on every push.

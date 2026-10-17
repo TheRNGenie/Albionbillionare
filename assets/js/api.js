@@ -154,6 +154,24 @@ ABP.api = (() => {
     return (r?.data || []).map((p) => ({ t: new Date(p.timestamp + (p.timestamp.endsWith("Z") ? "" : "Z")), price: p.avg_price, count: p.item_count })).sort((a, b) => a.t - b.t);
   }
 
+  /* Daily sales for many items and markets at once: map[id][city] = [{t, price, count}], oldest first. */
+  async function dailyMany(ids, locations, days = 28, quality = 1) {
+    const from = new Date(Date.now() - days * 864e5);
+    const date = `${from.getUTCMonth() + 1}-${from.getUTCDate()}-${from.getUTCFullYear()}`;
+    const loc = encodeURIComponent(locations.join(","));
+    const parts = chunk([...new Set(ids)]);
+    const results = await Promise.all(parts.map((p) =>
+      getJSON(`${host()}/api/v2/stats/history/${p.map(encodeURIComponent).join(",")}.json?locations=${loc}&qualities=${quality}&time-scale=24&date=${date}`)
+    ));
+    const out = {};
+    for (const r of results.flat()) {
+      const pts = (r.data || []).map((p) => ({ t: new Date(p.timestamp + (p.timestamp.endsWith("Z") ? "" : "Z")), price: p.avg_price, count: p.item_count })).sort((a, b) => a.t - b.t);
+      const m = (out[r.item_id] = out[r.item_id] || {});
+      if (!m[r.location] || pts.length > m[r.location].length) m[r.location] = pts;
+    }
+    return out;
+  }
+
   /* 7-day sales per item and market: map[id][city] = { sold, perDay, avg }. */
   async function volumes(ids, locations, quality = 1) {
     const loc = encodeURIComponent(locations.join(","));
@@ -201,6 +219,6 @@ ABP.api = (() => {
     clearCache() { cache.clear(); },
     get server() { return server; },
     set server(v) { server = v; cache.clear(); try { localStorage.setItem("abp.server", v); } catch (e) {} },
-    host, prices, index, history, hourly, daily, volumes, gold, itemNames, nameOf,
+    host, prices, index, history, hourly, daily, dailyMany, volumes, gold, itemNames, nameOf,
   };
 })();
