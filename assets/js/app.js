@@ -31,7 +31,7 @@
   const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
   /* ---------- Tabs ---------- */
-  const TABS = ["plan", "picks", "crafting", "methods", "market", "calc", "wiki", "wealth", "progress", "tools", "times"];
+  const TABS = ["plan", "picks", "crafting", "matchups", "methods", "market", "calc", "wiki", "wealth", "progress", "tools", "times"];
   const rendered = {};
   function show(tab) {
     if (!TABS.includes(tab)) tab = "plan";
@@ -3207,7 +3207,7 @@
     window.addEventListener("touchend", () => { if (y0 != null && dy > 90) refreshAll(); y0 = null; pull.classList.remove("on"); }, { passive: true });
   })();
 
-  const RENDER = { plan: renderPlan, picks: renderPicks, crafting: renderCrafting, methods: renderMethods, market: renderMarket, calc: renderCalc, wiki: renderWiki, wealth: renderWealth, progress: renderProgress, tools: renderTools, times: renderTimes };
+  const RENDER = { plan: renderPlan, picks: renderPicks, crafting: renderCrafting, matchups: () => ABP.renderMatchups(), methods: renderMethods, market: renderMarket, calc: renderCalc, wiki: renderWiki, wealth: renderWealth, progress: renderProgress, tools: renderTools, times: renderTimes };
   tickClock();
   scheduleReminders();
 
