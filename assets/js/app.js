@@ -2860,9 +2860,10 @@
       if (gen !== crGen) return;
       const hist = Object.assign({}, hm, hi);
       const run = (ks) => C.analyse({ R, keys: ks, hist, catKey: cr.cat, budgets: [cr.b1, cr.b2], risky: cr.risky });
-      const A = run(keys);
-      /* each item line (Mercenary Jacket, Claymore, ...) on its own, best first */
+      /* each item line (Mercenary Jacket, Claymore, ...) on its own, best first; the mix plans only the top 4 */
       const lines = linesOf(keys).map((ln) => ({ ...ln, A: run(ln.keys) })).sort((a, b) => b.A.stages[1].royal.med - a.A.stages[1].royal.med);
+      const A = run(lines.filter((l) => l.A.stages[1].royal.med > 0).slice(0, MIX_LINES).flatMap((l) => l.keys));
+      A.mixOf = lines.filter((l) => l.A.stages[1].royal.med > 0).slice(0, MIX_LINES).map((l) => l.name);
       crLast = { A, R, lines };
       drawCraft();
       time.textContent = `Built ${vanTime(new Date())} from ${ABP.SERVERS.find((s) => s.id === ABP.api.server).label} market history`;
@@ -2874,6 +2875,7 @@
   }
 
   /* Item lines within a category: every tier and enchant of one item, named without the tier word. */
+  const MIX_LINES = 4;
   const TIER_WORD = /^(Beginner's|Novice's|Journeyman's|Adept's|Expert's|Master's|Grandmaster's|Elder's)\s+/;
   function linesOf(keys) {
     const C = ABP.crafting, m = new Map();
@@ -2900,8 +2902,8 @@
     const bestTier = (X) => { const c = {}; for (const r of X.stages[1].royal.rows) c[r.s.key] = (c[r.s.key] || 0) + r.units * r.each; const k = Object.entries(c).sort((a, b) => b[1] - a[1])[0]; return k ? tierOf(k[0]) : "–"; };
     const picker = `<section class="box stack" id="cr-lines">
       <h3>Choose the item</h3>
-      <p>Pick one item to get its own plan and the daily loop city by city, the same layout as the leather jacket plan. Or keep the best mix across all ${esc(lc)}.</p>
-      <label class="field"><span>Item</span><select id="cr-line"><option value="">The best mix of ${esc(lc)}</option>${lines.map((l) => `<option value="${esc(l.line)}" ${line && line.line === l.line ? "selected" : ""}>${esc(l.name)}${l.A.stages[1].royal.med > 0 ? ` (about ${fmt(l.A.stages[1].royal.med)} a day)` : " (nothing pays now)"}</option>`).join("")}</select></label>
+      <p>Pick one item to get its own plan and the daily loop city by city, the same layout as the leather jacket plan. Or keep the best mix, which plans only the top ${MIX_LINES} items in this list${crLast.A.mixOf?.length ? ` (${esc(crLast.A.mixOf.join(", "))})` : ""}.</p>
+      <label class="field"><span>Item</span><select id="cr-line"><option value="">The best mix: top ${MIX_LINES} ${esc(lc)}</option>${lines.map((l) => `<option value="${esc(l.line)}" ${line && line.line === l.line ? "selected" : ""}>${esc(l.name)}${l.A.stages[1].royal.med > 0 ? ` (about ${fmt(l.A.stages[1].royal.med)} a day)` : " (nothing pays now)"}</option>`).join("")}</select></label>
       <div class="table-wrap"><table><thead><tr><th>Item</th><th>Stage 1 a day</th><th>Stage 2 a day</th><th>Worst week</th><th>Best tier</th><th></th></tr></thead><tbody>
       ${lines.slice(0, 12).map((l) => `<tr class="${line && line.line === l.line ? "on" : ""}"><td>${esc(l.name)}</td><td class="num">${fmt(l.A.stages[0].royal.med)}</td><td class="num money">${fmt(l.A.stages[1].royal.med)}</td><td class="num">${fmt(l.A.stages[1].royal.worst)}</td><td>${bestTier(l.A)}</td><td><button type="button" class="chip" data-line="${esc(l.line)}">Plan it</button></td></tr>`).join("")}
       </tbody></table></div>
@@ -2937,7 +2939,7 @@
       ${line ? `<h3>The pick: ${esc(line.name)}, ${tierList}</h3>
       <p>Craft ${esc(line.name)}s ${where}, and sell them in the royal cities. ${tiers.length > 1 ? "These tiers" : "This tier"} paid best of the ${A.priced.length} tiers and enchants up to T${cr.maxTier}, priced from the last four weeks of daily trades.</p>`
       : `<h3>The pick: ${list}</h3>
-      <p>Craft them ${where}, and sell them in the royal cities. They come out on top of ${A.priced.length} ${esc(lc)} up to T${cr.maxTier}, priced from the last four weeks of daily trades.</p>`}
+      <p>Craft them ${where}, and sell them in the royal cities. The plan mixes the top ${MIX_LINES} items (${esc((A.mixOf || []).join(", "))}), at every tier up to T${cr.maxTier}, priced from the last four weeks of daily trades.</p>`}
       <div class="table-wrap"><table><thead><tr><th>Stage</th><th>Materials a day</th><th>Royal cities: profit a day</th><th>Worst week</th>${A.risky ? "<th>Plus Caerleon and Black Market</th><th>Worst week</th>" : ""}</tr></thead><tbody>
       ${A.stages.map((s, i) => `<tr class="${i === stageNow ? "on" : ""}"><td>${s.name} <small class="muted">(${s.range})</small></td><td class="num">${fmt(s.royal.spent)}</td><td class="num money">${fmt(s.royal.med)}</td><td class="num">${fmt(s.royal.worst)}</td>${A.risky ? `<td class="num money">${fmt(s.risky.med)}</td><td class="num">${fmt(s.risky.worst)}</td>` : ""}</tr>`).join("")}
       </tbody></table></div>
