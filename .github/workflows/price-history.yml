@@ -16,10 +16,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
-      - run: python3 tools/fetch_history.py 2025-10-01 west
+      - run: python3 tools/fetch_history.py 2025-10-01 west T2_LEATHER,T3_HIDE,T3_LEATHER,T4_HIDE,T4_HIDE_LEVEL1@1,T4_HIDE_LEVEL2@2,T4_HIDE_LEVEL3@3,T5_HIDE,T5_HIDE_LEVEL1@1,T5_HIDE_LEVEL2@2,T5_HIDE_LEVEL3@3,T6_HIDE,T6_HIDE_LEVEL1@1,T6_HIDE_LEVEL2@2,T6_HIDE_LEVEL3@3 data/history/hides.csv.gz
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
-          git add data/history/daily.csv.gz
+          git add data/history/
           git commit -m "Price history snapshot $(date -u +%F)"
           git push

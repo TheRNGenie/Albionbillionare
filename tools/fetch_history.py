@@ -18,6 +18,10 @@ STD = re.compile(r"^T[4-8]_(PLANKS|METALBAR|LEATHER|CLOTH)(_LEVEL\d)?(@\d)?$")
 ids = [k for k, (f, a, m) in d["r"].items() if k[:2] in ("T4", "T5", "T6", "T7", "T8") and all(STD.match(x[0]) for x in m)]
 mats = sorted({x[0] for k in ids for x in d["r"][k][2]})
 ids = mats + sorted(ids)
+OUT = "data/history/daily.csv.gz"
+if len(sys.argv) > 3:  # explicit id list, e.g. raw hides for the refining study
+    ids = sys.argv[3].split(",")
+    OUT = sys.argv[4]
 print(len(ids), "ids", flush=True)
 
 agg = {}
@@ -53,7 +57,7 @@ for i in range(0, len(ids), B):
     time.sleep(0.7)
 
 os.makedirs("data/history", exist_ok=True)
-with gzip.open("data/history/daily.csv.gz", "wt", newline="") as f:
+with gzip.open(OUT, "wt", newline="") as f:
     w = csv.writer(f); w.writerow(["item", "location", "date", "count", "avg_price"])
     for (it, loc, day), (c, s) in sorted(agg.items()):
         w.writerow([it, loc, day, c, round(s / c)])
