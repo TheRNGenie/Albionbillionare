@@ -2972,7 +2972,7 @@
     at(craftCity).craft.push(...[...crafts.values()].sort((a, b) => b.focus - a.focus));
     for (const r of P.rows) {
       const sh = A.sells.find((x) => x.s.key === r.s.key && x.s.city === r.s.city);
-      at(r.s.city).sell.push({ key: r.s.key, units: r.units, target: r.s.price, floor: r.focus ? sh?.beFocus : sh?.beBought, kg: r.units * A.kgOf(r.s.key) });
+      at(r.s.city).sell.push({ key: r.s.key, city: r.s.city, units: r.units, target: r.s.price, floor: r.focus ? sh?.beFocus : sh?.beBought, kg: r.units * A.kgOf(r.s.key) });
     }
     const order = [stops.get(craftCity)].concat([...stops.values()].filter((s) => s.city !== craftCity)
       .sort((a, b) => ((a.city === refineCity) - (b.city === refineCity)) || b.sell.length - a.sell.length));
@@ -2987,6 +2987,13 @@
       if (!home) for (const b of merge(s.buy, "m")) rows.push(`<tr><td>Buy ${L(b.m)}${later}</td><td class="num">${full(b.qty)}</td><td>${b.max ? `about ${full(b.price)}, max ${full(b.max)}` : `about ${full(b.price)}`}</td></tr>`);
       for (const b of merge(s.raw, "m")) rows.push(`<tr><td>Buy ${L(b.m)} to refine</td><td class="num">${full(b.qty)}</td><td>about ${full(b.price)}</td></tr>`);
       for (const x of s.refine) rows.push(`<tr><td>Refine ${L(x.m)} from the raw materials bought on the last loop, no focus</td><td class="num">${full(x.qty)}</td><td>costs about ${full(x.refine.own)} each (${full(x.refine.buy)} to buy)</td></tr>`);
+      /* silver in and out at this stop, at last week's prices */
+      const spend = s.buy.reduce((a, b) => a + b.qty * b.price, 0) + s.raw.reduce((a, b) => a + b.qty * b.price, 0);
+      const earn = s.sell.reduce((a, x) => a + x.units * x.target * (1 - A.feeOf(x.city) + ABP.crafting.STATION), 0);
+      const fee = s.craft.reduce((a, c) => a + c.units * (A.sells.find((x) => x.s.key === c.key)?.last || 0) * ABP.crafting.STATION, 0)
+        + s.refine.reduce((a, x) => a + x.qty * x.refine.buy * 0.01, 0);
+      tot.spend += spend; tot.earn += earn; tot.fee += fee;
+      rows.push(`<tr class="on"><td><strong>Stop total</strong></td><td></td><td>${[spend ? `spend ${fmt(spend)}` : "", earn ? `earn ${fmt(earn)}` : "", fee ? `station fee ${fmt(fee)}` : ""].filter(Boolean).join(", ") || "–"}</td></tr>`);
       const verbs = [s.buy.length || s.raw.length ? "buy" : "", s.craft.length ? "craft" : "", s.sell.length ? "sell" : "", s.refine.length ? "refine" : ""].filter(Boolean);
       const kgOut = s.sell.reduce((a, x) => a + x.kg, 0);
       return `<div class="stack"><h4>${i + 1}. ${esc(s.city)}: ${verbs.join(", ")}</h4>
@@ -2994,18 +3001,27 @@
         ${s.craft.length ? `<p class="small muted">Spend focus first, then craft the rest without it. Skip anything whose price today is under its limit at the next stops.</p>` : ""}
         ${kgOut ? `<p class="small muted">About ${full(kgOut)} kg of ${esc(lc)} to sell here.</p>` : ""}</div>`;
     };
+    const tot = { spend: 0, earn: 0, fee: 0 };
+    const loopHtml = order.map(stopHtml).join("");
+    const dayOne = shop.filter((x) => x.refine);
+    const dayOneSpend = dayOne.reduce((a, x) => a + x.qty * x.price, 0);
+    const rawSpend = order.reduce((a, s) => a + s.raw.reduce((b, r) => b + r.qty * r.price, 0), 0);
+    const kept = tot.earn - tot.spend - tot.fee;
     const refineSave = shop.filter((x) => x.refine).reduce((a, x) => a + x.qty * (x.refine.buy - x.refine.own), 0);
     el.innerHTML = `
       <p>${S.name} (${S.range}): about <strong>${fmt(P.profit)}</strong> a day from ${fmt(P.spent)} of materials${refineSave > 0 ? `, plus about ${fmt(refineSave)} saved by refining your own` : ""}. Do the stops in this order every day.</p>
       ${shop.some((x) => x.refine) ? `<h4>Day one only (nothing to refine yet)</h4>
       <p class="small">Buy these refined materials ready-made, and skip the refining step today.</p>
       <div class="table-wrap"><table><thead><tr><th>Buy</th><th>In</th><th>Amount</th><th>Price</th></tr></thead><tbody>
-      ${shop.filter((x) => x.refine).map((x) => { const mx = A.buys.find((b) => b.m === x.m)?.max; return `<tr><td>${L(x.m)}</td><td>${esc(x.refine.buyCity || x.city)}</td><td class="num">${full(x.qty)}</td><td>about ${full(x.price)}${mx ? `, max ${full(mx)}` : ""}</td></tr>`; }).join("")}
+      ${dayOne.map((x) => { const mx = A.buys.find((b) => b.m === x.m)?.max; return `<tr><td>${L(x.m)}</td><td>${esc(x.refine.buyCity || x.city)}</td><td class="num">${full(x.qty)}</td><td>about ${full(x.price)}${mx ? `, max ${full(mx)}` : ""}</td></tr>`; }).join("")}
+      <tr class="on"><td><strong>Day-one total</strong></td><td></td><td></td><td>spend ${fmt(dayOneSpend)}</td></tr>
       </tbody></table></div>
       <h4>Every day after</h4>
       <p class="small muted">The raw materials are bought along the loop and carried back to ${esc([...new Set(shop.filter((x) => x.refine).map((x) => x.refine.res.city))].join(" and "))}, where they're refined the next morning.</p>` : `<p class="small muted">On day one, buy everything on the shopping list below before you craft. After that each loop buys tomorrow's materials on the way.</p>`}
-      ${order.map(stopHtml).join("")}
+      ${loopHtml}
       ${order.length > 1 ? `<p class="small muted">Ride back to ${esc(craftCity)} carrying about ${full(kgIn)} kg of materials for tomorrow.</p>` : ""}
+      <p><strong>Whole loop, at current prices:</strong> spend ${fmt(tot.spend)}, earn ${fmt(tot.earn)}, station fees ${fmt(tot.fee)}, so you keep about <strong>${fmt(kept)}</strong> a day.${dayOne.length ? ` Day one spends ${fmt(tot.spend - rawSpend + dayOneSpend)} instead, because it buys the refined materials ready-made.` : ""}</p>
+      <p class="small muted">Stop totals use last week's prices: purchases at last week's price, sales at the target price less market fees, and a station fee of about ${pct(ABP.crafting.STATION, 0)} of the value of what's crafted (1% for refining). The profit table at the top uses the middle of the last four weeks instead, so the two can differ.</p>
       <h4>Shopping list</h4>
       <div class="table-wrap"><table><thead><tr><th>Material</th><th>Buy in</th><th>Amount</th><th>Price</th><th>Cost</th><th>Share of daily sales there</th></tr></thead><tbody>
       ${shop.map((x) => `<tr><td>${L(x.m)}</td><td>${esc(x.city)}</td><td class="num">${full(x.qty)}</td><td class="num">${full(x.price)}</td><td class="num">${fmt(x.cost)}</td><td class="num ${x.share > 0.25 ? "bad" : ""}">${x.share == null ? "–" : pct(x.share, 0)}</td></tr>`).join("")}
