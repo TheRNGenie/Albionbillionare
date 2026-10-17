@@ -8,6 +8,17 @@ window.ABP = window.ABP || {};
 ABP.crafting = (() => {
   const ROYAL = ["Bridgewatch", "Fort Sterling", "Lymhurst", "Martlock", "Thetford"];
   const RISKY = ["Caerleon", "Brecilien", "Black Market"];
+  /* The royal cities in ring order: each one borders the next through blue and yellow zones. */
+  const RING = ["Thetford", "Fort Sterling", "Lymhurst", "Bridgewatch", "Martlock"];
+  /* Pack mounts at Excellent quality (albiononlinegrind's table; the ratios match maxload in Albion's spells.json).
+     No Transport Mammoth: the plans are sized for one ox or Direbear. */
+  const MOUNTS = [
+    { id: "ox8", name: "Elder's Transport Ox (T8)", kg: 3657 },
+    { id: "bear8", name: "Saddled Direbear (T8)", kg: 3090 },
+    { id: "ox7", name: "Grandmaster's Transport Ox (T7)", kg: 3058 },
+    { id: "ox6", name: "Master's Transport Ox (T6)", kg: 2577 },
+    { id: "ox5", name: "Expert's Transport Ox (T5)", kg: 2204 },
+  ];
   const STATION = 0.02; /* station fee allowance on crafts, as a share of the sale price */
   const REFINE_STATION = 0.01;
   const DAYS = 28;
@@ -188,7 +199,7 @@ ABP.crafting = (() => {
     }
 
     const STAGES = [
-      { name: "Stage 1", range: "spec 0 to 30", spec: 0, budget: budgets[0] },
+      { name: "Stage 1", range: "spec 0 to 30", spec: 15, budget: budgets[0] },
       { name: "Stage 2", range: "spec 30 to 75", spec: 50, budget: budgets[1] },
       { name: "Stage 3", range: "spec 75 to 100", spec: 90, budget: budgets[1] },
     ];
@@ -248,6 +259,152 @@ ABP.crafting = (() => {
       }).sort((a, b) => b.cost - a.cost);
     }
     const kgOf = (key) => R.w[baseOf(key)] ?? 0;
+    const wOf = (m) => R.w[baseOf(m)] ?? R.w[baseOf(m).replace(/_LEVEL\d$/, "")] ?? 0;
+    const priceIn = (m, city) => stat(m, city)?.w[0]?.price || null;
+
+    /* One stage's daily loop around the royal ring, sized to one mount.
+       Everything on board is tracked leg by leg: jackets until they are sold, materials from where they are
+       bought to where they are used, raw inputs to the refining city, refined output on to the crafting city.
+       When the heaviest leg is over the mount's capacity, the loop gives up the cheapest weight first: buy a
+       material in the crafting city instead of carrying it, or refine less of what saves the least per kilo and
+       buy that ready-made. */
+    function loop(P, cap = Infinity) {
+      if (!P?.rows.length) return null;
+      const shop = shopping(P);
+      const craftCity = craftPlace(P.rows[0].s.key, true).city || (shop[0] && shop[0].city) || ROYAL[0];
+      const perUnitIn = (m) => R.r[m][2].map(([x, n]) => {
+        const q = n * (1 - RET.refineBonus.none) / R.r[m][1];
+        const cheap = matPrice(x, 0);
+        return { x, q, cheap };
+      });
+      const refinables = shop.filter((x) => x.refine).map((x) => {
+        const city = x.refine.res.city;
+        const ins = perUnitIn(x.m).map((i) => {
+          /* refined inputs (the tier-below material) are bought in the refining city when it's within 5% of the cheapest */
+          const here = priceIn(i.x, city);
+          const at = refinedRes(i.x) && here && i.cheap && here <= i.cheap.price * 1.05 ? { city, price: here } : i.cheap;
+          return { ...i, city: at.city, price: at.price };
+        });
+        /* bought ready-made instead: in the crafting or refining city, whichever is cheaper, so it adds no extra trip */
+        const opts = [craftCity, city].map((c) => ({ city: c, price: priceIn(x.m, c) })).filter((o) => o.price);
+        const ready = opts.sort((a, b) => a.price - b.price)[0] || { city: x.city, price: x.price };
+        const own = sum(ins, (i) => i.q * i.price) * (1 + REFINE_STATION);
+        return { m: x.m, qty: x.qty, city, ins, ready, own, saving: ready.price - own, share: x.share };
+      });
+      const plain = shop.filter((x) => !x.refine);
+
+      /* sales: where each crafted item is sold */
+      const sales = P.rows.map((r) => {
+        const sh = sells.find((x) => x.s.key === r.s.key && x.s.city === r.s.city);
+        return { key: r.s.key, city: r.s.city, units: r.units, focus: r.focus, target: r.s.price, floor: r.focus ? sh?.beFocus : sh?.beBought, kg: r.units * kgOf(r.s.key) };
+      });
+      const crafts = new Map();
+      for (const r of P.rows) { const k = r.s.key + (r.focus ? "|f" : ""); crafts.set(k, { key: r.s.key, focus: r.focus, units: (crafts.get(k)?.units || 0) + r.units }); }
+
+      function build(st, dir) {
+        const need = new Set([craftCity]);
+        for (const x of plain) need.add(st.atCraft.has(x.m) ? craftCity : x.city);
+        for (const f of refinables) {
+          const q = st.refine.get(f.m);
+          if (q > 0) { need.add(f.city); f.ins.forEach((i) => need.add(i.city)); }
+          if (q < f.qty) need.add(f.ready.city);
+        }
+        for (const s of sales) need.add(s.city);
+        let ring = RING.filter((c) => need.has(c));
+        const extra = [...need].filter((c) => !RING.includes(c));
+        ring = ring.concat(extra);
+        const i0 = ring.indexOf(craftCity);
+        let order = ring.slice(i0).concat(ring.slice(0, i0));
+        if (dir < 0) order = [order[0]].concat(order.slice(1).reverse());
+        const k = order.length, pos = (c) => order.indexOf(c);
+        const legs = order.map((c, i) => ({ from: c, to: order[(i + 1) % k], kg: 0 }));
+        const carry = (from, to, kg) => { if (k < 2 || from === to || !kg) return; for (let i = pos(from); i !== pos(to); i = (i + 1) % k) legs[i].kg += kg; };
+        const stops = new Map(order.map((c) => [c, { city: c, buy: [], input: [], refine: [], ready: [], craft: [], sell: [], raw: [], spend: 0, earn: 0, fee: 0 }]));
+        const S = (c) => stops.get(c);
+        for (const x of plain) {
+          const city = st.atCraft.has(x.m) ? craftCity : x.city;
+          const price = st.atCraft.has(x.m) ? priceIn(x.m, craftCity) : x.price;
+          S(city).buy.push({ m: x.m, qty: x.qty, price, share: city === x.city ? x.share : null, max: buys.find((b) => b.m === x.m)?.max, forCraft: city === craftCity });
+          carry(city, craftCity, x.qty * wOf(x.m));
+        }
+        for (const f of refinables) {
+          const q = st.refine.get(f.m);
+          if (q > 0) {
+            S(f.city).refine.push({ m: f.m, qty: q, own: f.own, buy: f.ready.price });
+            for (const i of f.ins) {
+              const qty = Math.ceil(q * i.q);
+              const raw = !refinedRes(i.x);
+              const max = raw ? i.price + f.saving / i.q : null;
+              (i.city === f.city && !raw ? S(f.city).input : S(i.city).raw).push({ m: i.x, qty, price: i.price, max, for: f.m });
+              carry(i.city, f.city, qty * wOf(i.x));
+            }
+            carry(f.city, craftCity, q * wOf(f.m));
+          }
+          if (q < f.qty) {
+            S(f.ready.city).ready.push({ m: f.m, qty: f.qty - q, price: f.ready.price, max: buys.find((b) => b.m === f.m)?.max });
+            carry(f.ready.city, craftCity, (f.qty - q) * wOf(f.m));
+          }
+        }
+        S(craftCity).craft.push(...[...crafts.values()].sort((a, b) => b.focus - a.focus));
+        for (const s of sales) { S(s.city).sell.push(s); carry(craftCity, s.city, s.kg); }
+        for (const s of stops.values()) {
+          s.spend = sum(s.buy, (b) => b.qty * b.price) + sum(s.input, (b) => b.qty * b.price) + sum(s.raw, (b) => b.qty * b.price) + sum(s.ready, (b) => b.qty * b.price);
+          s.earn = sum(s.sell, (x) => x.units * x.target * (1 - feeOf(x.city) + STATION));
+          s.fee = sum(s.craft, (c) => c.units * (sells.find((x) => x.s.key === c.key)?.last || 0) * STATION) + sum(s.refine, (x) => x.qty * x.buy * REFINE_STATION);
+        }
+        const max = legs.reduce((a, l) => (l.kg > a.kg ? l : a), { kg: 0 });
+        return { order, legs, stops, max };
+      }
+      const best = (st) => { const a = build(st, 1), b = build(st, -1); return b.max.kg < a.max.kg - 1 ? { ...b, dir: -1 } : { ...a, dir: 1 }; };
+
+      const st = { refine: new Map(refinables.map((f) => [f.m, f.qty])), atCraft: new Set() };
+      let L = best(st);
+      const moved = [], cut = [];
+      for (let it = 0; it < 80 && L.max.kg > cap; it++) {
+        const li = L.legs.indexOf(L.max), over = L.max.kg - cap;
+        let pick = null;
+        /* option A: buy a carried material in the crafting city instead */
+        for (const x of plain) {
+          if (st.atCraft.has(x.m) || x.city === craftCity) continue;
+          const pc = priceIn(x.m, craftCity);
+          if (!pc) continue;
+          const t = { refine: st.refine, atCraft: new Set([...st.atCraft, x.m]) };
+          const drop = L.max.kg - build(t, L.dir).legs[li].kg;
+          if (drop <= 0) continue;
+          const c = Math.max(0, (pc - x.price) * x.qty) / drop;
+          if (!pick || c < pick.c) pick = { c, apply: () => { st.atCraft.add(x.m); moved.push({ m: x.m, from: x.city, to: craftCity, extra: (pc - x.price) * x.qty }); } };
+        }
+        /* option B: refine less of something, cheapest saving per kilo first */
+        for (const f of refinables) {
+          const q = st.refine.get(f.m);
+          if (q <= 0) continue;
+          const step = Math.min(q, 100);
+          const t = { refine: new Map(st.refine).set(f.m, q - step), atCraft: st.atCraft };
+          const drop = (L.max.kg - build(t, L.dir).legs[li].kg) / step;
+          if (drop <= 0) continue;
+          const c = Math.max(0, f.saving) / drop;
+          if (!pick || c < pick.c) pick = { c, apply: () => { const n = Math.min(q, Math.ceil(over / drop)); st.refine.set(f.m, q - n); cut.push(f.m); } };
+        }
+        if (!pick) break;
+        pick.apply();
+        L = best(st);
+      }
+      const tot = [...L.stops.values()].reduce((t, s) => ({ spend: t.spend + s.spend, earn: t.earn + s.earn, fee: t.fee + s.fee }), { spend: 0, earn: 0, fee: 0 });
+      tot.keep = tot.earn - tot.spend - tot.fee;
+      /* day one: nothing refined yet, so the refined material is bought ready-made and the refining city's inputs are skipped */
+      const refined = refinables.map((f) => ({ f, qty: st.refine.get(f.m) })).filter((x) => x.qty > 0);
+      const skipped = [...L.stops.values()].flatMap((s) => s.input);
+      const dayOne = { buy: refined.map(({ f, qty }) => ({ m: f.m, qty, city: f.ready.city, price: f.ready.price, max: buys.find((b) => b.m === f.m)?.max })), skip: skipped };
+      dayOne.spend = tot.spend - sum(skipped, (b) => b.qty * b.price) + sum(dayOne.buy, (b) => b.qty * b.price);
+      const saved = sum(refined, ({ f, qty }) => qty * f.saving);
+      const fullSave = sum(refinables, (f) => f.qty * Math.max(0, f.saving));
+      /* show the loop from the refining city when there is exactly one, as the leather plan does */
+      const rc = [...new Set(refined.map((x) => x.f.city))];
+      let order = L.order, legs = L.legs;
+      /* ...unless jackets are sold there too, which would put selling ahead of crafting */
+      if (rc.length === 1 && rc[0] !== craftCity && !L.stops.get(rc[0]).sell.length) { const i = order.indexOf(rc[0]); order = order.slice(i).concat(order.slice(0, i)); legs = legs.slice(i).concat(legs.slice(0, i)); }
+      return { craftCity, order, legs, stops: L.stops, max: L.max, cap, fits: L.max.kg <= cap, tot, dayOne, saved, fullSave, moved, cut: [...new Set(cut)], refinables, refined: st.refine };
+    }
 
     /* Price sheet: targets and hard limits for everything the plan makes and buys. */
     const sheetKeys = new Map();
@@ -272,8 +429,8 @@ ABP.crafting = (() => {
       return { m, city: b.city, last: b.price, med: st?.med, lo: st?.lo, hi: st?.hi, max, noRet: [...sheetKeys.values()].some((x) => x.e.lines.find((y) => y.m === m)?.noRet) };
     }).filter(Boolean).sort((a, b) => (b.last || 0) - (a.last || 0));
 
-    return { catKey, label: CATS.find((c) => c.key === catKey)?.label, keys, priced, noSales, ranked, stages, focusOnlyTiers, refine, ownPrice, shopping, sells, buys, kgOf, craftPlace, risky, focus, feeOf, now };
+    return { catKey, label: CATS.find((c) => c.key === catKey)?.label, keys, priced, noSales, ranked, stages, focusOnlyTiers, refine, ownPrice, shopping, loop, sells, buys, kgOf, craftPlace, risky, focus, feeOf, now };
   }
 
-  return { CATS, ROYAL, RISKY, STATION, DAYS, MAX_ITEMS, items, idsFor, analyse, tierOf, enchOf, baseOf, refinedRes };
+  return { CATS, ROYAL, RISKY, RING, MOUNTS, STATION, DAYS, MAX_ITEMS, items, idsFor, analyse, tierOf, enchOf, baseOf, refinedRes };
 })();
