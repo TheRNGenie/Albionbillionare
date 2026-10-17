@@ -2107,6 +2107,7 @@
     return "downloaded";
   }
 
+  let updWired = false;
   /* Albion's own item data (recipes, base focus, weights), built by tools/build_recipes.py. */
   let recipesP = null;
   function recipes() {
@@ -2340,6 +2341,12 @@
         <h2>Tools</h2>
         <p>Plan a trade run, get a shopping list for a craft, and back up everything you have entered. Weights, recipes and focus costs come from Albion's own item data.</p>
       </div>
+      ${window.albionDesktop?.checkUpdate ? `<div class="box stack" id="updates">
+        <div class="row spread"><h3>App updates</h3><span class="small muted" id="up-ver"></span></div>
+        <p class="small muted">The app only contacts GitHub when you press this button. It finds the newest Windows build and, if it's newer than yours, downloads and installs it over this one. Your plan, spec, wealth and other saved data stay as they are.</p>
+        <div class="row"><button class="btn" type="button" id="up-check">Check for updates</button><button class="btn" type="button" id="up-go" hidden>Download and install</button></div>
+        <p class="small" id="up-msg" aria-live="polite"></p>
+      </div>` : ""}
       ${window.albionDesktop ? `<div class="box stack" id="dataclient">
         <div class="row spread"><h3>Albion Data Client link</h3><span class="small" id="dc-state"></span></div>
         <p class="small muted">Run the official Albion Data Client next to this app. It keeps uploading to the public project as normal, and also hands this app every price you look at in-game, so your own markets are always the freshest in your picks, alerts and tools.</p>
@@ -2453,6 +2460,41 @@
     [["ench", "#sh-ench"], ["qty", "#sh-qty"], ["rr", "#sh-rr"], ["craftCity", "#sh-city"]].forEach(([k, sel]) => $(sel).addEventListener("change", (e) => { shop[k] = k === "craftCity" ? e.target.value : Math.max(k === "qty" ? 1 : 0, +e.target.value || 0); store.set("shop", shop); }));
     itemPicker("#sh-item", "#sh-results", "#sh-wrap", (id) => { shop.id = id.split("@")[0]; if (id.includes("@")) { shop.ench = +id.split("@")[1]; $("#sh-ench").value = shop.ench; } store.set("shop", shop); shoppingList(); });
     $("#sh-go").addEventListener("click", () => { const v = $("#sh-item").value.trim().toUpperCase(); if (/^T\d_/.test(v)) shop.id = v.split("@")[0]; store.set("shop", shop); shoppingList(); });
+
+    /* Updates from GitHub, only when asked (Windows app only) */
+    if (window.albionDesktop?.checkUpdate) {
+      const D = window.albionDesktop, msg = $("#up-msg"), goBtn = $("#up-go");
+      let found = null;
+      const mb = (b) => (b / 1048576).toFixed(0) + " MB";
+      $("#up-check").addEventListener("click", async () => {
+        const btn = $("#up-check"); btn.disabled = true; goBtn.hidden = true; msg.textContent = "Checking GitHub…";
+        try {
+          found = await D.checkUpdate();
+          $("#up-ver").textContent = `You have build ${found.current}`;
+          if (!found.latest) msg.textContent = "No Windows builds were found on GitHub.";
+          else if (!found.newer) msg.textContent = `You're up to date: build ${found.current} is the newest.`;
+          else {
+            msg.textContent = `Build ${found.latest} is available (published ${dateText(new Date(found.date))}${found.size ? `, ${mb(found.size)}` : ""}).${found.portable ? " This is the portable copy, so the download page opens in your browser; replace this file with the new one." : ""}`;
+            goBtn.textContent = found.portable ? "Open the download page" : "Download and install";
+            goBtn.hidden = false;
+          }
+        } catch (e) { msg.textContent = "Couldn't check: " + String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ""); }
+        btn.disabled = false;
+      });
+      goBtn.addEventListener("click", async () => {
+        if (!found) return;
+        if (found.portable || !found.url) { D.openPage(found.page); return; }
+        goBtn.disabled = true; $("#up-check").disabled = true; msg.textContent = "Downloading…";
+        try {
+          await D.installUpdate(found.url);
+          msg.textContent = "Downloaded. The installer is opening and this window will close; follow its steps to finish.";
+        } catch (e) {
+          msg.textContent = "The update didn't finish: " + String(e.message || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+          goBtn.disabled = false; $("#up-check").disabled = false;
+        }
+      });
+      if (!updWired) { updWired = true; D.onUpdateProgress((p) => { const m = $("#up-msg"); if (m && p.total) m.textContent = `Downloading… ${mb(p.got)} of ${mb(p.total)}`; }); }
+    }
 
     /* Data Client link (Windows app only) */
     if (window.albionDesktop) {
@@ -2816,8 +2858,12 @@
         ABP.api.itemNames().catch(() => null),
       ]);
       if (gen !== crGen) return;
-      const A = C.analyse({ R, keys, hist: Object.assign({}, hm, hi), catKey: cr.cat, budgets: [cr.b1, cr.b2], risky: cr.risky });
-      crLast = { A, R };
+      const hist = Object.assign({}, hm, hi);
+      const run = (ks) => C.analyse({ R, keys: ks, hist, catKey: cr.cat, budgets: [cr.b1, cr.b2], risky: cr.risky });
+      const A = run(keys);
+      /* each item line (Mercenary Jacket, Claymore, ...) on its own, best first */
+      const lines = linesOf(keys).map((ln) => ({ ...ln, A: run(ln.keys) })).sort((a, b) => b.A.stages[1].royal.med - a.A.stages[1].royal.med);
+      crLast = { A, R, lines };
       drawCraft();
       time.textContent = `Built ${vanTime(new Date())} from ${ABP.SERVERS.find((s) => s.id === ABP.api.server).label} market history`;
     } catch (e) {
@@ -2827,14 +2873,48 @@
     } finally { if (gen === crGen) btn.disabled = false; }
   }
 
+  /* Item lines within a category: every tier and enchant of one item, named without the tier word. */
+  const TIER_WORD = /^(Beginner's|Novice's|Journeyman's|Adept's|Expert's|Master's|Grandmaster's|Elder's)\s+/;
+  function linesOf(keys) {
+    const C = ABP.crafting, m = new Map();
+    for (const k of keys) { const line = C.baseOf(k).replace(/^T\d_/, ""); if (!m.has(line)) m.set(line, []); m.get(line).push(k); }
+    return [...m].map(([line, ks]) => {
+      const low = C.baseOf(ks.slice().sort((a, b) => C.tierOf(a) - C.tierOf(b))[0]);
+      const name = (ABP.api.nameOf(low) || itemLabel(low).replace(/^T\d(\.\d)?\s*/, "")).replace(TIER_WORD, "");
+      return { line, name, keys: ks };
+    });
+  }
+  function crView() {
+    const sel = (cr.lines || {})[cr.cat] || "";
+    const line = crLast.lines.find((l) => l.line === sel) || null;
+    return { A: line ? line.A : crLast.A, line };
+  }
+
   function drawCraft() {
-    const { A, R } = crLast, C = ABP.crafting, out = $("#cr-out");
+    const { A, line } = crView(), C = ABP.crafting, out = $("#cr-out");
     const L = (id) => esc(itemLabel(id));
     const lc = A.label.toLowerCase();
     const s2 = A.stages[1].royal;
+    const lines = crLast.lines;
+    const tierOf = (k) => { const t = C.tierOf(k), e = C.enchOf(k); return `T${t}${e ? "." + e : ""}`; };
+    const bestTier = (X) => { const c = {}; for (const r of X.stages[1].royal.rows) c[r.s.key] = (c[r.s.key] || 0) + r.units * r.each; const k = Object.entries(c).sort((a, b) => b[1] - a[1])[0]; return k ? tierOf(k[0]) : "–"; };
+    const picker = `<section class="box stack" id="cr-lines">
+      <h3>Choose the item</h3>
+      <p>Pick one item to get its own plan and the daily loop city by city, the same layout as the leather jacket plan. Or keep the best mix across all ${esc(lc)}.</p>
+      <label class="field"><span>Item</span><select id="cr-line"><option value="">The best mix of ${esc(lc)}</option>${lines.map((l) => `<option value="${esc(l.line)}" ${line && line.line === l.line ? "selected" : ""}>${esc(l.name)}${l.A.stages[1].royal.med > 0 ? ` (about ${fmt(l.A.stages[1].royal.med)} a day)` : " (nothing pays now)"}</option>`).join("")}</select></label>
+      <div class="table-wrap"><table><thead><tr><th>Item</th><th>Stage 1 a day</th><th>Stage 2 a day</th><th>Worst week</th><th>Best tier</th><th></th></tr></thead><tbody>
+      ${lines.slice(0, 12).map((l) => `<tr class="${line && line.line === l.line ? "on" : ""}"><td>${esc(l.name)}</td><td class="num">${fmt(l.A.stages[0].royal.med)}</td><td class="num money">${fmt(l.A.stages[1].royal.med)}</td><td class="num">${fmt(l.A.stages[1].royal.worst)}</td><td>${bestTier(l.A)}</td><td><button type="button" class="chip" data-line="${esc(l.line)}">Plan it</button></td></tr>`).join("")}
+      </tbody></table></div>
+      <p class="small muted">Each item judged on its own, at Stage 2 (spec 50, ${fmt(cr.b2)} of materials a day), royal cities only.${lines.length > 12 ? ` The other ${lines.length - 12} items are in the list above.` : ""}</p></section>`;
+    const wire = () => {
+      const pick = (v) => { cr.lines = Object.assign({}, cr.lines, { [cr.cat]: v }); saveCr(); drawCraft(); $("#cr-lines").scrollIntoView({ block: "start" }); };
+      $("#cr-line").addEventListener("change", (e) => pick(e.target.value));
+      $$("#cr-lines [data-line]").forEach((b) => b.addEventListener("click", () => pick(b.dataset.line)));
+    };
     if (!A.stages.some((s) => s.royal.rows.length)) {
-      out.innerHTML = `<section class="box stack"><h3>Nothing in ${esc(lc)} pays right now</h3>
-        <p>None of the ${A.keys.length} ${esc(lc)} made a profit after fees in the royal cities last week, with or without focus, at a volume the market can take. ${A.priced.length < A.keys.length ? `${A.keys.length - A.priced.length} of them had a material with no recent price, so they could not be judged.` : ""}${A.risky ? "" : " Try turning on Caerleon and the Black Market, or pick another category."}</p></section>`;
+      out.innerHTML = picker + `<section class="box stack"><h3>Nothing in ${line ? esc(line.name) : esc(lc)} pays right now</h3>
+        <p>None of the ${A.keys.length} ${esc(lc)} made a profit after fees in the royal cities last week, with or without focus, at a volume the market can take. ${A.priced.length < A.keys.length ? `${A.keys.length - A.priced.length} of them had a material with no recent price, so they could not be judged.` : ""}${A.risky ? "" : " Try turning on Caerleon and the Black Market, or pick another item."}</p></section>`;
+      wire();
       return;
     }
     /* the items that carry the Stage 2 plan, biggest earners first */
@@ -2850,17 +2930,21 @@
     const spec = ABP.spec.craft;
     const stageNow = spec.item >= 75 ? 2 : spec.item >= 30 ? 1 : 0;
 
-    const sec = [];
+    const sec = [picker];
+    const tiers = top.slice(0, 4).map(tierOf);
+    const tierList = tiers.length > 1 ? tiers.slice(0, -1).join(", ") + " and " + tiers[tiers.length - 1] : tiers[0];
     sec.push(`<section class="box stack" id="cr-pick">
-      <h3>The pick: ${list}</h3>
-      <p>Craft them ${where}, and sell them in the royal cities. They come out on top of ${A.priced.length} ${esc(lc)} up to T${cr.maxTier}, priced from the last four weeks of daily trades.</p>
+      ${line ? `<h3>The pick: ${esc(line.name)}, ${tierList}</h3>
+      <p>Craft ${esc(line.name)}s ${where}, and sell them in the royal cities. ${tiers.length > 1 ? "These tiers" : "This tier"} paid best of the ${A.priced.length} tiers and enchants up to T${cr.maxTier}, priced from the last four weeks of daily trades.</p>`
+      : `<h3>The pick: ${list}</h3>
+      <p>Craft them ${where}, and sell them in the royal cities. They come out on top of ${A.priced.length} ${esc(lc)} up to T${cr.maxTier}, priced from the last four weeks of daily trades.</p>`}
       <div class="table-wrap"><table><thead><tr><th>Stage</th><th>Materials a day</th><th>Royal cities: profit a day</th><th>Worst week</th>${A.risky ? "<th>Plus Caerleon and Black Market</th><th>Worst week</th>" : ""}</tr></thead><tbody>
       ${A.stages.map((s, i) => `<tr class="${i === stageNow ? "on" : ""}"><td>${s.name} <small class="muted">(${s.range})</small></td><td class="num">${fmt(s.royal.spent)}</td><td class="num money">${fmt(s.royal.med)}</td><td class="num">${fmt(s.royal.worst)}</td>${A.risky ? `<td class="num money">${fmt(s.risky.med)}</td><td class="num">${fmt(s.risky.worst)}</td>` : ""}</tr>`).join("")}
       </tbody></table></div>
       <p class="small muted">Profit is net silver a day in the middle of the last four weeks, after ${pct(ABP.FEES.salesTaxPremium + ABP.FEES.setupFee)} market fees and a ${pct(C.STATION, 0)} station-fee allowance, never selling more than the safe daily amount in each city. ${toB ? `At the Stage 2 rate this category alone reaches 1B in about ${full(toB)} days.` : ""} Your spec (Calculators → Your spec) puts you in ${A.stages[stageNow].name}.</p>
     </section>`);
 
-    sec.push(`<section class="box stack"><h3>Every ${esc(lc.replace(/s$/, ""))} ranked</h3>
+    sec.push(`<section class="box stack"><h3>${line ? `Every ${esc(line.name)} tier ranked` : `Every ${esc(lc.replace(/s$/, ""))} ranked`}</h3>
       <p>Ranked by what each could add to a day in its best royal city: no-focus profit times the safe daily amount, or focus profit times what 10,000 focus covers at spec 50, whichever is larger.</p>
       <div class="table-wrap"><table><thead><tr><th>Item</th><th>Sell in</th><th>Last week</th><th>Profit each</th><th>With focus</th><th>Silver per focus</th><th>Safe a day</th><th>Weeks in profit</th></tr></thead><tbody>
       ${A.ranked.slice(0, 15).map((x) => `<tr><td>${L(x.key)}</td><td>${esc(x.city)}</td><td class="num">${full(x.price)}</td><td class="num ${x.profitNo > 0 ? "money" : "bad"}">${full(x.profitNo)}</td><td class="num ${x.profitF > 0 ? "money" : "bad"}">${full(x.profitF)}</td><td class="num">${x.perFocus == null ? "no focus used" : x.profitF > 0 ? x.perFocus.toFixed(1) : "–"}</td><td class="num">${full(x.cap)}</td><td class="num">${x.weeksUp} of ${x.weeksSeen}</td></tr>`).join("")}
@@ -2912,8 +2996,11 @@
       </tbody></table></div>
       <p class="small muted">Premium refills 10,000 focus a day. At 100/100 the same focus makes ${(1 / Math.pow(0.5, 3.1)).toFixed(1)} times as many focus crafts; crafts without focus don't change with spec, except for quality.</p>` : ""}</section>`);
 
-    sec.push(`<section class="box stack" id="cr-stage-box"><div class="row spread"><h3>Your day, stage by stage</h3>
+    sec.push(line ? `<section class="box stack" id="cr-loop"><h3>Daily loop, city by city</h3>
+      ${loopSection(A, [{ name: "Stage 1", P: A.stages[0].royal }, { name: "Stage 2 and 3", P: A.stages[1].royal }])}</section>`
+      : `<section class="box stack" id="cr-stage-box"><div class="row spread"><h3>Your day, stage by stage</h3>
       <div class="chips" role="group" aria-label="Stage">${A.stages.map((s, i) => `<button type="button" class="chip ${i === cr.stage ? "on" : ""}" data-stage="${i}" aria-pressed="${i === cr.stage}">${s.name}</button>`).join("")}</div></div>
+      <p class="small muted">Pick one item above to get its loop in the leather jacket plan's layout.</p>
       <div id="cr-stage"></div></section>`);
 
     /* price sheet */
@@ -2937,25 +3024,27 @@
       <p class="small muted">Sources: <a href="https://www.albion-online-data.com/" target="_blank" rel="noopener">Albion Online Data Project</a> daily history (last ${C.DAYS} days); recipes and base focus from Albion's own item data (ao-bin-dumps); return rates and focus from the official wiki.</p></section>`);
 
     out.innerHTML = sec.join("");
+    wire();
     $$("#cr-stage-box [data-stage]").forEach((b) => b.addEventListener("click", () => {
       cr.stage = +b.dataset.stage; saveCr();
       $$("#cr-stage-box [data-stage]").forEach((x) => { x.classList.toggle("on", x === b); x.setAttribute("aria-pressed", String(x === b)); });
       drawStage();
     }));
-    drawStage();
+    if (!line) drawStage();
   }
 
-  /* The selected stage's day: city-by-city stops, the shopping list and refining your own materials. */
+  /* The selected stage's day in the item-mix view. */
   function drawStage() {
-    const { A, R } = crLast, el = $("#cr-stage");
-    const L = (id) => esc(itemLabel(id));
-    const S = A.stages[cr.stage] || A.stages[0], P = S.royal;
-    if (!P.rows.length) { el.innerHTML = `<p class="muted">Nothing pays at ${S.name}.</p>`; return; }
+    const { A } = crView();
+    const S = A.stages[cr.stage] || A.stages[0];
+    $("#cr-stage").innerHTML = loopSection(A, [{ name: S.name, P: S.royal }]);
+  }
+
+  /* One stage's loop: the crafting city first (buy what it sells, craft, sell there), then each city that buys or
+     sells something (sell first, then buy tomorrow's materials), ending where you refine. */
+  function loopModel(A, P) {
     const shop = A.shopping(P);
     const craftCity = A.craftPlace(P.rows[0].s.key, true).city || (shop[0] && shop[0].city);
-    const lc = A.label.toLowerCase();
-    /* The loop starts in the crafting city (buy what it sells, craft, sell there), then visits each city that buys
-       or sells something, selling first and buying tomorrow's materials, and ends where you refine. */
     const stops = new Map();
     const at = (c) => { if (!stops.has(c)) stops.set(c, { city: c, buy: [], refine: [], craft: [], sell: [], raw: [] }); return stops.get(c); };
     at(craftCity);
@@ -2974,64 +3063,104 @@
       const sh = A.sells.find((x) => x.s.key === r.s.key && x.s.city === r.s.city);
       at(r.s.city).sell.push({ key: r.s.key, city: r.s.city, units: r.units, target: r.s.price, floor: r.focus ? sh?.beFocus : sh?.beBought, kg: r.units * A.kgOf(r.s.key) });
     }
-    const order = [stops.get(craftCity)].concat([...stops.values()].filter((s) => s.city !== craftCity)
-      .sort((a, b) => ((a.city === refineCity) - (b.city === refineCity)) || b.sell.length - a.sell.length));
-    const kgIn = shop.reduce((s, x) => s + x.kg, 0);
-    const merge = (arr, key) => { const m = new Map(); for (const x of arr) { const k = x[key]; m.set(k, m.has(k) ? { ...x, qty: m.get(k).qty + x.qty } : { ...x }); } return [...m.values()]; };
-    const stopHtml = (s, i) => {
-      const home = s.city === craftCity, later = home ? "" : " for tomorrow";
-      const rows = [];
-      if (home) for (const b of merge(s.buy, "m")) rows.push(`<tr><td>Buy ${L(b.m)}</td><td class="num">${full(b.qty)}</td><td>${b.max ? `about ${full(b.price)}, max ${full(b.max)}` : `about ${full(b.price)}`}</td></tr>`);
-      for (const c of s.craft) rows.push(`<tr><td>Craft ${L(c.key)}${c.focus ? ", with focus" : ""}</td><td class="num">${full(c.units)}</td><td></td></tr>`);
-      for (const x of s.sell.slice().sort((a, b) => b.units * b.target - a.units * a.target)) rows.push(`<tr><td>Sell ${L(x.key)}</td><td class="num">${full(x.units)}</td><td>target ${full(x.target)}, never under ${full(x.floor)}</td></tr>`);
-      if (!home) for (const b of merge(s.buy, "m")) rows.push(`<tr><td>Buy ${L(b.m)}${later}</td><td class="num">${full(b.qty)}</td><td>${b.max ? `about ${full(b.price)}, max ${full(b.max)}` : `about ${full(b.price)}`}</td></tr>`);
-      for (const b of merge(s.raw, "m")) rows.push(`<tr><td>Buy ${L(b.m)} to refine</td><td class="num">${full(b.qty)}</td><td>about ${full(b.price)}</td></tr>`);
-      for (const x of s.refine) rows.push(`<tr><td>Refine ${L(x.m)} from the raw materials bought on the last loop, no focus</td><td class="num">${full(x.qty)}</td><td>costs about ${full(x.refine.own)} each (${full(x.refine.buy)} to buy)</td></tr>`);
-      /* silver in and out at this stop, at last week's prices */
-      const spend = s.buy.reduce((a, b) => a + b.qty * b.price, 0) + s.raw.reduce((a, b) => a + b.qty * b.price, 0);
-      const earn = s.sell.reduce((a, x) => a + x.units * x.target * (1 - A.feeOf(x.city) + ABP.crafting.STATION), 0);
-      const fee = s.craft.reduce((a, c) => a + c.units * (A.sells.find((x) => x.s.key === c.key)?.last || 0) * ABP.crafting.STATION, 0)
+    for (const s of stops.values()) {
+      s.spend = s.buy.reduce((a, b) => a + b.qty * b.price, 0) + s.raw.reduce((a, b) => a + b.qty * b.price, 0);
+      s.earn = s.sell.reduce((a, x) => a + x.units * x.target * (1 - A.feeOf(x.city) + ABP.crafting.STATION), 0);
+      s.fee = s.craft.reduce((a, c) => a + c.units * (A.sells.find((x) => x.s.key === c.key)?.last || 0) * ABP.crafting.STATION, 0)
         + s.refine.reduce((a, x) => a + x.qty * x.refine.buy * 0.01, 0);
-      tot.spend += spend; tot.earn += earn; tot.fee += fee;
-      rows.push(`<tr class="on"><td><strong>Stop total</strong></td><td></td><td>${[spend ? `spend ${fmt(spend)}` : "", earn ? `earn ${fmt(earn)}` : "", fee ? `station fee ${fmt(fee)}` : ""].filter(Boolean).join(", ") || "–"}</td></tr>`);
-      const verbs = [s.buy.length || s.raw.length ? "buy" : "", s.craft.length ? "craft" : "", s.sell.length ? "sell" : "", s.refine.length ? "refine" : ""].filter(Boolean);
-      const kgOut = s.sell.reduce((a, x) => a + x.kg, 0);
-      return `<div class="stack"><h4>${i + 1}. ${esc(s.city)}: ${verbs.join(", ")}</h4>
-        <div class="table-wrap"><table><thead><tr><th>Do</th><th>Amount</th><th>Price</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>
-        ${s.craft.length ? `<p class="small muted">Spend focus first, then craft the rest without it. Skip anything whose price today is under its limit at the next stops.</p>` : ""}
-        ${kgOut ? `<p class="small muted">About ${full(kgOut)} kg of ${esc(lc)} to sell here.</p>` : ""}</div>`;
-    };
-    const tot = { spend: 0, earn: 0, fee: 0 };
-    const loopHtml = order.map(stopHtml).join("");
+    }
     const dayOne = shop.filter((x) => x.refine);
-    const dayOneSpend = dayOne.reduce((a, x) => a + x.qty * x.price, 0);
-    const rawSpend = order.reduce((a, s) => a + s.raw.reduce((b, r) => b + r.qty * r.price, 0), 0);
-    const kept = tot.earn - tot.spend - tot.fee;
-    const refineSave = shop.filter((x) => x.refine).reduce((a, x) => a + x.qty * (x.refine.buy - x.refine.own), 0);
-    el.innerHTML = `
-      <p>${S.name} (${S.range}): about <strong>${fmt(P.profit)}</strong> a day from ${fmt(P.spent)} of materials${refineSave > 0 ? `, plus about ${fmt(refineSave)} saved by refining your own` : ""}. Do the stops in this order every day.</p>
-      ${shop.some((x) => x.refine) ? `<h4>Day one only (nothing to refine yet)</h4>
-      <p class="small">Buy these refined materials ready-made, and skip the refining step today.</p>
-      <div class="table-wrap"><table><thead><tr><th>Buy</th><th>In</th><th>Amount</th><th>Price</th></tr></thead><tbody>
-      ${dayOne.map((x) => { const mx = A.buys.find((b) => b.m === x.m)?.max; return `<tr><td>${L(x.m)}</td><td>${esc(x.refine.buyCity || x.city)}</td><td class="num">${full(x.qty)}</td><td>about ${full(x.price)}${mx ? `, max ${full(mx)}` : ""}</td></tr>`; }).join("")}
-      <tr class="on"><td><strong>Day-one total</strong></td><td></td><td></td><td>spend ${fmt(dayOneSpend)}</td></tr>
+    const tot = [...stops.values()].reduce((t, s) => ({ spend: t.spend + s.spend, earn: t.earn + s.earn, fee: t.fee + s.fee }), { spend: 0, earn: 0, fee: 0 });
+    const rawSpend = [...stops.values()].reduce((a, s) => a + s.raw.reduce((b, r) => b + r.qty * r.price, 0), 0);
+    tot.dayOne = tot.spend - rawSpend + dayOne.reduce((a, x) => a + x.qty * x.price, 0);
+    return { shop, craftCity, refineCity, stops, dayOne, tot, kgIn: shop.reduce((s, x) => s + x.kg, 0) };
+  }
+
+  /* The daily loop, city by city, with one amount column per stage (the doc's layout). */
+  function loopSection(A, cols) {
+    const L = (id) => esc(itemLabel(id));
+    cols = cols.filter((c) => c.P.rows.length);
+    if (!cols.length) return `<p class="muted">Nothing pays at this stage.</p>`;
+    const ms = cols.map((c) => ({ ...c, m: loopModel(A, c.P) }));
+    const lastM = ms[ms.length - 1].m, craftCity = lastM.craftCity;
+    const refineCity = ms.map((x) => x.m.refineCity).find(Boolean);
+    const lc = A.label.toLowerCase();
+    const cities = [craftCity];
+    for (const { m } of ms) for (const c of m.stops.keys()) if (!cities.includes(c)) cities.push(c);
+    const sells = (c) => lastM.stops.get(c)?.sell.length || 0;
+    const order = [craftCity].concat(cities.slice(1).sort((a, b) => ((a === refineCity) - (b === refineCity)) || sells(b) - sells(a)));
+    const head = (first) => `<thead><tr><th>${first}</th>${ms.map((x) => `<th>${esc(x.name)}</th>`).join("")}<th>Price</th></tr></thead>`;
+    const qtyCells = (q) => q.map((v) => `<td class="num">${v ? full(v) : "none"}</td>`).join("");
+    const buyPrice = (b) => (b.max ? `about ${full(b.price)}, max ${full(b.max)}` : `about ${full(b.price)}`);
+    const money = (s) => [s.spend ? `spend ${fmt(s.spend)}` : "", s.earn ? `earn ${fmt(s.earn)}` : "", s.fee ? `station fee ${fmt(s.fee)}` : ""].filter(Boolean).join(", ") || "–";
+    const TYPE = "bcstrf";
+
+    const stopHtml = (city, n) => {
+      const rows = new Map();
+      const add = (k, label, price, i, q) => { let r = rows.get(k); if (!r) rows.set(k, (r = { k, label, price, q: ms.map(() => 0) })); r.q[i] += q; if (price) r.price = price; };
+      const verbs = new Set(), kg = ms.map(() => 0);
+      ms.forEach(({ m }, i) => {
+        const s = m.stops.get(city);
+        if (!s) return;
+        const home = city === m.craftCity;
+        for (const b of s.buy) add((home ? "b|" : "t|") + b.m, `Buy ${L(b.m)}${home ? "" : " for tomorrow"}`, buyPrice(b), i, b.qty);
+        for (const c of s.craft) add("c|" + c.key + (c.focus ? "|f" : ""), `Craft ${L(c.key)}${c.focus ? ", with focus" : ""}`, "", i, c.units);
+        for (const x of s.sell) add("s|" + x.key, `Sell ${L(x.key)}`, `target ${full(x.target)}, never under ${full(x.floor)}`, i, x.units);
+        for (const b of s.raw) add("r|" + b.m, `Buy ${L(b.m)} to refine`, `about ${full(b.price)}`, i, b.qty);
+        for (const x of s.refine) add("f|" + x.m, `Refine ${L(x.m)} from the raw materials bought on the last loop, no focus`, `costs about ${full(x.refine.own)} each (${full(x.refine.buy)} to buy)`, i, x.qty);
+        if (s.buy.length || s.raw.length) verbs.add("buy");
+        if (s.craft.length) verbs.add("craft");
+        if (s.sell.length) verbs.add("sell");
+        if (s.refine.length) verbs.add("refine");
+        kg[i] = s.sell.reduce((a, x) => a + x.kg, 0);
+      });
+      const list = [...rows.values()].sort((a, b) => TYPE.indexOf(a.k[0]) - TYPE.indexOf(b.k[0]) || b.q[b.q.length - 1] - a.q[a.q.length - 1]);
+      const totals = ms.map(({ m }) => { const s = m.stops.get(city); return `<td>${s ? money(s) : "–"}</td>`; }).join("");
+      const verbsOrdered = ["buy", "craft", "sell", "refine"].filter((v) => verbs.has(v));
+      return `<div class="stack"><h4>${n + 1}. ${esc(city)}: ${verbsOrdered.join(", ")}</h4>
+        <div class="table-wrap"><table>${head("Do")}<tbody>
+        ${list.map((r) => `<tr><td>${r.label}</td>${qtyCells(r.q)}<td>${r.price}</td></tr>`).join("")}
+        <tr class="on"><td><strong>Stop total</strong></td>${totals}<td></td></tr></tbody></table></div>
+        ${city === craftCity ? `<p class="small muted">Spend focus first, then craft the rest without it. Skip anything whose price today is under its limit at the next stops.</p>` : ""}
+        ${kg.some(Boolean) ? `<p class="small muted">About ${ms.map((x, i) => `${full(kg[i])} kg${ms.length > 1 ? ` (${esc(x.name)})` : ""}`).join(" / ")} to sell here.</p>` : ""}</div>`;
+    };
+
+    const anyDayOne = ms.some((x) => x.m.dayOne.length);
+    let dayOneHtml = "";
+    if (anyDayOne) {
+      const rows = new Map();
+      ms.forEach(({ m }, i) => { for (const x of m.dayOne) { let r = rows.get(x.m); if (!r) rows.set(x.m, (r = { x, q: ms.map(() => 0) })); r.q[i] += x.qty; } });
+      dayOneHtml = `<h4>Day one only (nothing to refine yet)</h4>
+      <p class="small">Buy these refined materials ready-made in place of refining, and skip the refining step today.</p>
+      <div class="table-wrap"><table><thead><tr><th>Buy</th><th>In</th>${ms.map((x) => `<th>${esc(x.name)}</th>`).join("")}<th>Price</th></tr></thead><tbody>
+      ${[...rows.values()].map(({ x, q }) => { const mx = A.buys.find((b) => b.m === x.m)?.max; return `<tr><td>${L(x.m)}</td><td>${esc(x.refine.buyCity || x.city)}</td>${qtyCells(q)}<td>about ${full(x.price)}${mx ? `, max ${full(mx)}` : ""}</td></tr>`; }).join("")}
+      <tr class="on"><td><strong>Day-one total</strong></td><td></td>${ms.map(({ m }) => `<td>spend ${fmt(m.dayOne.reduce((a, x) => a + x.qty * x.price, 0))}</td>`).join("")}<td></td></tr>
       </tbody></table></div>
       <h4>Every day after</h4>
-      <p class="small muted">The raw materials are bought along the loop and carried back to ${esc([...new Set(shop.filter((x) => x.refine).map((x) => x.refine.res.city))].join(" and "))}, where they're refined the next morning.</p>` : `<p class="small muted">On day one, buy everything on the shopping list below before you craft. After that each loop buys tomorrow's materials on the way.</p>`}
-      ${loopHtml}
-      ${order.length > 1 ? `<p class="small muted">Ride back to ${esc(craftCity)} carrying about ${full(kgIn)} kg of materials for tomorrow.</p>` : ""}
-      <p><strong>Whole loop, at current prices:</strong> spend ${fmt(tot.spend)}, earn ${fmt(tot.earn)}, station fees ${fmt(tot.fee)}, so you keep about <strong>${fmt(kept)}</strong> a day.${dayOne.length ? ` Day one spends ${fmt(tot.spend - rawSpend + dayOneSpend)} instead, because it buys the refined materials ready-made.` : ""}</p>
+      <p class="small muted">The raw materials are bought along the loop and carried back to ${esc(refineCity)}, where they're refined the next morning.</p>`;
+    }
+
+    const shopRows = new Map();
+    ms.forEach(({ m }, i) => { for (const x of m.shop) { let r = shopRows.get(x.m); if (!r) shopRows.set(x.m, (r = { x, q: ms.map(() => 0), share: null })); r.q[i] += x.qty; if (i === ms.length - 1) r.share = x.share; r.x = x; } });
+    const refineSave = lastM.shop.filter((x) => x.refine).reduce((a, x) => a + x.qty * (x.refine.buy - x.refine.own), 0);
+
+    return `
+      <p>${ms.map((x) => `${esc(x.name)}: about <strong>${fmt(x.P.profit)}</strong> a day from ${fmt(x.P.spent)} of materials`).join(". ")}${refineSave > 0 ? `, plus about ${fmt(refineSave)} saved by refining your own` : ""}. Do the stops in this order every day.</p>
+      ${dayOneHtml || `<p class="small muted">On day one, buy everything on the shopping list below before you craft. After that each loop buys tomorrow's materials on the way.</p>`}
+      ${order.map(stopHtml).join("")}
+      ${order.length > 1 ? `<p class="small muted">Ride back to ${esc(craftCity)} carrying about ${ms.map((x) => `${full(x.m.kgIn)} kg${ms.length > 1 ? ` (${esc(x.name)})` : ""}`).join(" / ")} of materials for tomorrow.</p>` : ""}
+      <p><strong>Whole loop, at current prices:</strong> ${ms.map(({ name, m }) => `${ms.length > 1 ? `${esc(name)}: ` : ""}spend ${fmt(m.tot.spend)}, earn ${fmt(m.tot.earn)}, station fees ${fmt(m.tot.fee)}, so you keep about <strong>${fmt(m.tot.earn - m.tot.spend - m.tot.fee)}</strong> a day${m.dayOne.length ? ` (day one spends ${fmt(m.tot.dayOne)}, because it buys the refined materials ready-made)` : ""}`).join(". ")}.</p>
       <p class="small muted">Stop totals use last week's prices: purchases at last week's price, sales at the target price less market fees, and a station fee of about ${pct(ABP.crafting.STATION, 0)} of the value of what's crafted (1% for refining). The profit table at the top uses the middle of the last four weeks instead, so the two can differ.</p>
-      <h4>Shopping list</h4>
-      <div class="table-wrap"><table><thead><tr><th>Material</th><th>Buy in</th><th>Amount</th><th>Price</th><th>Cost</th><th>Share of daily sales there</th></tr></thead><tbody>
-      ${shop.map((x) => `<tr><td>${L(x.m)}</td><td>${esc(x.city)}</td><td class="num">${full(x.qty)}</td><td class="num">${full(x.price)}</td><td class="num">${fmt(x.cost)}</td><td class="num ${x.share > 0.25 ? "bad" : ""}">${x.share == null ? "–" : pct(x.share, 0)}</td></tr>`).join("")}
+      <h4>Daily shopping list</h4>
+      <div class="table-wrap"><table><thead><tr><th>Material</th><th>Buy in</th>${ms.map((x) => `<th>${esc(x.name)}</th>`).join("")}<th>Price</th><th>Share of daily sales there</th></tr></thead><tbody>
+      ${[...shopRows.values()].map(({ x, q, share }) => `<tr><td>${L(x.m)}</td><td>${esc(x.city)}</td>${qtyCells(q)}<td class="num">${full(x.price)}</td><td class="num ${share > 0.25 ? "bad" : ""}">${share == null ? "–" : pct(share, 0)}</td></tr>`).join("")}
       </tbody></table></div>
-      <p class="small muted">Amounts already allow for the materials the bonus city hands back, which you reuse in the same session. A share over 25% of a market's daily sales will push its price up: split that buying across cities. About ${full(kgIn)} kg of materials in total.</p>
+      <p class="small muted">Amounts already allow for the materials the bonus city hands back, which you reuse in the same session. A share over 25% of a market's daily sales will push its price up: split that buying across cities.</p>
       ${A.refine.length ? `<h4>Refining your own materials</h4>
       <div class="table-wrap"><table><thead><tr><th>Material</th><th>Recipe</th><th>Buy it (${esc(A.refine[0].buyCity)})</th><th>Refine it yourself</th><th>Saving</th><th>Weeks cheaper</th></tr></thead><tbody>
       ${A.refine.map((x) => `<tr><td>${L(x.m)}</td><td>${x.ins.map((i) => `${i.n} ${L(i.x)}`).join(" + ")}</td><td class="num">${full(x.buy)}</td><td class="num">${full(x.own)}</td><td class="num ${x.saving > 0.05 ? "money" : ""}">${pct(x.saving)}</td><td class="num">${x.wkUp} of 4</td></tr>`).join("")}
       </tbody></table></div>
-      <p class="small muted">Refined without focus in ${esc([...new Set(A.refine.map((x) => x.res.city))].join(" and "))}, the refining bonus city, which returns ${pct(ABP.RETURN.refineBonus.none)} of the inputs, with inputs bought in the cheapest royal city and a 1% station allowance. The day above refines only what saves more than 5%. Refining needs the matching tanner, weaver, smelter or lumbermill nodes unlocked.</p>` : ""}`;
+      <p class="small muted">Refined without focus in ${esc([...new Set(A.refine.map((x) => x.res.city))].join(" and "))}, the refining bonus city, which returns ${pct(ABP.RETURN.refineBonus.none)} of the inputs, with inputs bought in the cheapest royal city and a 1% station allowance. The loop refines only what saves more than 5%. Refining needs the matching tanner, weaver, smelter or lumbermill nodes unlocked.</p>` : ""}`;
   }
 
   /* ---------- Refresh everything: header button and pull down at the top of the page ---------- */

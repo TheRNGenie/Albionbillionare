@@ -76,7 +76,7 @@ Each build is attached to a `windows-build-N` release:
 
 **Albion Data Client link:** Tools → Albion Data Client link starts the official client with `-p http://127.0.0.1:47811`, so it keeps uploading to the public project and also sends this app every market order you view. Those prices replace the public ones whenever they're newer. You can instead add that flag to the client's own shortcut.
 
-After download it never contacts GitHub. Item names and recipes ship inside the app, there is no auto-updater, and the only network calls are the Albion Online Data Project prices, Albion's player lookup and Google Fonts.
+Item names and recipes ship inside the app. It only contacts GitHub when you press **Check for updates** under Tools: it compares your build number with the newest `windows-build-N` release, and the installed app downloads that Setup.exe and runs it (it upgrades in place and keeps your data). The portable copy opens the release page instead. Other network calls are the Albion Online Data Project prices, Albion's player lookup and Google Fonts.
 Your data lives in the app on that PC; use **Tools → Backup** to move it between your phone and PC.
 Windows may warn that the app is unsigned: choose **More info → Run anyway**.
 

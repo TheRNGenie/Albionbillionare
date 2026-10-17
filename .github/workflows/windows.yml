@@ -1,7 +1,7 @@
 name: Windows app
 
 # Builds the Windows desktop app (an Electron window around this web app) and attaches it to a GitHub release.
-# Once downloaded, the app never contacts GitHub: it has no auto-updater and ships its own data files.
+# The app ships its own data files and only contacts GitHub when the player presses "Check for updates" (Tools tab).
 on:
   push:
     branches: [main, claude/albion-billionaire-app]

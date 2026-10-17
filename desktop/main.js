@@ -1,6 +1,6 @@
 // Albion Billionaire for Windows: an Electron window around the same web app the Android build uses.
-// The app is served from inside the package on app://albion, so it never contacts GitHub;
-// the only network calls are the Albion price and player APIs (plus Google Fonts for the lettering).
+// The app is served from inside the package on app://albion. The network calls are the Albion price and player
+// APIs (plus Google Fonts for the lettering), and GitHub only when the player presses "Check for updates".
 const { app, BrowserWindow, protocol, net, session, shell, Menu, ipcMain, dialog } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -127,7 +127,50 @@ function launchClient(exe) {
     return { ok: true };
   } catch (e) { return { ok: false, error: e.message }; }
 }
+/* ---------- Updates, only when the player asks ----------
+   Each Windows build is a GitHub release tagged windows-build-N, and the app's version is 1.0.N. The installed app
+   downloads the newer Setup.exe and runs it (it upgrades in place, keeping your data); the portable one opens the page. */
+const REPO = "TheRNGenie/Albionbillionare";
+const DOWNLOADS = `https://github.com/${REPO}/releases/download/`;
+const portable = () => !!process.env.PORTABLE_EXECUTABLE_FILE;
+const buildNo = () => +(app.getVersion().split(".")[2] || 0);
+async function checkUpdate() {
+  const res = await net.fetch(`https://api.github.com/repos/${REPO}/releases?per_page=40`, { headers: { Accept: "application/vnd.github+json", "User-Agent": "Albion-Billionaire" } });
+  if (!res.ok) throw new Error(res.status === 403 ? "GitHub is limiting update checks right now. Try again in an hour." : "GitHub answered " + res.status + ".");
+  const builds = (await res.json()).map((r) => ({ r, n: +((r.tag_name || "").match(/^windows-build-(\d+)$/) || [])[1] || 0 })).filter((x) => x.n && !x.r.draft).sort((a, b) => b.n - a.n);
+  const top = builds[0];
+  if (!top) return { current: buildNo(), latest: null, portable: portable() };
+  const asset = top.r.assets.find((a) => a.name === (portable() ? "Albion-Billionaire-portable.exe" : "Albion-Billionaire-Setup.exe"));
+  return { current: buildNo(), latest: top.n, newer: top.n > buildNo(), date: top.r.published_at, url: asset ? asset.browser_download_url : null, size: asset ? asset.size : null, page: top.r.html_url, portable: portable() };
+}
+async function installUpdate(win, url) {
+  if (typeof url !== "string" || !url.startsWith(DOWNLOADS) || !url.endsWith("/Albion-Billionaire-Setup.exe")) throw new Error("That isn't this app's installer.");
+  const res = await net.fetch(url);
+  if (!res.ok || !res.body) throw new Error("The download failed (" + res.status + ").");
+  const total = +res.headers.get("content-length") || 0;
+  const file = path.join(app.getPath("temp"), "Albion-Billionaire-Setup.exe");
+  const out = fs.createWriteStream(file);
+  const reader = res.body.getReader();
+  let got = 0, shown = -1;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    got += value.length;
+    if (!out.write(Buffer.from(value))) await new Promise((r) => out.once("drain", r));
+    const pct = total ? Math.floor((got / total) * 100) : -1;
+    if (pct !== shown) { shown = pct; win.webContents.send("upd:progress", { got, total }); }
+  }
+  await new Promise((r, j) => out.end((e) => (e ? j(e) : r())));
+  if (total && got !== total) throw new Error("The download was cut short. Try again.");
+  spawn(file, [], { detached: true, stdio: "ignore" }).unref();
+  setTimeout(() => app.quit(), 500);
+  return { ok: true };
+}
+
 function setupIpc() {
+  ipcMain.handle("upd:check", () => checkUpdate());
+  ipcMain.handle("upd:install", (e, url) => installUpdate(BrowserWindow.fromWebContents(e.sender), url));
+  ipcMain.handle("upd:open", (e, url) => { if (typeof url === "string" && url.startsWith(`https://github.com/${REPO}/releases/`)) shell.openExternal(url); });
   ipcMain.handle("dc:status", () => ({ listening: local.listening, error: local.error, ingest: INGEST, received: local.received, lastAt: local.lastAt, count: local.prices.size, running: !!(local.child && local.child.exitCode == null), clientPath: clientPath || (clientPath = findClient()), gold: local.gold }));
   ipcMain.handle("dc:prices", (e, ids, cities, qualities) => {
     const out = [];
