@@ -571,9 +571,9 @@
     out.innerHTML = `<p class="muted">Loading ${ids.length} items from the ${ABP.SERVERS.find((s) => s.id === ABP.api.server).label} server…</p>`;
     const locs = mk.preset === "bm" ? [...ABP.CITIES, ABP.BM] : ABP.CITIES;
     try {
-      const rows = await ABP.api.prices(ids, locs, [mk.quality]);
+      const [rows, vol] = await Promise.all([ABP.api.prices(ids, locs, [mk.quality]), ABP.api.volumes(ids, locs, mk.quality).catch(() => null)]);
       mkRows = rows;
-      drawMarket(ids, rows);
+      drawMarket(ids, rows, vol);
     } catch (e) {
       out.innerHTML = fallbackNotice(e, `${ABP.api.host()}/api/v2/stats/prices/${ids.join(",")}.json?locations=${encodeURIComponent(locs.join(","))}&qualities=${mk.quality}`);
       $("#fb-apply")?.addEventListener("click", () => {
@@ -596,8 +596,11 @@
     </div>`;
   }
 
-  function drawMarket(ids, rows) {
+  function drawMarket(ids, rows, vol = null) {
     const out = $("#mk-out");
+    /* what it actually sold for on average over the last week in that market; orders above it rarely fill */
+    const avgOf = (id, city) => vol?.[id]?.[city]?.avg ?? null;
+    const real = (price, avg) => (avg && avg < price ? avg : price);
     const idx = ABP.api.index(rows);
     const sellTax = FEES.salesTaxPremium;
     const stale = (r) => { const h = ago(r?.sellDate); return h == null || h > 24; };
@@ -609,21 +612,23 @@
         if (mk.from === "cheapest") {
           for (const city of ABP.CITIES) { const r = c[city]; if (r?.sell && (!src || r.sell < src.sell)) src = r; }
         } else src = c[mk.from];
-        const net = bm?.buy ? bm.buy * (1 - sellTax) : null;
+        const avg = avgOf(id, ABP.BM);
+        const net = bm?.buy ? real(bm.buy, avg) * (1 - sellTax) : null;
         const profit = net != null && src?.sell ? net - src.sell : null;
-        return { id, src, bm, net, profit, roi: profit != null ? profit / src.sell : null };
+        return { id, src, bm, avg, net, profit, roi: profit != null ? profit / src.sell : null };
       }).sort((a, b) => (b.profit ?? -Infinity) - (a.profit ?? -Infinity));
       const good = list.filter((x) => x.roi > 0.1).length;
       out.innerHTML = `
-        <p class="small">${good ? `<strong>${good}</strong> items clear a 10% margin after the 4% tax.` : "No item clears a 10% margin right now. Try another tier or enchantment."} Black Market prices move fast; trust the ones updated in the last few hours.</p>
+        <p class="small">${good ? `<strong>${good}</strong> items clear a 10% margin after the 4% tax.` : "No item clears a 10% margin right now. Try another tier or enchantment."} Black Market prices move fast; trust the ones updated in the last few hours. When the Black Market paid less on average last week than its order says, the profit uses that average.</p>
         <div class="table-wrap"><table>
-          <thead><tr><th>Item</th><th>Buy in</th><th>Cost</th><th>Black Market pays</th><th>BM price age</th><th>After 4% tax</th><th>Profit each</th><th>Margin</th></tr></thead>
+          <thead><tr><th>Item</th><th>Buy in</th><th>Cost</th><th>Black Market pays</th><th>BM price age</th><th>Sold at (7-day avg)</th><th>After 4% tax</th><th>Profit each</th><th>Margin</th></tr></thead>
           <tbody>${list.map((x) => `<tr data-id="${esc(x.id)}">
             <td><span class="item-name">${esc(itemLabel(x.id))}<small>${esc(x.id)}</small></span></td>
             <td>${x.src ? esc(x.src.city) : "–"}</td>
             <td class="num ${stale(x.src) ? "stale" : ""}">${x.src?.sell ? full(x.src.sell) : "–"}</td>
             <td class="num hi">${x.bm?.buy ? full(x.bm.buy) : "–"}</td>
             <td class="small muted">${agoText(ago(x.bm?.buyDate))}</td>
+            <td class="num ${x.avg && x.bm?.buy && x.avg < x.bm.buy ? "bad" : ""}">${x.avg ? full(x.avg) : vol ? "no sales" : "–"}</td>
             <td class="num">${x.net ? full(x.net) : "–"}</td>
             <td class="num ${x.profit > 0 ? "good" : x.profit < 0 ? "bad" : ""}">${x.profit != null ? full(x.profit) : "–"}</td>
             <td>${x.roi != null ? `<span class="pill ${x.roi > 0.1 ? "good" : x.roi < 0 ? "bad" : ""}">${pct(x.roi)}</span>` : "–"}</td>
@@ -637,13 +642,14 @@
           if (!lo || r.sell < lo.sell) lo = r;
           if (!hi || r.sell > hi.sell) hi = r;
         }
-        const profit = lo && hi ? hi.sell * (1 - sellTax - FEES.setupFee) - lo.sell : null;
-        return { id, c, lo, hi, profit, roi: profit != null ? profit / lo.sell : null };
+        const avg = hi ? avgOf(id, hi.city) : null;
+        const profit = lo && hi ? real(hi.sell, avg) * (1 - sellTax - FEES.setupFee) - lo.sell : null;
+        return { id, c, lo, hi, avg, profit, roi: profit != null ? profit / lo.sell : null };
       });
       out.innerHTML = `
-        <p class="small muted">The last column assumes you instant-buy in the cheapest city and list a sell order in the best city (4% tax and 2.5% setup fee). It ignores travel risk, so check the route.</p>
+        <p class="small muted">Haul profit assumes you instant-buy in the cheapest city and list a sell order in the best city (4% tax and 2.5% setup fee), at no more than what it actually sold for there on average last week, since many listings never fill. It ignores travel risk, so check the route. Hover a price to see its average sale.</p>
         <div class="table-wrap"><table>
-          <thead><tr><th>Item</th>${ABP.CITIES.map((c) => `<th>${c}</th>`).join("")}<th>Haul profit</th><th>Margin</th></tr></thead>
+          <thead><tr><th>Item</th>${ABP.CITIES.map((c) => `<th>${c}</th>`).join("")}<th>Sold at in best city (7-day avg)</th><th>Haul profit</th><th>Margin</th></tr></thead>
           <tbody>${list.map((x) => `<tr data-id="${esc(x.id)}">
             <td><span class="item-name">${esc(itemLabel(x.id))}<small>${esc(x.id)}</small></span></td>
             ${ABP.CITIES.map((city) => {
@@ -651,8 +657,10 @@
               if (!r?.sell) return `<td class="num empty">–</td>`;
               const h = ago(r.sellDate);
               const cls = stale(r) ? "stale" : r === x.lo ? "lo" : r === x.hi ? "hi" : "";
-              return `<td class="num ${cls}" title="Updated ${agoText(h)}${r.buy ? " · top buy order " + full(r.buy) : ""}">${full(r.sell)}</td>`;
+              const a = avgOf(x.id, city);
+              return `<td class="num ${cls}" title="Updated ${agoText(h)}${r.buy ? " · top buy order " + full(r.buy) : ""}${a ? " · sold for " + full(a) + " on average last week" : ""}">${full(r.sell)}</td>`;
             }).join("")}
+            <td class="num ${x.avg && x.hi && x.avg < x.hi.sell ? "bad" : ""}">${x.avg ? full(x.avg) : vol && x.hi ? "no sales" : "–"}</td>
             <td class="num ${x.profit > 0 ? "good" : x.profit < 0 ? "bad" : ""}">${x.profit != null ? full(x.profit) : "–"}</td>
             <td>${x.roi != null ? `<span class="pill ${x.roi > 0.1 ? "good" : x.roi < 0 ? "bad" : ""}">${pct(x.roi)}</span>` : "–"}</td>
           </tr>`).join("")}</tbody></table></div>
@@ -1473,20 +1481,20 @@
   /* ---------- Best picks ---------- */
   const assume = Object.assign({ plots: 8, perPlant: 9, seedReturn: 70 }, store.get("assume", {}));
   const PICKS = [
-    { key: "crops", title: "Island: what to plant", how: "Ranked by profit per day across all your plots after seed costs, using the best city to sell in. A crop only counts as much as the market can absorb (half its daily sales), so a pricey crop nobody buys does not win.",
+    { key: "crops", title: "Island: what to plant", how: "Ranked by profit per day across all your plots after seed costs, using the best city to sell in, priced at no more than its average sale there last week. A crop only counts as much as the market can absorb (half its daily sales), so a pricey crop nobody buys does not win.",
       run: () => ABP.advisor.crops({ plots: assume.plots, perPlant: assume.perPlant, seedReturn: assume.seedReturn / 100 }),
       legs: (r) => [{ role: "sell", id: r.crop, city: r.sell.city, what: "your crop" }, { role: "buy", id: r.seed, city: r.seed.city, what: "seeds" }],
-      line: (r) => `${fmt(r.daily)} a day · sells ${full(r.sell.sell)} in ${r.sell.city}`, name: (r) => `T${r.tier} ${r.name}`, link: ["market", "crops"] },
+      line: (r) => `${fmt(r.daily)} a day · ${r.avg && r.avg < r.sell.sell ? `sold for ${full(r.avg)} on average` : `sells ${full(r.sell.sell)}`} in ${r.sell.city}`, name: (r) => `T${r.tier} ${r.name}`, link: ["market", "crops"] },
     { key: "refining", title: "Refining: what to spend focus on", how: "Every resource from T4 to T8 at .0 to .2 enchant, refined with focus in its bonus city. Focus cost comes from your refining spec (Calculators → Your spec). Ranked by what your 10,000 daily focus earns: the extra profit focus adds per refine, times how many refines your focus covers, capped at half of what the market sells per day.",
       run: () => ABP.advisor.refining(),
       legs: (r) => [{ role: "sell", id: r.outId, city: r.city, what: "the refined output" }, { role: "buy", id: r.rawId, city: r.city, what: "raw resources" }], line: (r) => `${fmt(r.score)} a day from focus · ${r.spf.toFixed(1)} silver per focus · ${r.city}`, name: (r) => r.label, link: ["calc"] },
-    { key: "bm", title: "Black Market: what to flip", how: "All Black Market gear from T4 to T8 at .0 to .2. Only Black Market prices from the last 12 hours count. Ranked by profit per flip times how many the Black Market actually bought per day (up to 10).",
+    { key: "bm", title: "Black Market: what to flip", how: "All Black Market gear from T4 to T8 at .0 to .2. Only Black Market prices from the last 12 hours count, and the order price is capped at what the Black Market actually paid on average last week. Ranked by profit per flip times how many the Black Market actually bought per day (up to 10).",
       run: () => ABP.advisor.blackMarket(),
       legs: (r) => [{ role: "buy", id: r.id, city: r.src.city, what: "the item" }, { role: "sell", id: r.id, city: ABP.BM, what: "into Black Market orders" }], line: (r) => `${full(r.profit)} each · buy in ${r.src.city}`, name: (r) => r.label, link: ["market", "bm"] },
-    { key: "flips", title: "Order flips: what to buy and relist", how: "Refined and raw resources (T4 to T8, .0 to .2), crops, herbs and common T4 to T6 gear in every city. Profit is the cheapest listing minus the top buy order after the 2.5% fee on both orders and the 4% tax. Ranked by that profit times a fifth of the daily sales, the share you can realistically fill. Items selling fewer than 5 a day are dropped.",
+    { key: "flips", title: "Order flips: what to buy and relist", how: "Refined and raw resources (T4 to T8, .0 to .2), crops, herbs and common T4 to T6 gear in every city. Profit is the cheapest listing minus the top buy order after the 2.5% fee on both orders and the 4% tax, with the listing capped at the average price the item actually sold for there last week, since many orders never fill. Flips where last week's sales averaged below the buy order are dropped. Ranked by that profit times a fifth of the daily sales, the share you can realistically fill. Items selling fewer than 5 a day are dropped.",
       run: () => ABP.advisor.flips(),
       legs: (r) => [{ role: "buy", id: r.id, city: r.city, what: "via buy orders" }, { role: "sell", id: r.id, city: r.city, what: "your relist" }], line: (r) => `${full(r.profit)} each · ${pct(r.margin, 0)} · in ${r.city}`, name: (r) => r.label },
-    { key: "journals", title: "Journals: which to fill", how: "Full journal sell price minus empty journal cost, after fees, in the best cities. Weighed down when fewer than 3 full journals sell per day.",
+    { key: "journals", title: "Journals: which to fill", how: "Full journal sell price minus empty journal cost, after fees, in the best cities, with the full journal priced at no more than its average sale last week. Weighed down when fewer than 3 full journals sell per day.",
       run: () => ABP.advisor.journals(),
       legs: (r) => [{ role: "sell", id: r.id, city: r.full.city, what: "full journals" }, { role: "buy", id: r.id.replace(/_FULL$/, "_EMPTY"), city: r.empty.city, what: "empty journals" }], line: (r) => `${full(r.profit)} per journal`, name: (r) => r.label },
     { key: "gems", more: 11, title: "Hidden gems: big margins, small amounts", how: "Order flips, Black Market flips and city-to-city trades across gear, refined resources and crops, keeping margins of 25% or more (30% between cities) on prices under a day old, then filling the list with 15% to 25% ones if needed (they're marked) that sell fewer than 5 a day. Each must have sold at least 3 last week at an average within 15% of the price used, so it really trades there. Ranked by profit per item times the few you can take a day.",
@@ -1498,7 +1506,7 @@
      royal-city hauls so the page keeps the same number of picks. */
   let safeMode = !!store.get("safeMode", false);
   ABP.advisor.safeOnly = safeMode;
-  const SAFE_BM = { key: "bm", title: "Safe hauls: buy in one royal city, sell in another", how: "Safe Options swaps Black Market flips (which need Caerleon) for trades between the royal cities, which link through blue and yellow zones only. Gear and refined resources from T4 to T8 at .0 to .2, instant-bought where cheapest and listed where dearest, with at least 8% left after tax and fees. Ranked by profit per item times a fifth of daily sales there.",
+  const SAFE_BM = { key: "bm", title: "Safe hauls: buy in one royal city, sell in another", how: "Safe Options swaps Black Market flips (which need Caerleon) for trades between the royal cities, which link through blue and yellow zones only. Gear and refined resources from T4 to T8 at .0 to .2, instant-bought where cheapest and listed where dearest, with at least 8% left after tax and fees at the lower of the listing and last week's average sale. Ranked by profit per item times a fifth of daily sales there.",
     run: () => ABP.advisor.royalHauls(),
     legs: (r) => [{ role: "buy", id: r.id, city: r.src.city, what: "the item" }, { role: "sell", id: r.id, city: r.dst.city, what: "your listing" }],
     line: (r) => `${full(r.profit)} each · ${pct(r.margin, 0)} · ${r.src.city} to ${r.dst.city}`, name: (r) => r.label };

@@ -36,6 +36,14 @@ ABP.advisor = (() => {
   const pct = (v) => (v * 100).toFixed(0) + "%";
   const age = (iso) => { const h = ageH(iso); return h == null ? "no date" : h < 1 ? "under an hour old" : h < 48 ? Math.round(h) + " h old" : Math.round(h / 24) + " days old"; };
   const keepOrder = () => 1 - F().salesTaxPremium - F().setupFee;
+  /* Orders often sit unfilled, so a selling price is only trusted up to what the item actually sold for on
+     average over the last week in that market. Without sales history the order price stands, flagged. */
+  const real = (price, avg) => (avg && avg < price ? avg : price);
+  const soldNote = (price, avg, where, what = "listing") => avg == null
+    ? `No sales came back for ${where} last week, so the ${n(price)} ${what} is unproven. Sell one first.`
+    : avg < price
+      ? `Last week it actually sold for ${n(avg)} on average in ${where}, below the ${n(price)} ${what}, so the numbers here use ${n(avg)}.`
+      : `Last week it actually sold for ${n(avg)} on average in ${where}, at or above the ${n(price)} ${what}, so that price is realistic.`;
 
   function cheapest(byCity, cities, field = "sell") {
     let best = null;
@@ -73,6 +81,8 @@ ABP.advisor = (() => {
     for (const r of rows) {
       const v = vol[r.crop]?.[r.sell.city];
       r.perDay = v ? v.perDay : null;
+      r.avg = v?.avg ?? null;
+      r.net = real(r.sell.sell, r.avg) * keepOrder();
       const sellable = r.perDay == null ? harvest : Math.min(harvest, r.perDay * 0.5);
       r.sellable = sellable;
       r.daily = sellable * r.net - r.seedCost;
@@ -84,7 +94,7 @@ ABP.advisor = (() => {
     rows.forEach((r, i) => {
       const next = rows[i + 1];
       r.reasons = [
-        `${r.name} sells for ${n(r.sell.sell)} in ${r.sell.city} (${age(r.sell.sellDate)}). After the 4% tax and 2.5% listing fee you keep ${n(r.net)} each.`,
+        `${r.name} is listed at ${n(r.sell.sell)} in ${r.sell.city} (${age(r.sell.sellDate)}). ${soldNote(r.sell.sell, r.avg, r.sell.city)} After the 4% tax and 2.5% listing fee you keep ${n(r.net)} each.`,
         `You harvest about ${n(harvest)} a day from ${plots} plots. With ${pct(seedReturn)} of seeds coming back you rebuy ${n(r.seedsBought)} seeds at ${n(r.seed.sell)} in ${r.seed.city}, which costs ${short(r.seedCost)} a day.`,
         r.perDay == null
           ? `No sales history came back for ${r.city || r.sell.city}, so check the market depth before you plant every plot with it.`
@@ -137,8 +147,17 @@ ABP.advisor = (() => {
       top.forEach((x) => (byCity[x.city] = byCity[x.city] || []).push(x.outId));
       const vols = await Promise.all(Object.entries(byCity).map(([c, list]) => ABP.api.volumes(list, [c])));
       const vol = Object.assign({}, ...vols);
-      top.forEach((x) => { x.perDay = vol[x.outId]?.[x.city]?.perDay ?? null; });
+      top.forEach((x) => {
+        const v = vol[x.outId]?.[x.city];
+        x.perDay = v?.perDay ?? null;
+        x.avg = v?.avg ?? null;
+        x.net = real(x.out.p, x.avg) * keepOrder();
+        x.pF = x.net - x.input * (1 - rF); x.pNo = x.net - x.input * (1 - rNo);
+        x.spf = (x.pF - Math.max(0, x.pNo)) / x.fc; x.margin = x.pF / (x.input * (1 - rF));
+      });
     } catch (e) { /* no volume */ }
+    /* only the 40 best had their sales checked; the rest have no proof they sell */
+    rows.splice(40);
     const scored = rows.map((x) => {
       const perFocus = 10000 / x.fc;
       const cap = x.perDay == null ? perFocus * 0.3 : Math.min(perFocus, x.perDay * 0.5);
@@ -150,7 +169,7 @@ ABP.advisor = (() => {
       x.label = label;
       x.reasons = [
         `In ${x.city} (the ${x.res.refinedName} bonus city) each refine takes ${x.k} T${x.t}${x.e ? "." + x.e : ""} ${x.res.rawName} at ${n(x.raw.p)} by ${x.raw.how} and 1 T${x.t - 1}${x.e && x.t > 4 ? "." + x.e : ""} ${x.res.refinedName} at ${n(x.prev.p)}, so ${n(x.input)} of material.`,
-        `With focus ${pct(rF)} of that comes back, so a refine really costs ${n(x.input * (1 - rF))}. ${label} sells for ${n(x.out.p)} (${age(x.out.date)}); you keep ${n(x.net)}, a profit of ${n(x.pF)} (${pct(x.margin)} on cost).`,
+        `With focus ${pct(rF)} of that comes back, so a refine really costs ${n(x.input * (1 - rF))}. ${label} is listed at ${n(x.out.p)} (${age(x.out.date)}). ${soldNote(x.out.p, x.avg, x.city)} You keep ${n(x.net)}, a profit of ${n(x.pF)} (${pct(x.margin)} on cost).`,
         `Your ${x.res.refinedName} spec gives ${n(x.eff)} focus efficiency at T${x.t}, so one refine costs ${x.fc.toFixed(1)} focus and 10,000 focus covers ${n(x.perFocus)} refines.`,
         x.pNo > 0 ? `It makes ${n(x.pNo)} per refine even without focus, so focus only adds ${n(x.pF - x.pNo)} each: ${x.spf.toFixed(1)} silver per focus point. Keep refining it after your focus runs out.` : `Without focus it loses ${n(-x.pNo)} per refine, so focus is what makes it pay: ${x.spf.toFixed(1)} silver per focus point. Refine only as much as your focus covers.`,
         x.perDay == null ? `No sales history came back, so the ranking assumes you can sell ${n(x.refines)} a day. Check the market before you buy big.` : x.perDay * 0.5 < x.perFocus ? `Only ${n(x.perDay)} sell per day in ${x.city}, so the ranking counts ${n(x.refines)} refines a day (half the market), worth ${short(x.score)} of focus value.` : `${n(x.perDay)} sell per day in ${x.city}, enough for all ${n(x.perFocus)} refines. Your daily focus is worth about ${short(x.score)} here.`,
@@ -179,16 +198,18 @@ ABP.advisor = (() => {
       rows.push({ id, label: `T${m[1]}${m[3] ? "." + m[3] : ""} ${names[m[2]] || m[2]}`, bm, src, keep, profit, margin: profit / src.sell });
     }
     rows.sort((a, b) => b.profit - a.profit);
-    rows = rows.slice(0, 20);
+    rows = rows.slice(0, 40);
     try {
       const vol = await ABP.api.volumes(rows.map((r) => r.id), [ABP.BM], quality);
-      rows.forEach((r) => { r.perDay = vol[r.id]?.[ABP.BM]?.perDay ?? null; });
+      rows.forEach((r) => { const v = vol[r.id]?.[ABP.BM]; r.perDay = v?.perDay ?? null; r.avg = v?.avg ?? null; });
     } catch (e) { /* no volume */ }
+    rows.forEach((r) => { r.keep = real(r.bm.buy, r.avg) * (1 - F().salesTaxPremium); r.profit = r.keep - r.src.sell; r.margin = r.profit / r.src.sell; });
+    rows = rows.filter((r) => r.profit > 0).slice(0, 20);
     rows.forEach((r) => { r.daily = r.profit * Math.min(r.perDay ?? 1, 10); });
     rows.sort((a, b) => b.daily - a.daily);
     rows.forEach((r) => {
       r.reasons = [
-        `The Black Market buy order is ${n(r.bm.buy)} (${age(r.bm.buyDate)}). After the 4% tax you keep ${n(r.keep)}.`,
+        `The Black Market buy order is ${n(r.bm.buy)} (${age(r.bm.buyDate)}). ${soldNote(r.bm.buy, r.avg, "the Black Market", "order")} After the 4% tax you keep ${n(r.keep)}.`,
         `The cheapest listing is ${n(r.src.sell)} in ${r.src.city} (${age(r.src.sellDate)}), so each flip makes ${n(r.profit)} (${pct(r.margin)}).`,
         r.perDay == null ? `No Black Market sales history came back; sell one first to confirm the order fills.` : r.perDay >= 5 ? `The Black Market bought about ${n(r.perDay)} a day this week, so it is a steady buyer.` : `The Black Market bought only about ${r.perDay.toFixed(1)} a day this week. Take a few at a time; its order disappears once it is stocked.`,
         r.src.city === "Caerleon" ? `Both ends are in Caerleon, so there is no hauling risk.` : `${r.src.city} to Caerleon crosses red zones. Carry only what you can afford to lose, or wait for a Caerleon listing.`,
@@ -218,13 +239,15 @@ ABP.advisor = (() => {
       rows.forEach((r) => (byCity[r.full.city] = byCity[r.full.city] || []).push(r.id));
       const vols = await Promise.all(Object.entries(byCity).map(([c, list]) => ABP.api.volumes(list, [c])));
       const vol = Object.assign({}, ...vols);
-      rows.forEach((r) => { r.perDay = vol[r.id]?.[r.full.city]?.perDay ?? null; });
+      rows.forEach((r) => { const v = vol[r.id]?.[r.full.city]; r.perDay = v?.perDay ?? null; r.avg = v?.avg ?? null; });
     } catch (e) { /* no volume */ }
+    rows.forEach((r) => { r.keep = real(r.full.sell, r.avg) * keepOrder(); r.profit = r.keep - r.empty.sell; });
+    rows = rows.filter((r) => r.profit > 0);
     rows.forEach((r) => { r.score = r.profit * Math.min(1, (r.perDay ?? 3) / 3); });
     rows.sort((a, b) => b.score - a.score);
     rows.forEach((r) => {
       r.reasons = [
-        `An empty one costs ${n(r.empty.sell)} in ${r.empty.city}. A full one sells for ${n(r.full.sell)} in ${r.full.city} (${age(r.full.sellDate)}), so you keep ${n(r.profit)} per journal after fees.`,
+        `An empty one costs ${n(r.empty.sell)} in ${r.empty.city}. A full one is listed at ${n(r.full.sell)} in ${r.full.city} (${age(r.full.sellDate)}). ${soldNote(r.full.sell, r.avg, r.full.city)} You keep ${n(r.profit)} per journal after fees.`,
         `It fills while you are ${r.j.activity}, so carry it whenever you do that anyway: the profit is on top of your normal income.`,
         r.perDay == null ? `No sales history came back; list one before filling many.` : `About ${r.perDay.toFixed(1)} full ones sell per day in ${r.full.city}.`,
         `Or hand it to a ${r.j.labourer} on your island, who returns materials worth more than the journal when your house and furniture keep them happy.`,
@@ -253,22 +276,30 @@ ABP.advisor = (() => {
       rows.push({ id: x.id, city: x.city, buy: x.buy, sell: x.sell, cost, keep, profit, margin: profit / cost, date: x.sellDate });
     }
     rows.sort((a, b) => b.margin - a.margin);
-    rows = rows.slice(0, 80);
+    rows = rows.slice(0, 150);
     try {
       const byCity = {};
       rows.forEach((r) => (byCity[r.city] = byCity[r.city] || []).push(r.id));
       const vols = await Promise.all(Object.entries(byCity).map(([c, list]) => ABP.api.volumes(list, [c]).then((v) => [c, v])));
       const vol = Object.fromEntries(vols);
-      rows.forEach((r) => { r.perDay = vol[r.city]?.[r.id]?.[r.city]?.perDay ?? null; });
+      rows.forEach((r) => { const v = vol[r.city]?.[r.id]?.[r.city]; r.perDay = v?.perDay ?? null; r.avg = v?.avg ?? null; });
     } catch (e) { /* no volume */ }
-    rows = rows.filter((r) => r.perDay == null || r.perDay >= 5);
+    /* Trades happen between the buy order and the listing. When the average sale sits below the listing, relisting
+       only fills near that average; when it sits below the buy order, sellers aren't reaching the order either. */
+    rows.forEach((r) => {
+      r.keep = real(r.sell, r.avg) * keepOrder();
+      r.profit = r.keep - r.cost; r.margin = r.profit / r.cost;
+      r.dead = r.avg != null && r.avg < r.buy;
+    });
+    rows = rows.filter((r) => r.profit > 0 && !r.dead && (r.perDay == null || r.perDay >= 5));
     rows.forEach((r) => { r.daily = r.profit * Math.max(1, (r.perDay ?? 5) * 0.2); });
     rows.sort((a, b) => b.daily - a.daily);
     rows.forEach((r) => {
       r.label = itemName(r.id);
       r.reasons = [
         `In ${r.city} the top buy order is ${n(r.buy)} and the cheapest listing is ${n(r.sell)} (${age(r.date)}).`,
-        `Buying through an order costs ${n(r.cost)} with the 2.5% fee; selling through an order keeps ${n(r.keep)} after tax and fee. That is ${n(r.profit)} per item (${pct(r.margin)}).`,
+        soldNote(r.sell, r.avg, r.city),
+        `Buying through an order costs ${n(r.cost)} with the 2.5% fee; relisting keeps ${n(r.keep)} after tax and fee. That is ${n(r.profit)} per item (${pct(r.margin)}).`,
         r.perDay == null ? `No sales history came back; start with a small order.` : `About ${n(r.perDay)} sell per day there. If you take a fifth of that, it is worth about ${short(r.daily)} a day.`,
         `Your orders sit in one city, so there is no travel and no risk beyond being undercut. Re-check them two or three times a day.`,
       ];
@@ -380,6 +411,12 @@ ABP.advisor = (() => {
     rows.forEach((r) => { const v = vols[r.sellCity]?.[r.id]?.[r.sellCity]; r.sold = v?.sold ?? 0; r.perDay = v?.perDay ?? 0; r.avg = v?.avg ?? null; });
     /* keep only the low-volume, proven ones: sold 3+ last week, under 5 a day, average sale at least 85% of the price used */
     rows = rows.filter((r) => r.sold >= 3 && r.perDay < 5 && r.avg && r.avg >= r.ref * 0.85);
+    /* price the sale at the average it really sold for when that is below the order or listing */
+    rows.forEach((r) => {
+      r.keep = real(r.ref, r.avg) * (r.sellCity === ABP.BM ? 1 - F().salesTaxPremium : keepOrder());
+      r.profit = r.keep - r.cost; r.margin = r.profit / r.cost;
+    });
+    rows = rows.filter((r) => r.margin >= 0.15);
     const seen = new Set();
     rows = rows.filter((r) => { const k = r.id + r.kind; if (seen.has(k)) return false; seen.add(k); return true; });
     rows.forEach((r) => { r.take = Math.max(1, Math.floor(r.perDay * 0.3)); r.daily = r.profit * r.take; r.label = itemName(r.id); r.strong = r.margin >= (r.kind === "City to city" ? 0.3 : 0.25); });
@@ -389,7 +426,7 @@ ABP.advisor = (() => {
     rows.forEach((r) => {
       r.reasons = [
         `${r.kind === "Order flip" ? `In ${r.buyCity}, buy with ${r.buyHow} at ${n(r.cost)} (fee included) and relist` : `Instant-buy it in ${r.buyCity} for ${n(r.cost)} and ${r.sellCity === ABP.BM ? "sell it into the Black Market order" : `list it in ${r.sellCity}`}`}: you keep ${n(r.keep)}, so ${n(r.profit)} each (${pct(r.margin)}).`,
-        `Proof it works: ${n(r.sold)} sold in ${r.sellCity} over the last week, at an average of ${n(r.avg)}, close to the ${n(r.ref)} used here (${age(r.date)}).`,
+        `Proof it works: ${n(r.sold)} sold in ${r.sellCity} over the last week, at an average of ${n(r.avg)}, against the ${n(r.ref)} ${r.sellCity === ABP.BM ? "order" : "listing"} (${age(r.date)}). The profit uses ${n(real(r.ref, r.avg))}, whichever is lower.`,
         `Only about ${r.perDay.toFixed(1)} sell a day, so this doesn't scale: plan on ${r.take} a day${r.take === 1 ? " at most" : ""}, worth about ${short(r.daily)}. Do more and you become the market.`,
         ...(r.strong ? [] : [`Its margin is under the usual gem bar, shown to fill the list; it still has proven sales.`]),
         r.buyCity !== r.sellCity && [r.buyCity, r.sellCity].some((c) => c === "Caerleon" || c === ABP.BM || c === "Brecilien") ? `The trip crosses red or black zones. Carry only what you can lose.` : r.buyCity !== r.sellCity ? `${r.buyCity} to ${r.sellCity} is through safe zones.` : `No travel: both orders sit in ${r.buyCity}.`,
@@ -419,14 +456,15 @@ ABP.advisor = (() => {
       const byCity = {};
       rows.forEach((r) => (byCity[r.dst.city] = byCity[r.dst.city] || new Set()).add(r.id));
       const vols = Object.fromEntries(await Promise.all(Object.entries(byCity).map(([c, set]) => ABP.api.volumes([...set], [c]).then((v) => [c, v]))));
-      rows.forEach((r) => { r.perDay = vols[r.dst.city]?.[r.id]?.[r.dst.city]?.perDay ?? null; });
+      rows.forEach((r) => { const v = vols[r.dst.city]?.[r.id]?.[r.dst.city]; r.perDay = v?.perDay ?? null; r.avg = v?.avg ?? null; });
     } catch (e) { /* no volume */ }
-    rows = rows.filter((r) => r.perDay == null || r.perDay >= 1);
+    rows.forEach((r) => { r.keep = real(r.dst.sell, r.avg) * keepOrder(); r.profit = r.keep - r.src.sell; r.margin = r.profit / r.src.sell; });
+    rows = rows.filter((r) => r.margin >= 0.08 && (r.perDay == null || r.perDay >= 1));
     rows.forEach((r) => { r.take = Math.max(1, Math.floor((r.perDay ?? 2) * 0.2)); r.daily = r.profit * r.take; r.label = itemName(r.id); });
     rows.sort((a, b) => b.daily - a.daily);
     rows.forEach((r) => {
       r.reasons = [
-        `Instant-buy it in ${r.src.city} for ${n(r.src.sell)} (${age(r.src.sellDate)}) and list it in ${r.dst.city} at ${n(r.dst.sell)} (${age(r.dst.sellDate)}). After tax and listing fee you keep ${n(r.keep)}: ${n(r.profit)} each (${pct(r.margin)}).`,
+        `Instant-buy it in ${r.src.city} for ${n(r.src.sell)} (${age(r.src.sellDate)}) and list it in ${r.dst.city}, where the cheapest listing is ${n(r.dst.sell)} (${age(r.dst.sellDate)}). ${soldNote(r.dst.sell, r.avg, r.dst.city)} After tax and listing fee you keep ${n(r.keep)}: ${n(r.profit)} each (${pct(r.margin)}).`,
         r.perDay == null ? `No sales history came back for ${r.dst.city}; list one before you carry more.` : `About ${r.perDay.toFixed(1)} sell a day in ${r.dst.city}; taking a fifth of that is about ${r.take} a day, worth ${short(r.daily)}.`,
         `${r.src.city} to ${r.dst.city} runs through blue and yellow zones only, so you can't lose the load on the way.`,
       ];
