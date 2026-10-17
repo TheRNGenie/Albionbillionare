@@ -1,0 +1,25 @@
+name: Price history snapshot
+
+# Downloads long-run daily prices and volumes for the craft-profit study and commits them to this branch.
+on:
+  push:
+    branches: [claude/project-thread-wzqm2p]
+    paths: [tools/fetch_history.py, .github/workflows/price-history.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 tools/fetch_history.py 2025-10-01 west
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add data/history/daily.csv.gz
+          git commit -m "Price history snapshot $(date -u +%F)"
+          git push
