@@ -66,6 +66,12 @@ The Crafting tab builds a full plan for one category the player picks (swords, l
 
 Each stage (spec 0 to 30, 30 to 75, 75 to 100) runs the same day: 10,000 focus on the crafts focus helps most, then the material budget on no-focus crafts with the best return, never more than the safe daily amount per city, and at most 8 different items. The report covers the pick, every item ranked, the route by stage with crafting fame, return rates and focus by spec, a city-by-city loop, the shopping list, refining your own materials, a price sheet with targets and break-even limits, and the risks. The same crafts are re-priced with each of the four weeks to give a worst week. Logic lives in `assets/js/crafting.js`.
 
+## Matchups
+
+The Matchups tab shows, for a weapon the player picks, the weapons it beats and loses to most in 1v1 fights, its record against each weapon line, and the builds players use with it in three settings: Stalker (900 to 1100 IP), Slayer (above 1200 IP) and Top rated (top 500 by Murder Ledger's 1v1 rating). With no weapon picked it shows the weapons winning and losing the most and the most played ones. Matchups are ranked by the low (or high) end of a 95% Wilson interval, so a 9-1 record doesn't outrank 600-400, and rows whose record could still be luck are marked "close".
+
+The data comes from [Murder Ledger](https://murderledger.albiononline2d.com/) (open-source API, MIT, `gitlab.com/albion-murder-ledger/api`): `/api/weapon-matrix`, `/api/weapon-matrix?slayer=true` and `/api/builds/{1v1_stalker_7_day,1v1_high_ip_7_day,1v1_high_elo_7_day}`. Murder Ledger turns away requests from cloud servers (GitHub's runners got 403 on every address), and its API only lets its own site read it from a web page, so there is no automatic snapshot. The app fetches only when the player presses Load: the Windows app through its main process (`ml:get`, Murder Ledger `/api/` addresses only), the Android app through Capacitor's native HTTP. In a plain browser, or if Load fails, the player opens the five links, saves the pages and imports them. The data is kept in IndexedDB (a full set is too big for localStorage).
+
 ## Windows app
 
 The same app runs as a Windows desktop program, built with Electron by `.github/workflows/windows.yml` on every push.

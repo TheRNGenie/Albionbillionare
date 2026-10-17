@@ -9,6 +9,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Alegreya+Sans:wght@400;500;700&display=swap">
 <link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="assets/matchups.css">
 </head>
 <body>
 <header class="top">
@@ -27,6 +28,7 @@
     <button role="tab" data-tab="plan" id="tab-plan">Plan</button>
     <button role="tab" data-tab="picks" id="tab-picks">Best picks</button>
     <button role="tab" data-tab="crafting" id="tab-crafting">Crafting</button>
+    <button role="tab" data-tab="matchups" id="tab-matchups">Matchups</button>
     <button role="tab" data-tab="methods" id="tab-methods">Methods</button>
     <button role="tab" data-tab="market" id="tab-market">Market</button>
     <button role="tab" data-tab="calc" id="tab-calc">Calculators</button>
@@ -46,6 +48,7 @@
   <section class="panel" id="panel-plan" role="tabpanel" aria-labelledby="tab-plan"></section>
   <section class="panel" id="panel-picks" role="tabpanel" aria-labelledby="tab-picks" hidden></section>
   <section class="panel" id="panel-crafting" role="tabpanel" aria-labelledby="tab-crafting" hidden></section>
+  <section class="panel" id="panel-matchups" role="tabpanel" aria-labelledby="tab-matchups" hidden></section>
   <section class="panel" id="panel-methods" role="tabpanel" aria-labelledby="tab-methods" hidden></section>
   <section class="panel" id="panel-market" role="tabpanel" aria-labelledby="tab-market" hidden></section>
   <section class="panel" id="panel-calc" role="tabpanel" aria-labelledby="tab-calc" hidden></section>
@@ -57,7 +60,7 @@
 </main>
 
 <footer class="wrap foot">
-  <p>Prices from the <a href="https://www.albion-online-data.com/" target="_blank" rel="noopener">Albion Online Data Project</a>. Item names from <a href="https://github.com/ao-data/ao-bin-dumps" target="_blank" rel="noopener">ao-bin-dumps</a>. Income figures are estimates; check prices before you commit silver. Not affiliated with Sandbox Interactive.</p>
+  <p>Prices from the <a href="https://www.albion-online-data.com/" target="_blank" rel="noopener">Albion Online Data Project</a>. Item names from <a href="https://github.com/ao-data/ao-bin-dumps" target="_blank" rel="noopener">ao-bin-dumps</a>. Matchups and builds from <a href="https://murderledger.albiononline2d.com/" target="_blank" rel="noopener">Murder Ledger</a>. Income figures are estimates; check prices before you commit silver. Not affiliated with Sandbox Interactive.</p>
 </footer>
 
 <div class="welcome-back" id="wheel" role="dialog" aria-modal="true" aria-labelledby="wh-title" hidden>
@@ -80,6 +83,7 @@
 <script src="assets/js/api.js"></script>
 <script src="assets/js/advisor.js"></script>
 <script src="assets/js/crafting.js"></script>
+<script src="assets/js/matchups.js"></script>
 <script src="assets/js/app.js"></script>
 </body>
 </html>

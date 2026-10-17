@@ -1,6 +1,7 @@
 // Albion Billionaire for Windows: an Electron window around the same web app the Android build uses.
 // The app is served from inside the package on app://albion. The network calls are the Albion price and player
-// APIs (plus Google Fonts for the lettering), and GitHub only when the player presses "Check for updates".
+// APIs (plus Google Fonts for the lettering), Murder Ledger only when the player presses Load on the Matchups tab,
+// and GitHub only when the player presses "Check for updates".
 const { app, BrowserWindow, protocol, net, session, shell, Menu, ipcMain, dialog } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -167,8 +168,24 @@ async function installUpdate(win, url) {
   return { ok: true };
 }
 
+/* ---------- Murder Ledger, for the Matchups tab ----------
+   Its API only lets its own website read it from a page, so the window asks through here, and only when the
+   player presses Load. Only Murder Ledger's /api/ addresses are allowed. */
+const ML_HOSTS = ["murderledger.albiononline2d.com", "murderledger-europe.albiononline2d.com", "murderledger-asia.albiononline2d.com", "murderledger.com"];
+async function murderLedger(url) {
+  let u;
+  try { u = new URL(url); } catch (e) { return { ok: false, error: "Not a web address." }; }
+  if (u.protocol !== "https:" || !ML_HOSTS.includes(u.host) || !u.pathname.startsWith("/api/")) return { ok: false, error: "Not a Murder Ledger address." };
+  try {
+    const res = await net.fetch(u.toString(), { headers: { Accept: "application/json", "User-Agent": `Albion-Billionaire/${app.getVersion()} (Windows app)` } });
+    if (!res.ok) return { ok: false, status: res.status, error: "Murder Ledger answered " + res.status + "." };
+    return { ok: true, json: await res.json() };
+  } catch (e) { return { ok: false, error: "Couldn't reach Murder Ledger: " + e.message }; }
+}
+
 function setupIpc() {
   ipcMain.handle("upd:check", () => checkUpdate());
+  ipcMain.handle("ml:get", (e, url) => murderLedger(url));
   ipcMain.handle("upd:install", (e, url) => installUpdate(BrowserWindow.fromWebContents(e.sender), url));
   ipcMain.handle("upd:open", (e, url) => { if (typeof url === "string" && url.startsWith(`https://github.com/${REPO}/releases/`)) shell.openExternal(url); });
   ipcMain.handle("dc:status", () => ({ listening: local.listening, error: local.error, ingest: INGEST, received: local.received, lastAt: local.lastAt, count: local.prices.size, running: !!(local.child && local.child.exitCode == null), clientPath: clientPath || (clientPath = findClient()), gold: local.gold }));
