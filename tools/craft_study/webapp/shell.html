@@ -1,0 +1,191 @@
+<title>Crafting Profit Plan</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Alegreya+Sans:ital,wght@0,400;0,500;0,700;1,400&display=swap">
+<style>
+/* Layout: sticky brass header with search, guild-ledger sidebar of sections, one section open at a time */
+:root{
+  --bg:#efe6d2; --panel:#e5d9bf; --card:#f7f0e1; --ink:#2a2017; --muted:#6c5b44; --line:#cdbb94;
+  --brass:#87601b; --brass-soft:rgba(135,96,27,.13); --blue:#2e5b7a; --good:#3d6b35; --mark:#f0c96a;
+  --display:"Cinzel",Georgia,"Times New Roman",serif; --body:"Alegreya Sans","Segoe UI",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#1a1511; --panel:#231d17; --card:#2a231c; --ink:#ece1c9; --muted:#b2a283; --line:#3e3429;
+  --brass:#d6a94c; --brass-soft:rgba(214,169,76,.14); --blue:#7fb0d3; --good:#8fc07f; --mark:#7a5a17; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#1a1511; --panel:#231d17; --card:#2a231c; --ink:#ece1c9; --muted:#b2a283; --line:#3e3429;
+  --brass:#d6a94c; --brass-soft:rgba(214,169,76,.14); --blue:#7fb0d3; --good:#8fc07f; --mark:#7a5a17; color-scheme:dark}
+*{box-sizing:border-box} [hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font:17px/1.55 var(--body);font-variant-numeric:tabular-nums}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--panel)}
+a{color:var(--brass)}
+header{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--panel);border-bottom:2px solid var(--brass);
+  padding-block:12px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.hd{max-width:1180px;margin:0 auto;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.brand{display:flex;flex-direction:column;min-width:0;flex:1 1 260px}
+.brand h1{font:700 1.35rem/1.15 var(--display);margin:0;letter-spacing:.02em;text-wrap:balance}
+.brand span{color:var(--muted);font-size:.85rem}
+.search{flex:1 1 300px;position:relative}
+.search input{width:100%;font:inherit;font-size:1rem;padding:9px 36px 9px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink)}
+.search input:focus{outline:2px solid var(--brass);outline-offset:1px}
+.search button{position:absolute;right:6px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--muted);font-size:1.2rem;cursor:pointer;padding:2px 6px}
+.wrap{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:210px minmax(0,1fr);gap:28px;
+  padding-block:20px 60px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+nav{position:sticky;top:calc(env(safe-area-inset-top,0px) + 90px);align-self:start;display:flex;flex-direction:column;gap:14px}
+.ngl{font:600 .7rem var(--display);letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.nv{display:block;padding:5px 10px;border-radius:5px;text-decoration:none;color:var(--ink);border-left:2px solid transparent}
+.nv:hover{background:var(--brass-soft)}
+.nv.on{background:var(--brass-soft);border-left-color:var(--brass);font-weight:700}
+.nv:focus-visible,.tab:focus-visible,button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+main{min-width:0}
+.glance{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:22px}
+.gl{background:var(--card);border:1px solid var(--line);border-top:3px solid var(--brass);border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.gl span{font:600 .68rem var(--display);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.gl b{font-size:1.2rem}
+.gl em{font-style:normal;color:var(--muted);font-size:.85rem}
+.sec{max-width:880px}
+.sec[hidden]{display:none}
+.eyebrow{font:600 .7rem var(--display);letter-spacing:.16em;text-transform:uppercase;color:var(--brass)}
+h2{font:700 1.6rem/1.2 var(--display);margin:.15em 0 .6em;text-wrap:balance}
+h3{font:700 1.15rem/1.3 var(--display);margin:1.2em 0 .5em}
+h4.mini{font:700 1.02rem var(--body);margin:1.3em 0 .4em;color:var(--brass)}
+p,li{max-width:70ch}
+.sec ol,.sec ul{padding-left:1.3em}
+li{margin:.3em 0}
+code{font-size:.88em;background:var(--brass-soft);padding:1px 5px;border-radius:4px}
+.tw{overflow-x:auto;margin:14px 0 18px;border:1px solid var(--line);border-radius:6px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:.95rem}
+th,td{text-align:left;vertical-align:top;padding:7px 10px;border-bottom:1px solid var(--line)}
+th{font:600 .72rem var(--display);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:var(--panel);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+tr.stop td{border-top:2px solid var(--brass)}
+tr.stop td:first-child strong{color:var(--brass);white-space:nowrap}
+tr.silver td{background:var(--brass-soft);font-weight:700}
+td:first-child{white-space:nowrap}
+.formula{font-size:1.1rem;padding:10px 14px;background:var(--card);border:1px dashed var(--line);border-radius:6px;display:inline-block}
+.fig{margin:16px 0 20px;padding:12px;background:var(--card);border:1px solid var(--line);border-radius:6px;overflow-x:auto}
+.fig svg{width:100%;min-width:560px;height:auto;display:block}
+.fig figcaption,.note{color:var(--muted);font-size:.85rem;margin:6px 0 0}
+svg text{font-family:var(--body);font-size:12px;fill:var(--ink)}
+.grid{stroke:var(--line)} .ax{fill:var(--muted)}
+.s1-l{fill:none;stroke:var(--brass);stroke-width:2.5} .s1-f{fill:var(--brass)} .s1-t{fill:var(--brass);font-weight:700}
+.s2-l{fill:none;stroke:var(--blue);stroke-width:2.5} .s2-f{fill:var(--blue)} .s2-t{fill:var(--blue);font-weight:700}
+.lbl{font-weight:700}
+.bx{fill:none;stroke:var(--line);stroke-width:1.4} .bx.main{fill:var(--brass-soft);stroke:var(--brass);stroke-width:2}
+.bt{font-size:13px !important;font-weight:700} .bq{fill:var(--muted)}
+.con path{fill:none;stroke:var(--muted);stroke-width:1.3} .arh{fill:var(--muted)}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 4px}
+.tab{font:inherit;cursor:pointer;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:8px 14px;display:flex;flex-direction:column;align-items:flex-start;gap:0;min-width:130px}
+.tab small{color:var(--muted);font-size:.8rem}
+.tab[aria-selected="true"]{border-color:var(--brass);background:var(--brass-soft);box-shadow:inset 0 -3px 0 var(--brass);font-weight:700}
+.here{font:700 .62rem var(--body);background:var(--brass);color:var(--card);border-radius:3px;padding:1px 5px;margin-left:6px;letter-spacing:.06em;text-transform:uppercase;vertical-align:2px}
+.pane[hidden]{display:none}
+mark{background:var(--mark);color:inherit;border-radius:2px;padding:0 1px}
+.sbar{display:none;margin:0 0 14px;color:var(--muted)}
+body.searching .sbar{display:block}
+body.searching .glance{display:none}
+body.searching .sec{margin-bottom:26px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.empty{padding:30px 0;color:var(--muted)}
+@media (max-width:820px){
+  .wrap{grid-template-columns:minmax(0,1fr);gap:12px;padding-block:12px 50px}
+  nav{position:static;flex-direction:row;overflow-x:auto;gap:6px;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+  .ng{display:contents}.ngl{display:none}
+  .nv{white-space:nowrap;border:1px solid var(--line);border-left-width:1px;background:var(--card);font-size:.92rem}
+  .nv.on{border-color:var(--brass)}
+  .glance{grid-template-columns:repeat(2,minmax(0,1fr))}
+  h2{font-size:1.35rem}
+}
+@media (prefers-reduced-motion:no-preference){.sec{animation:fade .18s ease-out}@keyframes fade{from{opacity:.4}to{opacity:1}}}
+</style>
+<header><div class="hd">
+  <div class="brand"><h1>Crafting Profit Plan</h1><span>Leather jackets in Thetford, plate helmets in Fort Sterling · data Apr 1 to Oct 16, 2026</span></div>
+  <div class="search"><input id="q" aria-label="Search the plan" type="text" placeholder="Search: T5.2, Martlock, hides, never under…" autocomplete="off"><button type="button" id="qx" aria-label="Clear search" hidden>×</button></div>
+</div></header>
+<div class="wrap">
+  <nav aria-label="Sections">%%NAV%%</nav>
+  <main id="main">
+    <div class="sbar" id="sbar"></div>
+    %%GLANCE%%
+    <div id="secs">%%BODY%%</div>
+  </main>
+</div>
+<script>
+(function(){
+  var secsEl=document.getElementById('secs'), ORIG=secsEl.innerHTML, q=document.getElementById('q'), qx=document.getElementById('qx'), sbar=document.getElementById('sbar');
+  var cur='pick', sub={};
+  function store(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+  function load(k){try{return localStorage.getItem(k)}catch(e){return null}}
+  function setTabs(root){
+    root.querySelectorAll('.sec').forEach(function(s){
+      var tabs=s.querySelectorAll('.tab'); if(!tabs.length) return;
+      var k=sub[s.id]!=null?sub[s.id]:1;
+      tabs.forEach(function(t){t.setAttribute('aria-selected',String(+t.dataset.sub===+k))});
+      s.querySelectorAll('.pane').forEach(function(p){p.hidden=+p.dataset.pane!==+k});
+    });
+  }
+  function show(id,scroll){
+    if(!document.getElementById(id)) id='pick';
+    cur=id; store('plan-sec',id);
+    document.querySelectorAll('.sec').forEach(function(s){s.hidden=s.id!==id});
+    document.querySelectorAll('.nv').forEach(function(a){a.classList.toggle('on',a.dataset.go===id)});
+    document.querySelector('.glance').hidden=id!=='pick';
+    if(scroll) window.scrollTo({top:0});
+  }
+  document.addEventListener('click',function(e){
+    var a=e.target.closest('.nv');
+    if(a){e.preventDefault(); if(q.value){q.value='';runSearch()} show(a.dataset.go,true); try{history.replaceState(null,'','#'+a.dataset.go)}catch(_){}; return}
+    var t=e.target.closest('.tab');
+    if(t){var s=t.closest('.sec'); sub[s.id]=+t.dataset.sub; store('plan-sub-'+s.id,t.dataset.sub); setTabs(document)}
+  });
+  function esc(s){return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}
+  function mark(el,re){
+    var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null),n,list=[];
+    while(n=w.nextNode()){ if(n.parentNode.closest('svg')) continue; if(re.test(n.nodeValue)) list.push(n); re.lastIndex=0 }
+    list.forEach(function(n){
+      var f=document.createDocumentFragment(),s=n.nodeValue,last=0;
+      s.replace(re,function(m,i){f.appendChild(document.createTextNode(s.slice(last,i)));var k=document.createElement('mark');k.textContent=m;f.appendChild(k);last=i+m.length;return m});
+      f.appendChild(document.createTextNode(s.slice(last))); n.parentNode.replaceChild(f,n);
+    });
+  }
+  function runSearch(){
+    var v=q.value.trim(); qx.hidden=!v;
+    secsEl.innerHTML=ORIG; setTabs(secsEl);
+    if(v.length<2){document.body.classList.remove('searching'); show(cur); return}
+    document.body.classList.add('searching');
+    var lv=v.toLowerCase(), re=new RegExp(esc(v),'gi'), hits=0, secHits=0;
+    secsEl.querySelectorAll('.sec').forEach(function(s){
+      var any=false;
+      s.querySelectorAll('.pane').forEach(function(p){p.hidden=false});
+      s.querySelectorAll('.tabs').forEach(function(t){t.hidden=true});
+      var blocks=s.querySelectorAll('p, li, h4.mini, .formula, figure, tbody tr');
+      blocks.forEach(function(b){
+        if(b.closest('figure')&&b.tagName!=='FIGURE') return;
+        var ok=b.textContent.toLowerCase().indexOf(lv)>=0;
+        if(b.tagName==='TR'){
+          if(!ok){ var stop=b; } 
+        }
+        b.hidden=!ok; if(ok){any=true;hits++}
+      });
+      // keep a matching row's stop label visible for context: show the stop row header city
+      s.querySelectorAll('.tw').forEach(function(w){
+        var rows=[].slice.call(w.querySelectorAll('tbody tr')), vis=rows.filter(function(r){return !r.hidden});
+        if(w.querySelector('thead') && w.querySelector('thead').textContent.toLowerCase().indexOf(lv)>=0){rows.forEach(function(r){r.hidden=false});vis=rows;any=true}
+        // add the stop's city to matching loop rows
+        var city='';
+        rows.forEach(function(r){var c=r.cells[0]; var t=c?c.textContent.trim():''; if(t) city=t; else if(!r.hidden&&city){c.innerHTML='<span class="ax" style="color:var(--muted)">'+city.replace(/</g,'&lt;')+'</span>'}});
+        w.hidden=!vis.length;
+      });
+      s.querySelectorAll('ul,ol').forEach(function(l){l.hidden=![].some.call(l.children,function(li){return !li.hidden})});
+      s.querySelectorAll('.pane').forEach(function(p){var h=p.querySelector('h3'); if(h) h.hidden=!p.querySelector('p:not([hidden]),li:not([hidden]),tr:not([hidden]),h4:not([hidden])')});
+      var h2=s.querySelector('h2'); if(h2.textContent.toLowerCase().indexOf(lv)>=0) any=true;
+      s.hidden=!any; if(any){secHits++; mark(s,re)}
+    });
+    sbar.textContent=hits? (hits+' match'+(hits===1?'':'es')+' in '+secHits+' section'+(secHits===1?'':'s')+' for “'+v+'”. Clear the search to go back.') : 'Nothing matches “'+v+'”. Try a tier like T4.2, a city, or a word like hides.';
+  }
+  var tmr; q.addEventListener('input',function(){clearTimeout(tmr);tmr=setTimeout(runSearch,120)});
+  qx.addEventListener('click',function(){q.value='';runSearch();q.focus()});
+  document.querySelectorAll('.sec').forEach(function(s){var k=load('plan-sub-'+s.id); if(k!=null) sub[s.id]=+k});
+  setTabs(document);
+  var h=(location.hash||'').slice(1); show(h&&document.getElementById(h)?h:(load('plan-sec')||'pick'));
+})();
+</script>
