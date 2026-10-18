@@ -39,7 +39,7 @@ def get(url, tries=6):
     print("GAVE UP", url, flush=True)
     return []
 
-B = 10
+B = int(os.environ.get('FETCH_BATCH', 10))
 for i in range(0, len(ids), B):
     chunk = ids[i:i + B]
     url = f"{HOST}/api/v2/stats/history/{','.join(chunk)}.json?time-scale=24&date={START}&end_date={END}&locations={urllib.parse.quote(LOCS)}"
