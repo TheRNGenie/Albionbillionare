@@ -9,5 +9,5 @@ The doc is the source of truth; the app is regenerated from it.
 2. `python3 gen.py <saved read>` then `python3 build.py <out.html>`.
 3. Publish <out.html> to the artifact URL above.
 
-The "at a glance" tiles in build.py are hand-written; update them if the doc's spec or profit numbers change.
+The "at a glance" tiles and the spec calculator data (J and X arrays in shell.html: base focus, profit with and without focus, caps) are hand-written from the study; update them if the doc's numbers change.
 New H2 sections need an entry in META (gen.py) and ORDER (build.py).

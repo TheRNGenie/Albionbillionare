@@ -41,18 +41,24 @@ diag = ('<svg viewBox="0 0 760 270" role="img" aria-label="Daily loop through fi
  + box(c2,rb,'5. Bridgewatch',[("Sell T4.1 Merc, T5.1 jackets",0),("From Stage 2: buy T5.1 hides",0),("Carry hides to Martlock",0)])
  + f'<text x="24" y="{rb+40}" class="bq">Blue and yellow zones only:</text><text x="24" y="{rb+56}" class="bq">you can\'t lose the load</text></svg>')
 
-CALC = """<div class="calc" id="calc">
-<div class="calc-in">
-<label>Leather Armor Crafter<input id="sp-m" type="number" min="0" max="100" inputmode="numeric"></label>
-<label>Assassin Jacket<input id="sp-a" type="number" min="0" max="100" inputmode="numeric"></label>
-<label>Mercenary Jacket<input id="sp-r" type="number" min="0" max="100" inputmode="numeric"></label>
-<label>Hunter Jacket<input id="sp-h" type="number" min="0" max="100" inputmode="numeric"></label>
-<label>Focus per day<input id="sp-f" type="number" min="0" max="30000" step="500" inputmode="numeric"></label>
-<button type="button" id="sp-reset" class="ghost">Use 63 / 41 / 16</button>
-</div>
-<div id="calc-out"></div>
-<p class="note">Updates as you type and is remembered on this device. The doc text below this box was written for 63 / 41 / 16 / 0.</p>
-</div>"""
+FIELDS = {
+ 'm':('Leather Armor Crafter',100),'a':('Assassin Jacket',100),'r':('Mercenary Jacket',100),'h':('Hunter Jacket',100),'f':('Focus per day',30000),
+ 'pm':('Plate Helmet Crafter',100),'pg':('Guardian Helmet',100),'ps':('Soldier Helmet',100),'pk':('Knight Helmet',100),
+ 't4':('Tanner T4',100),'t5':('Tanner T5',100),'t6':('Tanner T6',100),
+ 's4':('Smelter T4',100),'s5':('Smelter T5',100),'s6':('Smelter T6',100)}
+PANEL = {
+ 'spec':('jacket-full',['m','a','r','h','f'],None,'The doc text below this box was written for 63 / 41 / 16 / 0.'),
+ 'loop':('jacket',['m','a','r','h','f'],None,'Same spec as the Your spec page; changing it here changes it everywhere.'),
+ 'helmets':('helmet',['pm','pg','ps','pk'],('hl','I run this loop'),'Jacket focus crafts get your focus first; whatever is left goes to the craft below that adds the most per focus point.'),
+ 'refine':('leather',['t4','t5','t6'],None,'Refining spec is per tier: 30 per level of every tier you have, plus 250 per level of the tier you refine.'),
+ 'bars':('bars',['s4','s5','s6'],('bl','I run this loop'),'Counts are Lap 1 of the loop below. Refining spec is per tier: 30 per level of every tier, plus 250 per level of the tier you refine.'),
+}
+def panel(sec):
+    out, keys, chk, note = PANEL[sec]
+    f = ''.join(f'<label>{FIELDS[k][0]}<input id="sp-{k}-{sec}" data-k="{k}" type="number" min="0" max="{FIELDS[k][1]}" step="{500 if k=='f' else 1}" inputmode="numeric"></label>' for k in keys)
+    if chk: f += f'<label class="chk"><input id="sp-{chk[0]}-{sec}" data-k="{chk[0]}" type="checkbox"> {chk[1]}</label>'
+    if sec == 'spec': f += '<button type="button" class="ghost sp-reset">Use 63 / 41 / 16</button>'
+    return f'<div class="calc"><div class="calc-in">{f}</div><div class="calc-out" data-out="{out}"></div><p class="note">Updates as you type and is remembered on this device. {note}</p></div>'
 
 def fill(s): return s.replace('%%CHART%%', chart).replace('%%DIAGRAM%%', diag)
 
@@ -64,7 +70,7 @@ for gname in GROUPS:
 body = []
 for i in ORDER:
     s = secs[i]
-    inner = (CALC if i == 'spec' else '') + ''.join(fill(b) for b in s['body'])
+    inner = (panel(i) if i in PANEL else '') + ''.join(fill(b) for b in s['body'])
     if s['subs']:
         tabs = ''.join(f'<button type="button" class="tab" id="tab-{i}-{k}" data-sub="{k}" role="tab">{html.escape(sb["h"].split(" loop:")[0])}<span class="here" data-stage="{k}" hidden>You</span><small>{html.escape(sb["h"].split(": ",1)[-1])}</small></button>' for k,sb in enumerate(s['subs']))
         panes = ''.join(f'<div class="pane" data-pane="{k}"><h3>{html.escape(sb["h"])}</h3>' + ''.join(fill(b) for b in sb['body']) + '</div>' for k,sb in enumerate(s['subs']))

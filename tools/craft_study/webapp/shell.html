@@ -100,6 +100,9 @@ body.searching .sec{margin-bottom:26px;padding-bottom:12px;border-bottom:1px sol
 .calc ol{margin:0;padding-left:1.3em}
 td.num,th.num{text-align:right}
 tr.used td{font-weight:700}
+.calc-in .chk{flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font:500 .95rem var(--body);color:var(--ink);padding-bottom:8px}
+.calc-in .chk input{width:auto}
+.flag{border-left:3px solid var(--good);padding:4px 10px;background:var(--brass-soft)}
 .gl-link{text-decoration:none;color:inherit}
 .gl-link:hover{border-color:var(--brass)}
 @media (max-width:820px){.calc-sum{grid-template-columns:minmax(0,1fr)}.calc-in input{width:100px}}
@@ -166,9 +169,8 @@ tr.used td{font-weight:700}
   }
   function runSearch(){
     var v=q.value.trim(); qx.hidden=!v;
-    var keep=null; try{keep=readSp()}catch(e){}
     secsEl.innerHTML=ORIG; setTabs(secsEl);
-    if(keep){for(var k in ids){var el=document.getElementById(ids[k]); if(el) el.value=keep[k]} calc()}
+    if(typeof putAll==='function'){putAll();render()}
     if(v.length<2){document.body.classList.remove('searching'); show(cur); return}
     document.body.classList.add('searching');
     var lv=v.toLowerCase(), re=new RegExp(esc(v),'gi'), hits=0, secHits=0;
@@ -202,65 +204,95 @@ tr.used td{font-weight:700}
     sbar.textContent=hits? (hits+' match'+(hits===1?'':'es')+' in '+secHits+' section'+(secHits===1?'':'s')+' for “'+v+'”. Clear the search to go back.') : 'Nothing matches “'+v+'”. Try a tier like T4.2, a city, or a word like hides.';
   }
 
-  /* spec calculator: doc's formula, efficiency = 30 x family node + 30 x each other jacket spec + 280 x this jacket's spec */
-  var CR=[
-    {nm:'T4.3 Assassin Jacket',t:'a',base:4596,pf:73656,pn:41173,cap:7,sell:'Lymhurst'},
-    {nm:'T8.1 Assassin Jacket',t:'a',base:14074,pf:110600,pn:0,cap:1,sell:'Lymhurst'},
-    {nm:'T6.2 Assassin Jacket',t:'a',base:8042,pf:53539,pn:0,cap:10,sell:'Martlock'},
-    {nm:'T5.2 Assassin Jacket',t:'a',base:4596,pf:29817,pn:0,cap:34,sell:'Bridgewatch'},
-    {nm:'T4.2 Assassin Jacket',t:'a',base:2626,pf:16602,pn:8817,cap:77,sell:'Fort Sterling'},
-    {nm:'T4.3 Mercenary Jacket',t:'r',base:4596,pf:43978,pn:0,cap:7,sell:'Lymhurst'},
-    {nm:'T7.3 Assassin Jacket',t:'a',base:24630,pf:388513,pn:0,cap:0,sell:'Lymhurst'}];
-  var DEF={m:63,a:41,r:16,h:0,f:10000}, ids={m:'sp-m',a:'sp-a',r:'sp-r',h:'sp-h',f:'sp-f'};
-  function clamp(v,lo,hi){v=Math.round(+v);return isNaN(v)?lo:Math.max(lo,Math.min(hi,v))}
-  function effOf(sp,t){var o=0;['a','r','h'].forEach(function(k){if(k!==t)o+=sp[k]});return 30*sp.m+30*o+280*sp[t]}
-  function plan(sp){
-    var rows=CR.map(function(c){var f=c.base*Math.pow(.5,effOf(sp,c.t)/10000);return Object.assign({},c,{f:f,spf:c.pf/f,n:0})});
-    var left=sp.f, gain=0;
-    rows.filter(function(c){return c.cap>0}).sort(function(a,b){return b.spf-a.spf}).forEach(function(c){
-      var n=Math.min(c.cap,Math.floor(left/c.f)); if(n>0){c.n=n;left-=n*c.f;gain+=n*(c.pf-c.pn)}});
-    return {rows:rows,left:left,gain:gain};
-  }
-  var GAIN0=plan({m:0,a:0,r:0,h:0,f:10000}).gain;
+  /* spec calculator. Crafting: efficiency = 30 x family node + 30 x each other item spec in the family + 280 x this item's spec.
+     Refining: 30 x each tier's spec in the line + 250 x the refined tier's spec. focus = base x 0.5^(eff/10000). */
+  var SP={}, DEF={m:63,a:41,r:16,h:0,f:10000,pm:0,pg:0,ps:0,pk:0,t4:0,t5:0,t6:0,s4:0,s5:0,s6:0,hl:1,bl:0};
+  function jEff(t){var o=0;['a','r','h'].forEach(function(k){if(k!==t)o+=SP[k]});return 30*SP.m+30*o+280*SP[t]}
+  function hEff(t){var o=0;['pg','ps','pk'].forEach(function(k){if(k!==t)o+=SP[k]});return 30*SP.pm+30*o+280*SP[t]}
+  function rEff(p,tier){return 30*(SP[p+'4']+SP[p+'5']+SP[p+'6'])+250*(SP[p+tier]||0)}
+  var J=[
+    {nm:'T4.3 Assassin Jacket',e:function(){return jEff('a')},base:4596,pf:73656,pn:41173,cap:7,sell:'Lymhurst'},
+    {nm:'T8.1 Assassin Jacket',e:function(){return jEff('a')},base:14074,pf:110600,pn:0,cap:1,sell:'Lymhurst'},
+    {nm:'T6.2 Assassin Jacket',e:function(){return jEff('a')},base:8042,pf:53539,pn:0,cap:10,sell:'Martlock'},
+    {nm:'T5.2 Assassin Jacket',e:function(){return jEff('a')},base:4596,pf:29817,pn:0,cap:34,sell:'Bridgewatch'},
+    {nm:'T4.2 Assassin Jacket',e:function(){return jEff('a')},base:2626,pf:16602,pn:8817,cap:77,sell:'Fort Sterling'},
+    {nm:'T4.3 Mercenary Jacket',e:function(){return jEff('r')},base:4596,pf:43978,pn:0,cap:7,sell:'Lymhurst'},
+    {nm:'T7.3 Assassin Jacket',e:function(){return jEff('a')},base:24630,pf:388513,pn:0,cap:0,sell:'Lymhurst'}];
+  var X=[
+    {loop:'helmet',on:'hl',nm:'T4.2 Guardian Helmet',e:function(){return hEff('pg')},base:1313,pf:11763,pn:7890,cap:175},
+    {loop:'helmet',on:'hl',nm:'T4.2 Soldier Helmet',e:function(){return hEff('ps')},base:1313,pf:10521,pn:6461,cap:26},
+    {loop:'helmet',on:'hl',nm:'T4.3 Guardian Helmet',e:function(){return hEff('pg')},base:2298,pf:41677,pn:27349,cap:6},
+    {loop:'helmet',on:'hl',nm:'T4.3 Soldier Helmet',e:function(){return hEff('ps')},base:2298,pf:36010,pn:21774,cap:1},
+    {loop:'helmet',on:'hl',nm:'T5.2 Guardian Helmet',e:function(){return hEff('pg')},base:2298,pf:29177,pn:17290,cap:24},
+    {loop:'helmet',on:'hl',nm:'T5.2 Soldier Helmet',e:function(){return hEff('ps')},base:2298,pf:26493,pn:14365,cap:9},
+    {loop:'helmet',on:'hl',nm:'T5.1 Guardian Helmet',e:function(){return hEff('pg')},base:1313,pf:7161,pn:3770,cap:36},
+    {loop:'helmet',on:'hl',nm:'T6.1 Guardian Helmet',e:function(){return hEff('pg')},base:2298,pf:22573,pn:7891,cap:9},
+    {loop:'leather',nm:'T4.2 leather (refine)',e:function(){return rEff('t',4)},base:164,pf:450,pn:0,cap:2730},
+    {loop:'leather',nm:'T5.1 leather (refine)',e:function(){return rEff('t',5)},base:164,pf:457,pn:0,cap:1050},
+    {loop:'bars',on:'bl',nm:'T4.2 metal bars',e:function(){return rEff('s',4)},base:164,pf:884,pn:448,cap:2760},
+    {loop:'bars',on:'bl',nm:'T4.3 metal bars',e:function(){return rEff('s',4)},base:287,pf:2815,pn:940,cap:765},
+    {loop:'bars',on:'bl',nm:'T6.2 metal bars',e:function(){return rEff('s',6)},base:503,pf:8278,pn:2406,cap:78}];
   function fmt(n){return Math.round(n).toLocaleString('en-US')}
-  function readSp(){var sp={};for(var k in ids){var el=document.getElementById(ids[k]);sp[k]=clamp(el?el.value:DEF[k],0,k==='f'?30000:100)}return sp}
-  function milestone(sp,test){for(var L=sp.a;L<=100;L++){var s2=Object.assign({},sp,{a:L});if(test(plan(s2)))return L}return null}
-  function calc(){
-    var sp=readSp(); try{localStorage.setItem('plan-spec',JSON.stringify(sp))}catch(e){}
-    var P=plan(sp), t43=P.rows[0], stage=Math.min(sp.m,sp.a)<30?0:Math.min(sp.m,sp.a)<75?1:2;
-    var prof=2.67+(P.gain-GAIN0)/1e6;
-    var used=P.rows.filter(function(c){return c.n>0});
-    var steps=used.map(function(c){return '<li>'+c.n+' '+c.nm+(c.n>1?'s':'')+' with focus, '+fmt(c.f)+' focus each, sell in '+c.sell+'</li>'}).join('');
+  function run(sp){
+    var save=SP; SP=sp;
+    var js=J.map(function(c){var f=c.base*Math.pow(.5,c.e()/1e4);return Object.assign({},c,{f:f,spf:c.pf/f,gpf:(c.pf-c.pn)/f,n:0})});
+    var xs=X.map(function(c){var f=c.base*Math.pow(.5,c.e()/1e4);return Object.assign({},c,{f:f,gpf:(c.pf-c.pn)/f,n:0,act:!c.on||!!sp[c.on]})});
+    var left=sp.f, gain=0;
+    js.filter(function(c){return c.cap>0}).sort(function(a,b){return b.spf-a.spf}).forEach(function(c){var n=Math.min(c.cap,Math.floor(left/c.f));if(n>0){c.n=n;left-=n*c.f;gain+=n*(c.pf-c.pn)}});
+    var jleft=left, xgain=0;
+    xs.filter(function(c){return c.act}).sort(function(a,b){return b.gpf-a.gpf}).forEach(function(c){var n=Math.min(c.cap,Math.floor(left/c.f));if(n>0){c.n=n;left-=n*c.f;xgain+=n*(c.pf-c.pn)}});
+    SP=save; return {j:js,x:xs,left:left,jleft:jleft,gain:gain,xgain:xgain};
+  }
+  var GAIN0=run(Object.assign({},DEF,{m:0,a:0,r:0,h:0,f:10000})).gain;
+  function milestone(test){for(var L=SP.a;L<=100;L++){if(test(run(Object.assign({},SP,{a:L}))))return L}return null}
+  function save(){try{localStorage.setItem('plan-spec2',JSON.stringify(SP))}catch(e){}}
+  function putAll(){document.querySelectorAll('[data-k]').forEach(function(el){var k=el.dataset.k;if(el.type==='checkbox')el.checked=!!SP[k];else el.value=SP[k]})}
+  function table(rows,cols){return '<div class="tw"><table><thead><tr>'+cols.map(function(c){return '<th'+(c[2]?' class="num"':'')+'>'+c[0]+'</th>'}).join('')+'</tr></thead><tbody>'+rows.map(function(r){return '<tr'+(r.n?' class="used"':'')+'>'+cols.map(function(c){return '<td'+(c[2]?' class="num"':'')+'>'+c[1](r)+'</td>'}).join('')+'</tr>'}).join('')+'</tbody></table></div>'}
+  function render(){
+    var P=run(SP), t43=P.j[0], st=Math.min(SP.m,SP.a), stage=st<30?0:st<75?1:2, prof=2.67+(P.gain-GAIN0)/1e6;
+    var usedJ=P.j.filter(function(c){return c.n}), usedX=P.x.filter(function(c){return c.n});
+    var steps=usedJ.concat(usedX).map(function(c){return '<li>'+fmt(c.n)+' × '+c.nm+' with focus, '+fmt(c.f)+' focus each</li>'}).join('');
     if(t43.n<7) steps+='<li>The other '+(7-t43.n)+' T4.3 Assassin Jacket'+(7-t43.n>1?'s':'')+' without focus (about 41,000 each)</li>';
     steps+='<li>About '+fmt(P.left)+' focus left over</li>';
-    var m1=milestone(sp,function(p){return p.rows[0].n>=7}), m2=milestone(sp,function(p){return p.rows[0].n>=7&&p.rows[1].n>=1});
-    var ms='';
-    if(m1!=null&&m1>sp.a) ms+='<li>Assassin '+m1+': your focus covers all 7 T4.3 Assassin Jackets.</li>';
-    if(m2!=null&&m2>sp.a) ms+='<li>Assassin '+m2+': one T8.1 Assassin Jacket a day fits on top.</li>';
+    var m1=milestone(function(p){return p.j[0].n>=7}), m2=milestone(function(p){return p.j[0].n>=7&&p.j[1].n>=1}), ms='';
+    if(m1!=null&&m1>SP.a) ms+='<li>Assassin '+m1+': your focus covers all 7 T4.3 Assassin Jackets.</li>';
+    if(m2!=null&&m2>SP.a) ms+='<li>Assassin '+m2+': one T8.1 Assassin Jacket a day fits on top.</li>';
     if(!ms) ms='<li>Your focus already covers the T4.3 and T8.1 Assassin Jackets. Extra spec now goes to T6.2, T5.2 and T4.2 Assassin Jackets.</li>';
-    var tbl='<div class="tw"><table><thead><tr><th>Craft (with focus)</th><th class="num">Focus each</th><th class="num">Profit each</th><th class="num">Silver per focus</th><th>Sell in</th><th class="num">Cap per day</th></tr></thead><tbody>'+
-      P.rows.map(function(c){return '<tr'+(c.n?' class="used"':'')+'><td>'+c.nm+'</td><td class="num">'+fmt(c.f)+'</td><td class="num">'+fmt(c.pf)+'</td><td class="num">'+c.spf.toFixed(1)+'</td><td>'+c.sell+'</td><td class="num">'+(c.cap?c.cap:'under 1')+'</td></tr>'}).join('')+'</tbody></table></div>';
-    var ef=['a','r','h'].map(function(k){var e=effOf(sp,k);return '<tr><td>'+{a:'Assassin',r:'Mercenary',h:'Hunter'}[k]+'</td><td class="num">'+fmt(e)+'</td><td class="num">'+Math.pow(.5,e/10000).toFixed(2)+'</td></tr>'}).join('');
-    document.getElementById('calc-out').innerHTML=
-      '<div class="calc-sum"><div><span>Stage</span><b>Stage '+(stage+1)+'</b></div><div><span>Jacket loop, estimate</span><b>'+prof.toFixed(2)+'M a day</b></div><div><span>T4.3 Assassin with focus</span><b>'+t43.n+' of 7</b></div></div>'+
-      '<h4>Spend your focus like this</h4><ol>'+steps+'</ol><h4>Next spec goals</h4><ul>'+ms+'</ul>'+
-      '<h4>Focus cost at this spec</h4>'+tbl+
-      '<div class="tw"><table><thead><tr><th>Jacket</th><th class="num">Focus efficiency</th><th class="num">Focus multiplier</th></tr></thead><tbody>'+ef+'</tbody></table></div>'+
-      '<p class="note">The profit estimate is the doc'+"'"+'s spec-0 figure (2.67M, royal cities, 20M of materials) plus what your focus crafts add over spec 0. The rest of the loop is crafted without focus, so spec does not change it.</p>';
+    function warnFor(rows){var beat=rows.filter(function(c){return c.act&&c.gpf>t43.gpf}).sort(function(a,b){return b.gpf-a.gpf});
+      if(!beat.length)return '';var top=beat.slice(0,3).map(function(c){return c.nm}).join(', ')+(beat.length>3?' and '+(beat.length-3)+' more':'');
+      return '<p class="flag">'+top+' now add'+(beat.length===1?'s':'')+' more per focus point (up to '+beat[0].gpf.toFixed(1)+') than the focus on your T4.3 Assassin Jackets ('+t43.gpf.toFixed(1)+'). Consider moving focus there.</p>'}
+    var warn=warnFor(P.x);
+    var sum='<div class="calc-sum"><div><span>Stage</span><b>Stage '+(stage+1)+'</b></div><div><span>Jacket loop, estimate</span><b>'+prof.toFixed(2)+'M a day</b></div><div><span>T4.3 Assassin with focus</span><b>'+t43.n+' of 7</b></div></div>';
+    var jt=table(P.j,[['Craft (with focus)',function(c){return c.nm}],['Focus each',function(c){return fmt(c.f)},1],['Profit each',function(c){return fmt(c.pf)},1],['Silver per focus',function(c){return c.spf.toFixed(1)},1],['Sell in',function(c){return c.sell}],['Cap per day',function(c){return c.cap||'under 1'},1]]);
+    var ef='<div class="tw"><table><thead><tr><th>Jacket</th><th class="num">Focus efficiency</th><th class="num">Focus multiplier</th></tr></thead><tbody>'+['a','r','h'].map(function(k){var e=jEff(k);return '<tr><td>'+{a:'Assassin',r:'Mercenary',h:'Hunter'}[k]+'</td><td class="num">'+fmt(e)+'</td><td class="num">'+Math.pow(.5,e/1e4).toFixed(2)+'</td></tr>'}).join('')+'</tbody></table></div>';
+    var OUT={
+      'jacket-full':sum+warn+'<h4>Spend your focus like this</h4><ol>'+steps+'</ol><h4>Next spec goals</h4><ul>'+ms+'</ul><h4>Focus cost at this spec</h4>'+jt+ef+'<p class="note">The profit estimate is the doc'+"'"+'s spec-0 figure (2.67M, royal cities, 20M of materials) plus what your jacket focus crafts add over spec 0. Focus on helmets or refining is extra; see those loops.</p>',
+      'jacket':sum+warn+'<h4>Spend your focus like this</h4><ol>'+steps+'</ol>'
+    };
+    ['helmet','leather','bars'].forEach(function(lp){
+      var rows=P.x.filter(function(c){return c.loop===lp}), on=rows[0].act, add=rows.reduce(function(s,c){return s+c.n*(c.pf-c.pn)},0);
+      var head='<div class="calc-sum"><div><span>Focus left after jackets</span><b>'+fmt(P.jleft)+'</b></div><div><span>Crafts here with focus</span><b>'+(on?fmt(rows.reduce(function(s,c){return s+c.n},0)):'loop off')+'</b></div><div><span>Extra from that focus</span><b>'+(add?fmt(add)+' a day':'none')+'</b></div></div>';
+      var best=rows.slice().sort(function(a,b){return b.gpf-a.gpf})[0];
+      var line='<p>At this spec the best focus craft here is <strong>'+best.nm+'</strong>: '+fmt(best.f)+' focus for '+fmt(best.pf-best.pn)+' extra silver, '+best.gpf.toFixed(1)+' per focus point. Your T4.3 Assassin Jackets add '+t43.gpf.toFixed(1)+' per focus point.</p>';
+      OUT[lp]=head+warnFor(rows)+line+table(rows,[[lp==='helmet'?'Craft':'Refine',function(c){return c.nm}],['Focus each',function(c){return fmt(c.f)},1],['Extra silver from focus',function(c){return fmt(c.pf-c.pn)},1],['Per focus point',function(c){return c.gpf.toFixed(1)},1],['Per day in the loop',function(c){return fmt(c.cap)},1],['With focus',function(c){return c.n?fmt(c.n):'–'},1]]);
+    });
+    document.querySelectorAll('[data-out]').forEach(function(el){el.innerHTML=OUT[el.dataset.out]||''});
     var g=function(id,v){var el=document.getElementById(id);if(el)el.textContent=v};
-    g('g-stage','Stage '+(stage+1)); g('g-spec','Crafter '+sp.m+' · Assassin '+sp.a+' · Merc '+sp.r+(sp.h?' · Hunter '+sp.h:''));
+    g('g-stage','Stage '+(stage+1)); g('g-spec','Crafter '+SP.m+' · Assassin '+SP.a+' · Merc '+SP.r+(SP.h?' · Hunter '+SP.h:''));
     g('g-prof',prof.toFixed(2)+'M / day'); g('g-focus',t43.n+' × T4.3 Assassin'); g('g-focus2',fmt(t43.f)+' focus each at your spec');
     document.querySelectorAll('.here').forEach(function(h){h.hidden=+h.dataset.stage!==stage});
     if(sub.loop==null){sub.loop=stage;setTabs(document)}
   }
+  function readField(el){var k=el.dataset.k;if(el.type==='checkbox')return el.checked?1:0;var mx=+el.max||100,v=Math.round(+el.value);return isNaN(v)?0:Math.max(0,Math.min(mx,v))}
   (function(){
-    var saved=null; try{saved=JSON.parse(localStorage.getItem('plan-spec'))}catch(e){}
-    var sp=Object.assign({},DEF,saved||{});
-    function put(v){for(var k in ids){var el=document.getElementById(ids[k]); if(el) el.value=v[k]}}
-    put(sp);
-    document.addEventListener('input',function(e){if(e.target.closest&&e.target.closest('.calc-in'))calc()});
-    document.addEventListener('click',function(e){if(e.target.id==='sp-reset'){put(DEF);calc()}});
-    calc();
+    var saved=null; try{saved=JSON.parse(localStorage.getItem('plan-spec2'))}catch(e){}
+    if(!saved){try{var old=JSON.parse(localStorage.getItem('plan-spec'));if(old)saved=old}catch(e){}}
+    SP=Object.assign({},DEF,saved||{});
+    putAll(); render();
+    document.addEventListener('input',function(e){var el=e.target;if(!el.dataset||!el.dataset.k)return;SP[el.dataset.k]=readField(el);
+      document.querySelectorAll('[data-k="'+el.dataset.k+'"]').forEach(function(o){if(o!==el){if(o.type==='checkbox')o.checked=el.checked;else o.value=el.value}});save();render()});
+    document.addEventListener('change',function(e){var el=e.target;if(el.type==='checkbox'&&el.dataset.k){SP[el.dataset.k]=readField(el);putAll();save();render()}});
+    document.addEventListener('click',function(e){if(e.target.closest('.sp-reset')){['m','a','r','h','f'].forEach(function(k){SP[k]=DEF[k]});putAll();save();render()}});
   })();
   var tmr; q.addEventListener('input',function(){clearTimeout(tmr);tmr=setTimeout(runSearch,120)});
   qx.addEventListener('click',function(){q.value='';runSearch();q.focus()});
