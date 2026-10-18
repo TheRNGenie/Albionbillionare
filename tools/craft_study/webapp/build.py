@@ -1,7 +1,7 @@
 import json, html, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 C = json.load(open(os.path.join(HERE, 'content.json')))
-ORDER = ['pick','spec','route','loop','helmets','shopping','refine','bars','mammoth','prices','why','mechanics','routine','risks','sources']
+ORDER = ['pick','spec','route','loop','helmets','combined','shopping','refine','bars','mammoth','prices','why','mechanics','routine','risks','sources']
 secs = {s['id']: s for s in C['secs']}
 GROUPS = ['Plan','Loops','Refining','Reference']
 
