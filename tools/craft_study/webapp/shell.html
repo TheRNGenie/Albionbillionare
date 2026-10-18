@@ -327,7 +327,12 @@ tr.used td{font-weight:700}
     {nm:'T5.2 Soldier Helmet',k:'ps',base:2298,g:12128,n:9,bar:'T5.2',w:2.5,sold:[[0,5,'target 57,000, never under 43,700'],[4,4,'target 45,400, never under 43,700']]},
     {nm:'T5.1 Guardian Helmet',k:'pg',base:1313,g:3391,n:36,bar:'T5.1',w:2.5,sold:[[1,19,'target 21,200, never under 15,300'],[4,17,'target 18,000, never under 15,300']]},
     {nm:'T6.1 Guardian Helmet',k:'pg',base:2298,g:14682,n:9,bar:'T6.1',w:3.8,sold:[[1,9,'target 67,800, never under 51,000']]}];
-  var BARS={'T4.2':[2030,'about 2,030, max 2,890',0.51],'T4.3':[7820,'about 7,820, max 9,530',0.51],'T5.2':[6660,'about 6,660, max 8,380',0.76],'T5.1':[2340,'about 2,340, max 2,750',0.76],'T6.1':[7770,'about 7,770, max 10,330',1.14]};
+  var BARS={'T4':[270,'about 270',0.51],'T5':[1090,'about 1,090',0.76],'T6':[2830,'about 2,830',1.14],'T4.2':[2030,'about 2,030, max 2,890',0.51],'T4.3':[7820,'about 7,820, max 9,530',0.51],'T5.2':[6660,'about 6,660, max 8,380',0.76],'T5.1':[2340,'about 2,340, max 2,750',0.76],'T6.1':[7770,'about 7,770, max 10,330',1.14]};
+  /* Enchanting: craft one enchant lower and upgrade at the station (12 runes or souls per bar, no focus, no returns).
+     lo = bar bought instead; mats = [name, price]; focus = still pays when the craft uses focus. */
+  var ENC={'T4.2':{lo:'T4',mats:[['T4 runes',8],['T4 souls',85]],focus:false},'T5.1':{lo:'T5',mats:[['T5 runes',31]],focus:true},
+           'T5.2':{lo:'T5.1',mats:[['T5 souls',190]],focus:false},'T6.1':{lo:'T6',mats:[['T6 runes',160]],focus:true}};
+  var JENC={n:84,runes:16130,rune:31,leather:1520,was:2374,bought:1010};
   var HPRICE=[0,0,0,0,0]; HL.forEach(function(h){h.sold.forEach(function(s){var p=+s[2].replace(/target ([\d,]+).*/,'$1').replace(/,/g,'');HPRICE[s[0]]+=s[1]*p*0.935})});
   var PLS={j:null,h:null};
   function stageOf(a,b){var s=Math.min(a,b);return s<30?1:s<75?2:3}
@@ -348,8 +353,16 @@ tr.used td{font-weight:700}
     document.querySelectorAll('.seg').forEach(function(sg){sg.querySelectorAll('button').forEach(function(b){b.setAttribute('aria-pressed',String(+b.dataset.v===PLS[sg.dataset.pl]))})});
     var J=PLJ[PLS.j], S=plSplit(PLS.j,PLS.h), n=S.n, f43=n.T43J||0, f42=n.T42J||0;
     var c43=PLS.j===1?f43:7, l43=Math.round(f43*8.34+(c43-f43)*12.03)+(c43?3:0);
-    var bars={}; HL.forEach(function(h,i){var fn=n['H'+i]||0;bars[h.bar]=(bars[h.bar]||0)+fn*8*0.521+(h.n-fn)*8*0.752});
-    var barKg=0,barCost=0; for(var t in bars){bars[t]=Math.round(bars[t]/5)*5;barKg+=bars[t]*BARS[t][2];barCost+=bars[t]*BARS[t][0]}
+    var bars={}, old={}, mats={}, ups=[], matCost=0;
+    function addBar(o,t,v){o[t]=(o[t]||0)+v}
+    HL.forEach(function(h,i){var fn=n['H'+i]||0, e=ENC[h.bar], uf=e&&e.focus?fn:0, un=e?h.n-fn:0;
+      addBar(old,h.bar,fn*8*0.521+(h.n-fn)*8*0.752);
+      addBar(bars,h.bar,(fn-uf)*8*0.521+(h.n-fn-un)*8*0.752); if(e&&uf+un){addBar(bars,e.lo,uf*8*0.521+un*8*0.752);
+        e.mats.forEach(function(m){mats[m[0]]=mats[m[0]]||[0,m[1]];mats[m[0]][0]+=(uf+un)*96;matCost+=(uf+un)*96*m[1]});
+        ups.push(['Upgrade '+h.nm.replace(/^T(\d)\.\d/,'T$1'+(e.lo.indexOf('.')>0?'.'+e.lo.split('.')[1]:''))+'s to '+h.bar,String(uf+un),e.mats.map(function(m){return '96 '+m[0]}).join(', then ')+' each'])}});
+    var barKg=0,barCost=0,oldCost=0; for(var t in bars){bars[t]=Math.round(bars[t]/5)*5;if(!bars[t]){delete bars[t];continue}barKg+=bars[t]*BARS[t][2];barCost+=bars[t]*BARS[t][0]}
+    for(var t2 in old) oldCost+=Math.round(old[t2]/5)*5*BARS[t2][0];
+    var jEnc=PLS.j>1, jGain=jEnc?JENC.bought*(JENC.was-JENC.leather)-JENC.runes*JENC.rune:0, encGain=(oldCost-barCost-matCost)+jGain;
     var hk=[131,Math.round(barKg),560,361,246], legs=J.legs.map(function(w,i){return w+hk[i]});
     var subst=function(r){
       if(r[0]==='T43L') return l43?['Buy T4.3 leather',fmt(l43),'max 10,569']:null;
@@ -357,6 +370,8 @@ tr.used td{font-weight:700}
       if(r[0]==='T43S') return c43?['Sell T4.3 Assassin Jackets',String(c43),'target 139,000, never under 82,748']:null;
       if(r[1]==='T42J') return [r[0],'77'+(f42?' <small>('+f42+' with focus)</small>':''),''];
       if(r[1]==='T42L') return [r[0],fmt(Math.round((2730-f42*3.7)/10)*10),r[2]];
+      if(r[0]==='Buy T5.1 leather') return [['Buy T5 leather, to upgrade to T5.1',r[1],'about '+fmt(JENC.leather)],['Buy T5 runes',fmt(JENC.runes),'about '+JENC.rune]];
+      if(r[0]==='Craft T5.1 Assassin Jackets') return [r,['Upgrade '+JENC.n+' of the T5.1 jackets from T5 (the ones made from the T5 leather)',String(JENC.n),'192 T5 runes each']];
       return r;
     };
     var CITY=['1. Martlock','2. Thetford','3. Fort Sterling','4. Lymhurst','5. Bridgewatch'], NEXT=['Thetford','Fort Sterling','Lymhurst','Bridgewatch','Martlock'];
@@ -365,28 +380,30 @@ tr.used td{font-weight:700}
       var st=J.stops[i], R=[];
       if(i<2) HL.forEach(function(h){h.sold.forEach(function(s){if(s[0]===i)R.push(['Sell '+h.nm+'s (yesterday\'s)',String(s[1]),s[2]])})});
       if(i>=3&&st.sell) st.sell.forEach(function(r){R.push(subst(r))});
+      if(i===2) for(var m in mats) R.push(['Buy '+m,fmt(Math.round(mats[m][0]/10)*10),'about '+mats[m][1]]);
       if(i===2) HL.forEach(function(h,k){var fn=n['H'+k]||0;R.push(['Craft '+h.nm+'s',h.n+(fn?' <small>('+fn+' with focus)</small>':''),''])});
+      if(i===2) ups.forEach(function(u){R.push(u)});
       if(i===2&&st.sell) st.sell.forEach(function(r){R.push(subst(r))});
       if(i>=3) HL.forEach(function(h){h.sold.forEach(function(s){if(s[0]===i)R.push(['Sell '+h.nm+'s',String(s[1]),s[2]])})});
       (st.buy||[]).forEach(function(r){R.push(subst(r))});
       if(i===1) for(var t in bars) R.push(['Buy '+t+' metal bars',fmt(bars[t]),BARS[t][1]]);
       (st.craft||[]).forEach(function(r){R.push(subst(r))});
-      R=R.filter(Boolean);
+      R=[].concat.apply([],R.filter(Boolean).map(function(r){return Array.isArray(r[0])?r:[r]}));
       if(!R.length) R.push(['Nothing to buy or sell for the jackets yet','','']);
-      var earn=(st.earn||0)+HPRICE[i]/1e6, spend=(st.spend||0)+(i===1?barCost/1e6:0)+(i===2?0.10:0);
+      var earn=(st.earn||0)+HPRICE[i]/1e6, spend=(st.spend||0)+(i===1?barCost/1e6-(jEnc?(JENC.bought*(JENC.was-JENC.leather)-JENC.runes*JENC.rune)/1e6:0):0)+(i===2?0.10+matCost/1e6:0);
       spendT+=spend; earnT+=earn;
       R.push(['Ride to '+NEXT[i]+' carrying','about '+fmt(Math.round(legs[i]/10)*10)+' kg'+(legs[i]>3657?' <b class="bad">over the ox</b>':''),'']);
       R.push(['Silver',(earn?'earn '+earn.toFixed(2)+'M, ':'')+'spend '+spend.toFixed(2)+'M','']);
       R.forEach(function(r,k){rows+='<tr class="'+(k===0?'stop':'')+(r[0]==='Silver'?' silver':'')+'"><td>'+(k===0?'<strong>'+CITY[i]+'</strong>':'')+'</td><td>'+r[0]+'</td><td>'+(r[1]||'')+'</td><td>'+(r[2]||'')+'</td></tr>'});
     }
-    var maxLeg=Math.max.apply(null,legs), prof=J.base+2.7+(S.gain-J.doc)/1e6;
+    var maxLeg=Math.max.apply(null,legs), prof=J.base+2.7+(S.gain-J.doc+encGain)/1e6;
     var mount=maxLeg<=3090*0.9?'Ox or Direbear':maxLeg<=3090?'Ox or Direbear (bear nearly full)':maxLeg<=3657?'Elder\'s Ox only':'Too heavy for one ox';
     var fl=S.opts.filter(function(o){return n[o.id]}).map(function(o){return n[o.id]+' × '+o.nm+' ('+fmt(o.f)+' focus each)'}).join(', ')||'none';
     var specNote=(stageOf(SP.m,SP.a)===PLS.j?'your jacket spec':'jacket spec '+{1:15,2:50,3:90}[PLS.j])+' and '+(stageOf(SP.pm,SP.pg)===PLS.h?'your helmet spec':'helmet spec '+{1:15,2:50,3:90}[PLS.h]);
     out.innerHTML='<div class="calc-sum"><div><span>Keep per day</span><b>about '+prof.toFixed(1)+'M</b></div><div><span>Mount</span><b>'+mount+'</b></div><div><span>Heaviest leg</span><b>'+fmt(Math.round(maxLeg/10)*10)+' kg</b></div></div>'+
       '<p><strong>Focus:</strong> '+fl+'. Worked out for '+specNote+'; the focus goes to whichever of the loop\'s crafts adds the most silver per focus point.</p>'+
       '<div class="tw"><table><thead><tr><th>Stop</th><th>Do</th><th>Amount</th><th>Price</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
-      '<p class="note">Whole loop: spend about '+spendT.toFixed(1)+'M, earn about '+earnT.toFixed(1)+'M at recent prices. Helmets made in Fort Sterling sell in Lymhurst and Bridgewatch the same day and in Martlock and Thetford at the start of the next loop. '+J.day1+' There are no helmets to sell in Martlock or Thetford on day one. Leg weights are worked out from item weights. Ox 3,657 kg, Direbear 3,090 kg.</p>';
+      '<p class="note">Whole loop: spend about '+spendT.toFixed(1)+'M, earn about '+earnT.toFixed(1)+'M at recent prices, including about '+(encGain/1e6).toFixed(1)+'M a day from enchanting. Enchanting means crafting one enchant lower and upgrading at the station with runes or souls bought in the city where you craft, so they never ride on the ox. On a day when T4.2 bars cost less than about 1,500 more than T4 bars, buy T4.2 bars for those helmets and skip their upgrade. Helmets made in Fort Sterling sell in Lymhurst and Bridgewatch the same day and in Martlock and Thetford at the start of the next loop. '+J.day1+' There are no helmets to sell in Martlock or Thetford on day one. Leg weights are worked out from item weights. Ox 3,657 kg, Direbear 3,090 kg.</p>';
   }
   document.addEventListener('click',function(e){var b=e.target.closest('.seg button');if(!b)return;PLS[b.closest('.seg').dataset.pl]=+b.dataset.v;try{localStorage.setItem('plan-pl',JSON.stringify(PLS))}catch(_){};renderPL()});
   try{var pls=JSON.parse(localStorage.getItem('plan-pl'));if(pls){PLS.j=pls.j;PLS.h=pls.h}}catch(_){}

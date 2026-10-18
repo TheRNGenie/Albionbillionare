@@ -1,3 +1,4 @@
+import re
 import json, html, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 C = json.load(open(os.path.join(HERE, 'content.json')))
@@ -71,7 +72,14 @@ for gname in GROUPS:
 body = []
 for i in ORDER:
     s = secs[i]
-    inner = (PLBOX if i == 'perfect' else '') + (panel(i) if i in PANEL else '') + ''.join(fill(b) for b in s['body'])
+    blocks = s['body']
+    if i == 'perfect':
+        # The app's stage builder is the one loop table here, so drop the doc's fixed copy of it and its totals.
+        t = next(k for k, x in enumerate(blocks) if '<table' in x)
+        blocks = [x for k, x in enumerate(blocks) if k != t and not re.sub(r'<[^>]+>', '', x).startswith(('Whole loop', 'Day one'))]
+        inner = fill(blocks[0]) + PLBOX + ''.join(fill(x) for x in blocks[1:])
+    else:
+        inner = (panel(i) if i in PANEL else '') + ''.join(fill(x) for x in blocks)
     if s['subs']:
         tabs = ''.join(f'<button type="button" class="tab" id="tab-{i}-{k}" data-sub="{k}" role="tab">{html.escape(sb["h"].split(" loop:")[0])}<span class="here" data-stage="{k}" hidden>You</span><small>{html.escape(sb["h"].split(": ",1)[-1])}</small></button>' for k,sb in enumerate(s['subs']))
         panes = ''.join(f'<div class="pane" data-pane="{k}"><h3>{html.escape(sb["h"])}</h3>' + ''.join(fill(b) for b in sb['body']) + '</div>' for k,sb in enumerate(s['subs']))
@@ -81,7 +89,7 @@ for i in ORDER:
 glance = '''<div class="glance">
 <div class="gl"><span>Your stage</span><b id="g-stage">Stage 2</b><em id="g-spec">Crafter 63 · Assassin 41 · Merc 16</em></div>
 <div class="gl"><span>Jacket loop</span><b id="g-prof">2.78M / day</b><em>estimate, royal cities, 20M of materials</em></div>
-<a class="gl gl-link gl-main" href="#perfect" data-go="perfect"><span>Your plan · Perfect Loop</span><b>6.5M / day</b><em>jackets 3.8M + helmets 2.7M, Elder's Ox</em></a>
+<a class="gl gl-link gl-main" href="#perfect" data-go="perfect"><span>Your plan · Perfect Loop</span><b>7.7M / day</b><em>jackets and helmets, 1.3M of it from enchanting, Elder's Ox</em></a>
 <a class="gl gl-link" href="#spec" data-go="spec"><span>Daily focus · edit spec</span><b id="g-focus">5 × T4.3 Assassin</b><em id="g-focus2">1,760 focus each at your spec</em></a>
 </div>'''
 
