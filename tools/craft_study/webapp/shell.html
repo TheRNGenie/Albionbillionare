@@ -103,6 +103,17 @@ tr.used td{font-weight:700}
 .calc-in .chk{flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font:500 .95rem var(--body);color:var(--ink);padding-bottom:8px}
 .calc-in .chk input{width:auto}
 .flag{border-left:3px solid var(--good);padding:4px 10px;background:var(--brass-soft)}
+.pl-pick{display:flex;flex-wrap:wrap;gap:12px 28px}
+.pl-l{display:block;font:600 .68rem var(--display);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{font:inherit;cursor:pointer;background:var(--bg);color:var(--ink);border:0;border-right:1px solid var(--line);padding:7px 14px}
+.seg button:last-child{border-right:0}
+.seg button[aria-pressed="true"]{background:var(--brass);color:var(--card);font-weight:700}
+.seg button .here{display:none}
+.pl .tw{background:var(--bg)}
+.pl td small{color:var(--muted)}
+.bad{color:#b4472f} :root[data-theme="dark"] .bad{color:#e38b6f}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .bad{color:#e38b6f}}
 .gl-link{text-decoration:none;color:inherit}
 .gl-link:hover{border-color:var(--brass)}
 .gl-main{background:var(--brass-soft)}
@@ -284,7 +295,101 @@ tr.used td{font-weight:700}
     g('g-prof',prof.toFixed(2)+'M / day'); g('g-focus',t43.n+' × T4.3 Assassin'); g('g-focus2',fmt(t43.f)+' focus each at your spec');
     document.querySelectorAll('.here').forEach(function(h){h.hidden=+h.dataset.stage!==stage});
     if(sub.loop==null){sub.loop=stage;setTabs(document)}
+    renderPL();
   }
+
+  /* Perfect Loop: jacket stage x helmet stage. Jacket rows are the doc's stage loops; helmet rows are the helmet lap.
+     Focus is split across the loop's own focus crafts by extra silver per focus point. */
+  var PLJ={
+    1:{base:2.0,doc:3*73656,legs:[1650,910,1675,2050,2050],stops:[
+      {buy:[['Buy T3 leather','2,010','about 219'],['T43L'],['Refine T4.1 leather from yesterday\'s hides','1,430','costs about 390 each (457 to buy)'],['Refine T4.2 leather from yesterday\'s hides','1,750','costs about 1,690 each (1,951 to buy)']],spend:0.75},
+      {buy:[],craft:[['T43J'],['Craft T4.2 Assassin Jackets','T42J'],['Craft T4.2 Mercenary Jackets','68'],['Craft T4.1 Assassin Jackets','118']],spend:0.13},
+      {sell:[['Sell T4.2 Assassin Jackets','77','target 39,300, never under 22,854']],buy:[['Buy T4.1 hides','905','max 219'],['Buy T4.2 hides','1,105','max 1,947']],earn:2.83,spend:1.56},
+      {sell:[['Sell T4.1 Assassin Jackets','118','target 5,500, never under 5,207'],['Sell T4.2 Mercenary Jackets','68','target 34,600, never under 22,854'],['T43S']],buy:[['Buy T4.1 hides','905','max 219'],['Buy T4.2 hides','1,105','max 1,947']],earn:3.20,spend:1.61},
+      {sell:[],buy:[],earn:0,spend:0}],
+      day1:'Day one: in Martlock buy 1,430 T4.1 leather (max 420) and 1,750 T4.2 leather (max 2,630) instead of refining, and skip the T3 leather.'},
+    2:{base:3.8,doc:7*32483,legs:[2230,2300,2922,2844,3280],stops:[
+      {buy:[['Buy T3 leather','1,730','about 219'],['Buy T4.1 leather, for the T5.1 refining','665','about 474'],['T43L'],['Refine T4.2 leather from yesterday\'s hides','T42L','costs about 1,690 each (1,951 to buy)'],['Refine T5.1 leather from yesterday\'s hides','1,050','costs about 1,770 each (2,108 to buy)']],spend:1.42},
+      {buy:[['Buy T4.1 leather','2,090','max 420'],['Buy T5.1 leather','1,010','max 2,556']],craft:[['T43J'],['Craft T4.2 Assassin Jackets','T42J'],['Craft T4.2 Mercenary Jackets','150'],['Craft T4.1 Assassin Jackets','118'],['Craft T4.1 Mercenary Jackets','56'],['Craft T5.1 Mercenary Jackets','101'],['Craft T5.1 Assassin Jackets','71']],spend:3.67},
+      {sell:[['Sell T4.2 Assassin Jackets','77','target 39,300, never under 22,854']],buy:[['Buy T4.2 hides','1,730','max 1,947']],earn:2.83,spend:2.16},
+      {sell:[['Sell T4.1 Assassin Jackets','118','target 5,500, never under 5,207'],['Sell T4.2 Mercenary Jackets','150','target 34,600, never under 22,854'],['T43S']],buy:[['Buy T4.2 hides','1,730','max 1,947']],earn:6.37,spend:2.24},
+      {sell:[['Sell T4.1 Mercenary Jackets','56','target 5,700, never under 5,207'],['Sell T5.1 Mercenary Jackets','101','target 35,200, never under 25,773'],['Sell T5.1 Assassin Jackets','71','target 33,600, never under 25,773']],buy:[['Buy T5.1 hides','2,000','max 1,200']],earn:5.85,spend:1.72}],
+      day1:'Day one: in Martlock buy the T4.2 leather (max 2,630) instead of refining, skip the T3 leather and the T4.1 leather for refining, and in Thetford buy all 2,060 T5.1 leather (about 18.5M that day).'},
+    3:{base:4.0,doc:7*32483+14*7785,legs:[2200,2300,2907,2811,3250],stops:null,day1:'Day one: in Martlock buy the T4.2 leather (max 2,630) instead of refining, skip the T3 leather and the T4.1 leather for refining, and in Thetford buy all 2,060 T5.1 leather (about 18.3M that day).'}};
+  PLJ[3].stops=JSON.parse(JSON.stringify(PLJ[2].stops));
+  PLJ[3].stops[0].buy[0][1]='1,700'; PLJ[3].stops[0].spend=1.37; PLJ[3].stops[2].buy[0][1]='1,700'; PLJ[3].stops[2].spend=2.12; PLJ[3].stops[3].buy[0][1]='1,695'; PLJ[3].stops[3].spend=2.19;
+  var HL=[ // name, base focus, extra silver from focus, crafts a day, tier, bar price, bar max, bar weight, helmet weight, sold [stop index, count, price text]
+    {nm:'T4.2 Guardian Helmet',k:'pg',base:1313,g:3873,n:175,bar:'T4.2',w:1.7,sold:[[0,48,'target 24,300, never under 13,300'],[1,20,'target 18,900, never under 13,300'],[3,92,'target 23,300, never under 13,300'],[4,15,'target 19,700, never under 13,300']]},
+    {nm:'T4.2 Soldier Helmet',k:'ps',base:1313,g:4060,n:26,bar:'T4.2',w:1.7,sold:[[3,20,'target 21,800, never under 13,300'],[4,6,'target 19,900, never under 13,300']]},
+    {nm:'T4.3 Guardian Helmet',k:'pg',base:2298,g:14328,n:6,bar:'T4.3',w:1.7,sold:[[0,1,'target 62,500, never under 51,300'],[3,4,'target 72,500, never under 51,300'],[4,1,'target 93,500, never under 51,300']]},
+    {nm:'T4.3 Soldier Helmet',k:'ps',base:2298,g:14236,n:1,bar:'T4.3',w:1.7,sold:[[3,1,'target 80,000, never under 51,300']]},
+    {nm:'T5.2 Guardian Helmet',k:'pg',base:2298,g:11887,n:24,bar:'T5.2',w:2.5,sold:[[0,8,'target 55,000, never under 43,700'],[1,6,'target 78,300, never under 43,700'],[4,10,'target 58,700, never under 43,700']]},
+    {nm:'T5.2 Soldier Helmet',k:'ps',base:2298,g:12128,n:9,bar:'T5.2',w:2.5,sold:[[0,5,'target 57,000, never under 43,700'],[4,4,'target 45,400, never under 43,700']]},
+    {nm:'T5.1 Guardian Helmet',k:'pg',base:1313,g:3391,n:36,bar:'T5.1',w:2.5,sold:[[1,19,'target 21,200, never under 15,300'],[4,17,'target 18,000, never under 15,300']]},
+    {nm:'T6.1 Guardian Helmet',k:'pg',base:2298,g:14682,n:9,bar:'T6.1',w:3.8,sold:[[1,9,'target 67,800, never under 51,000']]}];
+  var BARS={'T4.2':[2030,'about 2,030, max 2,890',0.51],'T4.3':[7820,'about 7,820, max 9,530',0.51],'T5.2':[6660,'about 6,660, max 8,380',0.76],'T5.1':[2340,'about 2,340, max 2,750',0.76],'T6.1':[7770,'about 7,770, max 10,330',1.14]};
+  var HPRICE=[0,0,0,0,0]; HL.forEach(function(h){h.sold.forEach(function(s){var p=+s[2].replace(/target ([\d,]+).*/,'$1').replace(/,/g,'');HPRICE[s[0]]+=s[1]*p*0.935})});
+  var PLS={j:null,h:null};
+  function stageOf(a,b){var s=Math.min(a,b);return s<30?1:s<75?2:3}
+  function plSplit(js,hs){
+    var rep={1:15,2:50,3:90}, jsp=stageOf(SP.m,SP.a)===js?{m:SP.m,a:SP.a,r:SP.r,h:SP.h}:{m:rep[js],a:rep[js],r:0,h:0};
+    var hsp=stageOf(SP.pm,SP.pg)===hs?{pm:SP.pm,pg:SP.pg,ps:SP.ps,pk:SP.pk}:{pm:rep[hs],pg:rep[hs],ps:0,pk:0};
+    var ja=30*jsp.m+30*(jsp.r+jsp.h)+280*jsp.a;
+    function he(k){var o=0;['pg','ps','pk'].forEach(function(x){if(x!==k)o+=hsp[x]});return 30*hsp.pm+30*o+280*hsp[k]}
+    var opts=[{id:'T43J',nm:'T4.3 Assassin Jacket',f:4596*Math.pow(.5,ja/1e4),g:js===1?73656:32483,cap:7},{id:'T42J',nm:'T4.2 Assassin Jacket',f:2626*Math.pow(.5,ja/1e4),g:js===1?16602:7785,cap:77}];
+    HL.forEach(function(h,i){opts.push({id:'H'+i,nm:h.nm,f:h.base*Math.pow(.5,he(h.k)/1e4),g:h.g,cap:h.n})});
+    var left=SP.f||10000,gain=0,n={};
+    opts.slice().sort(function(a,b){return b.g/b.f-a.g/a.f}).forEach(function(o){var k=Math.min(o.cap,Math.floor(left/o.f));if(k>0){n[o.id]=k;left-=k*o.f;gain+=k*o.g}});
+    return {opts:opts,n:n,left:left,gain:gain,jsp:jsp,hsp:hsp};
+  }
+  function renderPL(){
+    var out=document.getElementById('pl-out'); if(!out) return;
+    if(PLS.j==null) PLS.j=stageOf(SP.m,SP.a); if(PLS.h==null) PLS.h=stageOf(SP.pm,SP.pg);
+    document.querySelectorAll('.seg').forEach(function(sg){sg.querySelectorAll('button').forEach(function(b){b.setAttribute('aria-pressed',String(+b.dataset.v===PLS[sg.dataset.pl]))})});
+    var J=PLJ[PLS.j], S=plSplit(PLS.j,PLS.h), n=S.n, f43=n.T43J||0, f42=n.T42J||0;
+    var c43=PLS.j===1?f43:7, l43=Math.round(f43*8.34+(c43-f43)*12.03)+(c43?3:0);
+    var bars={}; HL.forEach(function(h,i){var fn=n['H'+i]||0;bars[h.bar]=(bars[h.bar]||0)+fn*8*0.521+(h.n-fn)*8*0.752});
+    var barKg=0,barCost=0; for(var t in bars){bars[t]=Math.round(bars[t]/5)*5;barKg+=bars[t]*BARS[t][2];barCost+=bars[t]*BARS[t][0]}
+    var hk=[131,Math.round(barKg),560,361,246], legs=J.legs.map(function(w,i){return w+hk[i]});
+    var subst=function(r){
+      if(r[0]==='T43L') return l43?['Buy T4.3 leather',fmt(l43),'max 10,569']:null;
+      if(r[0]==='T43J') return c43?['Craft T4.3 Assassin Jackets',c43+(f43?' <small>('+f43+' with focus'+(c43>f43?', '+(c43-f43)+' without':'')+')</small>':' <small>(no focus)</small>'),'']:null;
+      if(r[0]==='T43S') return c43?['Sell T4.3 Assassin Jackets',String(c43),'target 139,000, never under 82,748']:null;
+      if(r[1]==='T42J') return [r[0],'77'+(f42?' <small>('+f42+' with focus)</small>':''),''];
+      if(r[1]==='T42L') return [r[0],fmt(Math.round((2730-f42*3.7)/10)*10),r[2]];
+      return r;
+    };
+    var CITY=['1. Martlock','2. Thetford','3. Fort Sterling','4. Lymhurst','5. Bridgewatch'], NEXT=['Thetford','Fort Sterling','Lymhurst','Bridgewatch','Martlock'];
+    var rows='', spendT=0, earnT=0;
+    for(var i=0;i<5;i++){
+      var st=J.stops[i], R=[];
+      if(i<2) HL.forEach(function(h){h.sold.forEach(function(s){if(s[0]===i)R.push(['Sell '+h.nm+'s (yesterday\'s)',String(s[1]),s[2]])})});
+      if(i>=3&&st.sell) st.sell.forEach(function(r){R.push(subst(r))});
+      if(i===2) HL.forEach(function(h,k){var fn=n['H'+k]||0;R.push(['Craft '+h.nm+'s',h.n+(fn?' <small>('+fn+' with focus)</small>':''),''])});
+      if(i===2&&st.sell) st.sell.forEach(function(r){R.push(subst(r))});
+      if(i>=3) HL.forEach(function(h){h.sold.forEach(function(s){if(s[0]===i)R.push(['Sell '+h.nm+'s',String(s[1]),s[2]])})});
+      (st.buy||[]).forEach(function(r){R.push(subst(r))});
+      if(i===1) for(var t in bars) R.push(['Buy '+t+' metal bars',fmt(bars[t]),BARS[t][1]]);
+      (st.craft||[]).forEach(function(r){R.push(subst(r))});
+      R=R.filter(Boolean);
+      if(!R.length) R.push(['Nothing to buy or sell for the jackets yet','','']);
+      var earn=(st.earn||0)+HPRICE[i]/1e6, spend=(st.spend||0)+(i===1?barCost/1e6:0)+(i===2?0.10:0);
+      spendT+=spend; earnT+=earn;
+      R.push(['Ride to '+NEXT[i]+' carrying','about '+fmt(Math.round(legs[i]/10)*10)+' kg'+(legs[i]>3657?' <b class="bad">over the ox</b>':''),'']);
+      R.push(['Silver',(earn?'earn '+earn.toFixed(2)+'M, ':'')+'spend '+spend.toFixed(2)+'M','']);
+      R.forEach(function(r,k){rows+='<tr class="'+(k===0?'stop':'')+(r[0]==='Silver'?' silver':'')+'"><td>'+(k===0?'<strong>'+CITY[i]+'</strong>':'')+'</td><td>'+r[0]+'</td><td>'+(r[1]||'')+'</td><td>'+(r[2]||'')+'</td></tr>'});
+    }
+    var maxLeg=Math.max.apply(null,legs), prof=J.base+2.7+(S.gain-J.doc)/1e6;
+    var mount=maxLeg<=3090*0.9?'Ox or Direbear':maxLeg<=3090?'Ox or Direbear (bear nearly full)':maxLeg<=3657?'Elder\'s Ox only':'Too heavy for one ox';
+    var fl=S.opts.filter(function(o){return n[o.id]}).map(function(o){return n[o.id]+' × '+o.nm+' ('+fmt(o.f)+' focus each)'}).join(', ')||'none';
+    var specNote=(stageOf(SP.m,SP.a)===PLS.j?'your jacket spec':'jacket spec '+{1:15,2:50,3:90}[PLS.j])+' and '+(stageOf(SP.pm,SP.pg)===PLS.h?'your helmet spec':'helmet spec '+{1:15,2:50,3:90}[PLS.h]);
+    out.innerHTML='<div class="calc-sum"><div><span>Keep per day</span><b>about '+prof.toFixed(1)+'M</b></div><div><span>Mount</span><b>'+mount+'</b></div><div><span>Heaviest leg</span><b>'+fmt(Math.round(maxLeg/10)*10)+' kg</b></div></div>'+
+      '<p><strong>Focus:</strong> '+fl+'. Worked out for '+specNote+'; the focus goes to whichever of the loop\'s crafts adds the most silver per focus point.</p>'+
+      '<div class="tw"><table><thead><tr><th>Stop</th><th>Do</th><th>Amount</th><th>Price</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
+      '<p class="note">Whole loop: spend about '+spendT.toFixed(1)+'M, earn about '+earnT.toFixed(1)+'M at recent prices. Helmets made in Fort Sterling sell in Lymhurst and Bridgewatch the same day and in Martlock and Thetford at the start of the next loop. '+J.day1+' There are no helmets to sell in Martlock or Thetford on day one. Leg weights are worked out from item weights. Ox 3,657 kg, Direbear 3,090 kg.</p>';
+  }
+  document.addEventListener('click',function(e){var b=e.target.closest('.seg button');if(!b)return;PLS[b.closest('.seg').dataset.pl]=+b.dataset.v;try{localStorage.setItem('plan-pl',JSON.stringify(PLS))}catch(_){};renderPL()});
+  try{var pls=JSON.parse(localStorage.getItem('plan-pl'));if(pls){PLS.j=pls.j;PLS.h=pls.h}}catch(_){}
   function readField(el){var k=el.dataset.k;if(el.type==='checkbox')return el.checked?1:0;var mx=+el.max||100,v=Math.round(+el.value);return isNaN(v)?0:Math.max(0,Math.min(mx,v))}
   (function(){
     var saved=null; try{saved=JSON.parse(localStorage.getItem('plan-spec2'))}catch(e){}

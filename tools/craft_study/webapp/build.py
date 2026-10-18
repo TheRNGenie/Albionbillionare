@@ -53,6 +53,7 @@ PANEL = {
  'refine':('leather',['t4','t5','t6'],None,'Refining spec is per tier: 30 per level of every tier you have, plus 250 per level of the tier you refine.'),
  'bars':('bars',['s4','s5','s6'],('bl','I run this loop'),'Counts are Lap 1 of the loop below. Refining spec is per tier: 30 per level of every tier, plus 250 per level of the tier you refine.'),
 }
+PLBOX = """<div class="calc pl"><div class="pl-pick"><div><span class="pl-l">Jackets</span><div class="seg" data-pl="j"><button type="button" data-v="1">Stage 1</button><button type="button" data-v="2">Stage 2</button><button type="button" data-v="3">Stage 3</button></div></div><div><span class="pl-l">Helmets</span><div class="seg" data-pl="h"><button type="button" data-v="1">Stage 1</button><button type="button" data-v="2">Stage 2</button><button type="button" data-v="3">Stage 3</button></div></div></div><div id="pl-out"></div></div>"""
 def panel(sec):
     out, keys, chk, note = PANEL[sec]
     f = ''.join(f'<label>{FIELDS[k][0]}<input id="sp-{k}-{sec}" data-k="{k}" type="number" min="0" max="{FIELDS[k][1]}" step="{500 if k=='f' else 1}" inputmode="numeric"></label>' for k in keys)
@@ -70,7 +71,7 @@ for gname in GROUPS:
 body = []
 for i in ORDER:
     s = secs[i]
-    inner = (panel(i) if i in PANEL else '') + ''.join(fill(b) for b in s['body'])
+    inner = (PLBOX if i == 'perfect' else '') + (panel(i) if i in PANEL else '') + ''.join(fill(b) for b in s['body'])
     if s['subs']:
         tabs = ''.join(f'<button type="button" class="tab" id="tab-{i}-{k}" data-sub="{k}" role="tab">{html.escape(sb["h"].split(" loop:")[0])}<span class="here" data-stage="{k}" hidden>You</span><small>{html.escape(sb["h"].split(": ",1)[-1])}</small></button>' for k,sb in enumerate(s['subs']))
         panes = ''.join(f'<div class="pane" data-pane="{k}"><h3>{html.escape(sb["h"])}</h3>' + ''.join(fill(b) for b in sb['body']) + '</div>' for k,sb in enumerate(s['subs']))
