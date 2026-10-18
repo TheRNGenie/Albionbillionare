@@ -41,6 +41,19 @@ diag = ('<svg viewBox="0 0 760 270" role="img" aria-label="Daily loop through fi
  + box(c2,rb,'5. Bridgewatch',[("Sell T4.1 Merc, T5.1 jackets",0),("From Stage 2: buy T5.1 hides",0),("Carry hides to Martlock",0)])
  + f'<text x="24" y="{rb+40}" class="bq">Blue and yellow zones only:</text><text x="24" y="{rb+56}" class="bq">you can\'t lose the load</text></svg>')
 
+CALC = """<div class="calc" id="calc">
+<div class="calc-in">
+<label>Leather Armor Crafter<input id="sp-m" type="number" min="0" max="100" inputmode="numeric"></label>
+<label>Assassin Jacket<input id="sp-a" type="number" min="0" max="100" inputmode="numeric"></label>
+<label>Mercenary Jacket<input id="sp-r" type="number" min="0" max="100" inputmode="numeric"></label>
+<label>Hunter Jacket<input id="sp-h" type="number" min="0" max="100" inputmode="numeric"></label>
+<label>Focus per day<input id="sp-f" type="number" min="0" max="30000" step="500" inputmode="numeric"></label>
+<button type="button" id="sp-reset" class="ghost">Use 63 / 41 / 16</button>
+</div>
+<div id="calc-out"></div>
+<p class="note">Updates as you type and is remembered on this device. The doc text below this box was written for 63 / 41 / 16 / 0.</p>
+</div>"""
+
 def fill(s): return s.replace('%%CHART%%', chart).replace('%%DIAGRAM%%', diag)
 
 nav = []
@@ -51,18 +64,18 @@ for gname in GROUPS:
 body = []
 for i in ORDER:
     s = secs[i]
-    inner = ''.join(fill(b) for b in s['body'])
+    inner = (CALC if i == 'spec' else '') + ''.join(fill(b) for b in s['body'])
     if s['subs']:
-        tabs = ''.join(f'<button type="button" class="tab" id="tab-{i}-{k}" data-sub="{k}" role="tab">{html.escape(sb["h"].split(" loop:")[0])}{" <span class=here>You</span>" if k==1 else ""}<small>{html.escape(sb["h"].split(": ",1)[-1])}</small></button>' for k,sb in enumerate(s['subs']))
+        tabs = ''.join(f'<button type="button" class="tab" id="tab-{i}-{k}" data-sub="{k}" role="tab">{html.escape(sb["h"].split(" loop:")[0])}<span class="here" data-stage="{k}" hidden>You</span><small>{html.escape(sb["h"].split(": ",1)[-1])}</small></button>' for k,sb in enumerate(s['subs']))
         panes = ''.join(f'<div class="pane" data-pane="{k}"><h3>{html.escape(sb["h"])}</h3>' + ''.join(fill(b) for b in sb['body']) + '</div>' for k,sb in enumerate(s['subs']))
         inner += f'<div class="tabs" role="tablist">{tabs}</div>{panes}'
     body.append(f'<section class="sec" id="{i}" data-nav="{html.escape(s["nav"])}"><div class="eyebrow">{s["group"]}</div><h2>{html.escape(s["h"])}</h2>{inner}</section>')
 
 glance = '''<div class="glance">
-<div class="gl"><span>Your stage</span><b>Stage 2</b><em>Crafter 63 · Assassin 41 · Merc 16</em></div>
-<div class="gl"><span>Jacket loop</span><b>2.78M / day</b><em>royal cities, worst month 1.76M</em></div>
+<div class="gl"><span>Your stage</span><b id="g-stage">Stage 2</b><em id="g-spec">Crafter 63 · Assassin 41 · Merc 16</em></div>
+<div class="gl"><span>Jacket loop</span><b id="g-prof">2.78M / day</b><em>estimate, royal cities, 20M of materials</em></div>
 <div class="gl"><span>Plate helmet lap</span><b>2.5M / day</b><em>worst month 1.95M, no focus</em></div>
-<div class="gl"><span>Daily focus</span><b>5 × T4.3 Assassin</b><em>1,760 focus each at your spec</em></div>
+<a class="gl gl-link" href="#spec" data-go="spec"><span>Daily focus · edit spec</span><b id="g-focus">5 × T4.3 Assassin</b><em id="g-focus2">1,760 focus each at your spec</em></a>
 </div>'''
 
 tpl = open(os.path.join(HERE, 'shell.html')).read()
