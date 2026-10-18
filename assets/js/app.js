@@ -2821,9 +2821,13 @@
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#pace").hidden) closePace(); });
 
   /* ---------- Crafting: pick a category, get a full plan for it ---------- */
-  const cr = Object.assign({ cat: "", b1: 5e6, b2: 20e6, risky: false, maxTier: 8, mount: "ox8" }, store.get("crafting", {}));
+  const cr = Object.assign({ cat: "", b1: 5e6, b2: 20e6, risky: false, maxTier: 4, mount: "ox8" }, store.get("crafting", {}));
   let crGen = 0, crLast = null;
   const saveCr = () => store.set("crafting", cr);
+  /* Highest tier per stage: the player's pick is Stage 1; by default each later stage unlocks one tier more,
+     until the player sets Stages 2 and 3 themselves. */
+  if (!Array.isArray(cr.tiers)) { const t = cr.maxTier || 8; cr.tiers = [t, Math.min(8, t + 1), Math.min(8, t + 2)]; cr.tiersAuto = true; }
+  const crTop = () => Math.max(...cr.tiers);
   function renderCrafting() {
     const C = ABP.crafting, p = $("#panel-crafting");
     const groups = [...new Set(C.CATS.map((c) => c.group))];
@@ -2836,7 +2840,7 @@
           <label class="field"><span>Category</span><select id="cr-cat"><option value="">Choose a category…</option>${groups.map((g) => `<optgroup label="${esc(g)}">${C.CATS.filter((c) => c.group === g).map((c) => `<option value="${c.key}" ${cr.cat === c.key ? "selected" : ""}>${esc(c.label)}</option>`).join("")}</optgroup>`).join("")}</select></label>
           <label class="field"><span>Stage 1 materials a day (silver)</span><input type="number" id="cr-b1" min="0" step="500000" value="${cr.b1}"></label>
           <label class="field"><span>Stage 2 and 3 materials a day</span><input type="number" id="cr-b2" min="0" step="1000000" value="${cr.b2}"></label>
-          <label class="field"><span>Highest tier you can craft</span><select id="cr-tier">${[4, 5, 6, 7, 8].map((t) => `<option value="${t}" ${cr.maxTier === t ? "selected" : ""}>T${t}</option>`).join("")}</select></label>
+          ${["Highest tier you can craft now (Stage 1)", "Stage 2 unlocks up to", "Stage 3 unlocks up to"].map((lab, i) => `<label class="field"><span>${lab}</span><select id="cr-tier${i}">${[4, 5, 6, 7, 8].filter((t) => t >= (i ? cr.tiers[i - 1] : 4)).map((t) => `<option value="${t}" ${cr.tiers[i] === t ? "selected" : ""}>T${t}</option>`).join("")}</select></label>`).join("")}
           <label class="field"><span>Your pack mount</span><select id="cr-mount">${C.MOUNTS.map((m) => `<option value="${m.id}" ${cr.mount === m.id ? "selected" : ""}>${esc(m.name)}, ${full(m.kg)} kg</option>`).join("")}</select></label>
         </div>
         <div class="row"><button class="btn" id="cr-go">Build plan</button>
@@ -2846,7 +2850,12 @@
       <div id="cr-out" class="stack cr-report"></div>`;
     $("#cr-cat").addEventListener("change", (e) => { cr.cat = e.target.value; saveCr(); buildCraft(); });
     [["cr-b1", "b1"], ["cr-b2", "b2"]].forEach(([id, k]) => $("#" + id).addEventListener("change", (e) => { cr[k] = Math.max(0, +e.target.value || 0); saveCr(); if (cr.cat) buildCraft(); }));
-    $("#cr-tier").addEventListener("change", (e) => { cr.maxTier = +e.target.value; saveCr(); if (cr.cat) buildCraft(); });
+    [0, 1, 2].forEach((i) => $("#cr-tier" + i).addEventListener("change", (e) => {
+      const t = +e.target.value;
+      if (i === 0 && cr.tiersAuto) cr.tiers = [t, Math.min(8, t + 1), Math.min(8, t + 2)];
+      else { cr.tiers[i] = t; if (i) cr.tiersAuto = false; for (let j = i + 1; j < 3; j++) cr.tiers[j] = Math.max(cr.tiers[j], t); }
+      saveCr(); renderCrafting();
+    }));
     $("#cr-risky").addEventListener("change", (e) => { cr.risky = e.target.checked; saveCr(); if (cr.cat) buildCraft(); });
     /* the mount only changes the loops, so no new prices are needed */
     $("#cr-mount").addEventListener("change", (e) => { cr.mount = e.target.value; saveCr(); if (crLast) drawCraft(); });
@@ -2861,7 +2870,7 @@
     out.innerHTML = `<p class="muted">Pricing every craftable item in ${esc(label.toLowerCase())}…</p>`;
     try {
       const R = await recipes();
-      const keys = C.items(R, cr.cat).filter((k) => C.tierOf(k) <= cr.maxTier);
+      const keys = C.items(R, cr.cat).filter((k) => C.tierOf(k) <= crTop());
       const { mats } = C.idsFor(R, keys);
       const [hi, hm] = await Promise.all([
         ABP.api.dailyMany(keys, C.ROYAL.concat(cr.risky ? C.RISKY : []), C.DAYS),
@@ -2870,7 +2879,7 @@
       ]);
       if (gen !== crGen) return;
       const hist = Object.assign({}, hm, hi);
-      const run = (ks) => C.analyse({ R, keys: ks, hist, catKey: cr.cat, budgets: [cr.b1, cr.b2], risky: cr.risky });
+      const run = (ks) => C.analyse({ R, keys: ks, hist, catKey: cr.cat, budgets: [cr.b1, cr.b2], tiers: cr.tiers, risky: cr.risky });
       /* each item line (Mercenary Jacket, Claymore, ...) on its own, best first; the mix plans only the top 4 */
       const lines = linesOf(keys).map((ln) => ({ ...ln, A: run(ln.keys) })).sort((a, b) => b.A.stages[1].royal.med - a.A.stages[1].royal.med);
       const A = run(lines.filter((l) => l.A.stages[1].royal.med > 0).slice(0, MIX_LINES).flatMap((l) => l.keys));
@@ -2948,11 +2957,11 @@
     const tierList = tiers.length > 1 ? tiers.slice(0, -1).join(", ") + " and " + tiers[tiers.length - 1] : tiers[0];
     sec.push(`<section class="box stack" id="cr-pick">
       ${line ? `<h3>The pick: ${esc(line.name)}, ${tierList}</h3>
-      <p>Craft ${esc(line.name)}s ${where}, and sell them in the royal cities. ${tiers.length > 1 ? "These tiers" : "This tier"} paid best of the ${A.priced.length} tiers and enchants up to T${cr.maxTier}, priced from the last four weeks of daily trades.</p>`
+      <p>Craft ${esc(line.name)}s ${where}, and sell them in the royal cities. ${tiers.length > 1 ? "These tiers" : "This tier"} paid best of the ${A.priced.length} tiers and enchants up to T${crTop()}, priced from the last four weeks of daily trades.</p>`
       : `<h3>The pick: ${list}</h3>
-      <p>Craft them ${where}, and sell them in the royal cities. The plan mixes the top ${MIX_LINES} items (${esc((A.mixOf || []).join(", "))}), at every tier up to T${cr.maxTier}, priced from the last four weeks of daily trades.</p>`}
+      <p>Craft them ${where}, and sell them in the royal cities. The plan mixes the top ${MIX_LINES} items (${esc((A.mixOf || []).join(", "))}), at every tier each stage has unlocked (T${cr.tiers.join(", T")} for Stages 1, 2 and 3), priced from the last four weeks of daily trades.</p>`}
       <div class="table-wrap"><table><thead><tr><th>Stage</th><th>Materials a day</th><th>Royal cities: profit a day</th><th>Worst week</th>${A.risky ? "<th>Plus Caerleon and Black Market</th><th>Worst week</th>" : ""}</tr></thead><tbody>
-      ${A.stages.map((s, i) => `<tr class="${i === stageNow ? "on" : ""}"><td>${s.name} <small class="muted">(${s.range})</small></td><td class="num">${fmt(s.royal.spent)}</td><td class="num money">${fmt(s.royal.med)}</td><td class="num">${fmt(s.royal.worst)}</td>${A.risky ? `<td class="num money">${fmt(s.risky.med)}</td><td class="num">${fmt(s.risky.worst)}</td>` : ""}</tr>`).join("")}
+      ${A.stages.map((s, i) => `<tr class="${i === stageNow ? "on" : ""}"><td>${s.name} <small class="muted">(${s.range}, up to T${s.maxTier})</small></td><td class="num">${fmt(s.royal.spent)}</td><td class="num money">${fmt(s.royal.med)}</td><td class="num">${fmt(s.royal.worst)}</td>${A.risky ? `<td class="num money">${fmt(s.risky.med)}</td><td class="num">${fmt(s.risky.worst)}</td>` : ""}</tr>`).join("")}
       </tbody></table></div>
       <p class="small muted">Profit is net silver a day in the middle of the last four weeks, after ${pct(ABP.FEES.salesTaxPremium + ABP.FEES.setupFee)} market fees and a ${pct(C.STATION, 0)} station-fee allowance, never selling more than the safe daily amount in each city. ${toB ? `At the Stage 2 rate this category alone reaches 1B in about ${full(toB)} days.` : ""} Your spec (Calculators → Your spec) puts you in ${A.stages[stageNow].name}.</p>
     </section>`);
@@ -2982,7 +2991,7 @@
     const lv = [30, 75, 100].map((l) => ({ l, fame: ABP.fameAt(l, ABP.FAME.totals.craftMastery) }));
     sec.push(`<section class="box stack"><h3>The route from zero spec</h3>
       <p>Level the ${esc(lc)} crafter node together with the spec of ${L(anyKey).replace(/^T\d(\.\d)?\s*/, "")}, and craft only what pays at your stage, so every stage earns silver while you level.</p>
-      ${A.stages.map((s) => `<div class="stack"><h4>${s.name}: ${s.range}, about ${fmt(s.budget)} of materials a day</h4>
+      ${A.stages.map((s) => `<div class="stack"><h4>${s.name}: ${s.range}, up to T${s.maxTier}, about ${fmt(s.budget)} of materials a day</h4>
         ${s.royal.rows.length ? `<ul>${topRows(s.royal.rows)}</ul>
         <p class="small">About <strong>${fmt(s.royal.profit)}</strong> profit a day from ${fmt(s.royal.spent)} of materials and ${full(s.royal.focusUsed)} focus${s.royal.spent < s.budget * 0.9 ? `. The safe daily amounts fill up before the budget does, so more silver adds nothing here` : ""}.</p>`
         : `<p class="small muted">Nothing pays at this stage.</p>`}
@@ -3053,7 +3062,7 @@
     });
 
     const stageHtml = ({ S, M, O }) => {
-      const head = `<h4>${esc(S.name)} loop: ${esc(S.range)}</h4>`;
+      const head = `<h4>${esc(S.name)} loop: ${esc(S.range)}, up to T${S.maxTier}</h4>`;
       if (!M) return head + `<p class="small muted">Nothing pays at this stage.</p>`;
       const cap = M.cap, pctOf = (kg) => pct(kg / cap, 0);
       const intro = [];

@@ -73,7 +73,7 @@ ABP.crafting = (() => {
     return { items: keys, mats: [...mats] };
   }
 
-  function analyse({ R, keys, hist, catKey, budgets = [5e6, 20e6], focus = 10000, risky = false, now = Date.now() }) {
+  function analyse({ R, keys, hist, catKey, budgets = [5e6, 20e6], tiers = [8, 8, 8], focus = 10000, risky = false, now = Date.now() }) {
     const F = ABP.FEES, RET = ABP.RETURN;
     const stats = new Map();
     function stat(id, city) {
@@ -147,7 +147,9 @@ ABP.crafting = (() => {
       return out;
     }
 
-    function plan(sl, spec, budget, safe) {
+    function plan(sl, spec, budget, safe, maxTier = 8) {
+      /* only the tiers this stage has unlocked */
+      sl = sl.filter((s) => tierOf(s.key) <= maxTier);
       const left = new Map(sl.map((s) => [s, s.cap]));
       let fLeft = focus, bLeft = budget;
       const rows = [];
@@ -199,13 +201,13 @@ ABP.crafting = (() => {
     }
 
     const STAGES = [
-      { name: "Stage 1", range: "spec 0 to 30", spec: 15, budget: budgets[0] },
-      { name: "Stage 2", range: "spec 30 to 75", spec: 50, budget: budgets[1] },
-      { name: "Stage 3", range: "spec 75 to 100", spec: 90, budget: budgets[1] },
+      { name: "Stage 1", range: "spec 0 to 30", spec: 15, budget: budgets[0], maxTier: tiers[0] },
+      { name: "Stage 2", range: "spec 30 to 75", spec: 50, budget: budgets[1], maxTier: tiers[1] },
+      { name: "Stage 3", range: "spec 75 to 100", spec: 90, budget: budgets[1], maxTier: tiers[2] },
     ];
     const royalSlots = slots(true);
     const riskySlots = risky ? slots(false) : null;
-    const stages = STAGES.map((st) => ({ ...st, royal: plan(royalSlots, st.spec, st.budget, true), risky: riskySlots ? plan(riskySlots, st.spec, st.budget, false) : null }));
+    const stages = STAGES.map((st) => ({ ...st, royal: plan(royalSlots, st.spec, st.budget, true, st.maxTier), risky: riskySlots ? plan(riskySlots, st.spec, st.budget, false, st.maxTier) : null }));
 
     /* Every item ranked by what it could add to a day, in its best royal city. */
     const byKey = {};
@@ -221,8 +223,8 @@ ABP.crafting = (() => {
     const noSales = priced.filter((k) => !ROYAL.some((c) => stat(k, c)?.w[0]));
 
     /* Tiers where nothing in the category paid without focus last week. */
-    const tiers = [...new Set(royalSlots.map((s) => tierOf(s.key)))].sort();
-    const focusOnlyTiers = tiers.filter((t) => royalSlots.filter((s) => tierOf(s.key) === t).every((s) => s.profitNo <= 0));
+    const seenTiers = [...new Set(royalSlots.map((s) => tierOf(s.key)))].sort();
+    const focusOnlyTiers = seenTiers.filter((t) => royalSlots.filter((s) => tierOf(s.key) === t).every((s) => s.profitNo <= 0));
 
     /* Refining your own material: inputs bought in the cheapest royal city, refined without focus in the refining bonus city. */
     const usedMats = new Set();
