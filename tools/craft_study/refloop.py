@@ -5,6 +5,7 @@ Usage: python3 tools/craft_study/refloop.py [cap_kg] [budget]"""
 import csv, gzip, json, sys, collections, statistics as st
 CAP = float(sys.argv[1]) if len(sys.argv) > 1 else 3300
 BUDGET = float(sys.argv[2]) if len(sys.argv) > 2 else 2e7
+EXTRA = ["METALBAR+LEATHER", "METALBAR+LEATHER+CLOTH"]
 TRIPS = int(sys.argv[3]) if len(sys.argv) > 3 else 1
 ROYAL = ["Martlock", "Bridgewatch", "Lymhurst", "Fort Sterling", "Thetford"]
 BONUS = {"METALBAR": "Thetford", "PLANKS": "Fort Sterling", "CLOTH": "Lymhurst", "LEATHER": "Martlock", "STONEBLOCK": "Bridgewatch"}
@@ -48,7 +49,7 @@ def month_rows(m):
     return rows
 def plan(rows, f):
     kg = 0; bud = BUDGET; tot = 0; pick = []; rawused = collections.Counter()
-    for r in sorted([r for r in rows if r["fam"] == f and r["prof"] > 0], key=lambda r: -r["prof"] / r["kg"]):
+    for r in sorted([r for r in rows if r["fam"] in f.split("+") and r["prof"] > 0], key=lambda r: -r["prof"] / r["kg"]):
         q = int(min(r["cap"], r["rcap"] - rawused[r["o"]], (CAP * TRIPS - kg) / r["kg"], bud / r["cost"]))
         if q < 1: continue
         kg += q * r["kg"]; bud -= q * r["cost"]; tot += q * r["prof"]; pick.append((r, q)); rawused[r["o"]] += q
@@ -56,9 +57,9 @@ def plan(rows, f):
 res = collections.defaultdict(list)
 allrows = {m: month_rows(m) for m in M}
 for m in M:
-    for f in BONUS: res[f].append(plan(allrows[m], f)[0])
-for f in BONUS:
-    v = res[f]; print(f"{f:10} in {BONUS[f]:13} median {st.median(v)/1e6:5.2f}M  worst {min(v)/1e6:5.2f}M  months {[round(x/1e6,2) for x in v]}")
+    for f in list(BONUS) + EXTRA: res[f].append(plan(allrows[m], f)[0])
+for f in list(BONUS) + EXTRA:
+    v = res[f]; print(f"{f:10} in {BONUS.get(f, 'several'):13} median {st.median(v)/1e6:5.2f}M  worst {min(v)/1e6:5.2f}M  months {[round(x/1e6,2) for x in v]}")
 best = sys.argv[4] if len(sys.argv) > 4 else max(BONUS, key=lambda f: st.median(res[f]))
 print("\nBEST", best)
 # per-item medians over months for the best family
