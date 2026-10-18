@@ -72,7 +72,7 @@ META = {
  'The route': ('route', 'Route by stage', 'Plan'),
  'Daily loop': ('loop', 'Jacket loop', 'Loops'),
  'Plate helmet': ('helmets', 'Plate helmet loop', 'Loops'),
- 'Combined loop': ('combined', 'Combined loop', 'Loops'),
+ 'Perfect Loop': ('perfect', 'Perfect Loop', 'Plan'),
  'Daily shopping': ('shopping', 'Shopping list', 'Loops'),
  'Refining your own': ('refine', 'Refine your leather', 'Refining'),
  'Refining loop for profit': ('bars', 'Metal bar loop', 'Refining'),

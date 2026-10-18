@@ -1,7 +1,7 @@
 import json, html, os, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 C = json.load(open(os.path.join(HERE, 'content.json')))
-ORDER = ['pick','spec','route','loop','helmets','combined','shopping','refine','bars','mammoth','prices','why','mechanics','routine','risks','sources']
+ORDER = ['pick','perfect','spec','route','loop','helmets','shopping','refine','bars','mammoth','prices','why','mechanics','routine','risks','sources']
 secs = {s['id']: s for s in C['secs']}
 GROUPS = ['Plan','Loops','Refining','Reference']
 
@@ -80,7 +80,7 @@ for i in ORDER:
 glance = '''<div class="glance">
 <div class="gl"><span>Your stage</span><b id="g-stage">Stage 2</b><em id="g-spec">Crafter 63 · Assassin 41 · Merc 16</em></div>
 <div class="gl"><span>Jacket loop</span><b id="g-prof">2.78M / day</b><em>estimate, royal cities, 20M of materials</em></div>
-<div class="gl"><span>Plate helmet lap</span><b>2.5M / day</b><em>worst month 1.95M, no focus</em></div>
+<a class="gl gl-link gl-main" href="#perfect" data-go="perfect"><span>Your plan · Perfect Loop</span><b>6.5M / day</b><em>jackets 3.8M + helmets 2.7M, Elder's Ox</em></a>
 <a class="gl gl-link" href="#spec" data-go="spec"><span>Daily focus · edit spec</span><b id="g-focus">5 × T4.3 Assassin</b><em id="g-focus2">1,760 focus each at your spec</em></a>
 </div>'''
 
