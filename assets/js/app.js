@@ -2884,7 +2884,8 @@
       const lines = linesOf(keys).map((ln) => ({ ...ln, A: run(ln.keys) })).sort((a, b) => b.A.stages[1].royal.med - a.A.stages[1].royal.med);
       const A = run(lines.filter((l) => l.A.stages[1].royal.med > 0).slice(0, MIX_LINES).flatMap((l) => l.keys));
       A.mixOf = lines.filter((l) => l.A.stages[1].royal.med > 0).slice(0, MIX_LINES).map((l) => l.name);
-      crLast = { A, R, lines };
+      /* the whole category, unlimited by item: the pool "Expand this loop" draws from */
+      crLast = { A, R, lines, full: run(keys) };
       drawCraft();
       time.textContent = `Built ${vanTime(new Date())} from ${ABP.SERVERS.find((s) => s.id === ABP.api.server).label} market history`;
     } catch (e) {
@@ -3044,6 +3045,14 @@
 
     out.innerHTML = sec.join("");
     wire();
+    $$("#cr-loop [data-expand]").forEach((b) => b.addEventListener("click", () => {
+      const mount = C.MOUNTS.find((m) => m.id === cr.mount) || C.MOUNTS[0];
+      const k = `${cr.cat}|${(cr.lines || {})[cr.cat] || ""}|${b.dataset.expand}|${mount.id}`;
+      cr.expanded = Object.assign({}, cr.expanded, { [k]: b.dataset.on === "1" });
+      saveCr();
+      b.disabled = true; b.textContent = b.dataset.on === "1" ? "Packing the mount…" : "Restoring…";
+      setTimeout(() => { const y = window.scrollY; drawCraft(); window.scrollTo(0, y); }, 20);
+    }));
   }
 
   /* The daily loops: one per stage, each sized to the chosen pack mount (no Transport Mammoth), in the leather
@@ -3055,13 +3064,21 @@
     const about = (p, max) => (max ? `about ${full(p)}, max ${full(max)}` : `about ${full(p)}`);
     const shareNote = (sh) => (sh > 0.25 ? ` · ${pct(sh, 0)} of a day's sales here, split it across cities` : "");
     const and = (a) => (a.length > 1 ? a.slice(0, -1).join(", ") + " and " + a[a.length - 1] : a[0] || "");
-    const done = A.stages.map((S) => {
+    const sel = (cr.lines || {})[cr.cat] || "";
+    const exKey = (i) => `${cr.cat}|${sel}|${i}|${mount.id}`;
+    const F = crLast.full;
+    const done = A.stages.map((S, i) => {
       const P = S.royal;
-      if (!P.rows.length) return { S, M: null };
-      return { S, M: A.loop(P, mount.kg), O: A.loop(P, other.kg) };
+      if (!P.rows.length) return { S, i, M: null };
+      if ((cr.expanded || {})[exKey(i)] && F) {
+        const E = F.expand(P, i, mount.kg);
+        const base = A.loop(P, mount.kg);
+        return { S, i, M: F.loop(E.P, mount.kg), O: F.loop(E.P, other.kg), E, base };
+      }
+      return { S, i, M: A.loop(P, mount.kg), O: A.loop(P, other.kg) };
     });
 
-    const stageHtml = ({ S, M, O }) => {
+    const stageHtml = ({ S, i, M, O, E, base }) => {
       const head = `<h4>${esc(S.name)} loop: ${esc(S.range)}, up to T${S.maxTier}</h4>`;
       if (!M) return head + `<p class="small muted">Nothing pays at this stage.</p>`;
       const cap = M.cap, pctOf = (kg) => pct(kg / cap, 0);
@@ -3073,6 +3090,18 @@
       if (partial.length) {
         const kept = M.refinables.filter((f) => M.refined.get(f.m) > 0).map((f) => `${full(M.refined.get(f.m))} ${L(f.m)}${M.refined.get(f.m) < f.qty ? ` of ${full(f.qty)}` : ""}`);
         intro.push(`A full refining loop doesn't fit, so this loop refines what saves the most per kilo${kept.length ? `: ${and(kept)}` : " (nothing, here)"}, and buys the rest ready-made.`);
+      }
+      const use = M.order.length > 1 ? M.max.kg / cap : 0;
+      let expandHtml = "";
+      if (E) {
+        const byKey = new Map();
+        for (const x of E.added) byKey.set(x.key, (byKey.get(x.key) || 0) + x.units);
+        const grouped = [...byKey].sort((a, b) => b[1] - a[1]);
+        const names = grouped.slice(0, 5).map(([k, u]) => `${full(u)} ${L(k)}`).concat(grouped.length > 5 ? [`${grouped.length - 5} more items`] : []);
+        expandHtml = `<div class="notice"><p class="small"><strong>Expanded:</strong> ${names.length ? `added ${and(names)}, each sold where the table below says` : "nothing more pays at a volume the markets can take"}. The mount now carries ${pct(use, 0)} of its limit${E.full ? "" : `; the rest would mean selling more than each market's safe daily amount`}. This spends about ${fmt(M.tot.spend - base.tot.spend)} more a day and keeps about <strong>${fmt(M.tot.keep - base.tot.keep)}</strong> more.</p>
+          <button type="button" class="btn ghost" data-expand="${i}" data-on="0">Back to the normal loop</button></div>`;
+      } else if (M.fits && M.order.length > 1 && use < 0.9) {
+        expandHtml = `<div class="row"><button type="button" class="btn" data-expand="${i}" data-on="1">Expand this loop</button><span class="small muted">It uses only ${pct(use, 0)} of your mount. Expanding adds more ${esc(A.label.toLowerCase())} this stage can craft, best silver per kilo first, until the mount is about 90% full.</span></div>`;
       }
       M.moved.forEach((x) => intro.push(`It buys ${L(x.m)} in ${esc(x.to)} instead of carrying it from ${esc(x.from)}, which costs about ${fmt(Math.max(0, x.extra))} more and keeps the legs light.`));
 
@@ -3107,6 +3136,7 @@
       const oLine = O ? `On the ${esc(other.name)} (${full(other.kg)} kg) this loop ${O.fits ? `${Math.abs(O.tot.keep - M.tot.keep) < Math.abs(M.tot.keep) * 0.01 ? "keeps the same" : `keeps about <strong>${fmt(O.tot.keep)}</strong> a day`}${O.saved < M.saved - 1 ? `, refining less because it carries less` : ""}` : `doesn't fit: its heaviest leg would be ${full(O.max.kg)} kg`}.` : "";
       return `${head}
         <p class="small">${intro.join(" ")}</p>
+        ${expandHtml}
         <div class="table-wrap"><table class="cr-loop"><thead><tr><th>Stop</th><th>Do</th><th>Amount</th><th>Price</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>
         <p><strong>Whole loop:</strong> spend about ${fmt(M.tot.spend)}, earn about ${fmt(M.tot.earn)}, station fees ${fmt(M.tot.fee)}, so you keep about <strong>${fmt(M.tot.keep)} a day</strong>. ${oLine}</p>
         ${dayOne}`;

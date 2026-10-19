@@ -297,11 +297,13 @@ ABP.crafting = (() => {
 
       /* sales: where each crafted item is sold */
       const sales = P.rows.map((r) => {
-        const sh = sells.find((x) => x.s.key === r.s.key && x.s.city === r.s.city);
-        return { key: r.s.key, city: r.s.city, units: r.units, focus: r.focus, target: r.s.price, floor: r.focus ? sh?.beFocus : sh?.beBought, kg: r.units * kgOf(r.s.key) };
+        /* break-even: what the craft cost, grossed up for market fees and the station fee */
+        const floor = (r.focus ? r.s.e.costF : r.s.e.cost0) / (1 - feeOf(r.s.city));
+        return { key: r.s.key, city: r.s.city, units: r.units, focus: r.focus, target: r.s.price, floor, kg: r.units * kgOf(r.s.key) };
       });
       const crafts = new Map();
-      for (const r of P.rows) { const k = r.s.key + (r.focus ? "|f" : ""); crafts.set(k, { key: r.s.key, focus: r.focus, units: (crafts.get(k)?.units || 0) + r.units }); }
+      const valueOf = new Map();
+      for (const r of P.rows) { const k = r.s.key + (r.focus ? "|f" : ""); crafts.set(k, { key: r.s.key, focus: r.focus, units: (crafts.get(k)?.units || 0) + r.units }); valueOf.set(r.s.key, Math.max(valueOf.get(r.s.key) || 0, r.s.price)); }
 
       function build(st, dir) {
         const need = new Set([craftCity]);
@@ -352,7 +354,7 @@ ABP.crafting = (() => {
         for (const s of stops.values()) {
           s.spend = sum(s.buy, (b) => b.qty * b.price) + sum(s.input, (b) => b.qty * b.price) + sum(s.raw, (b) => b.qty * b.price) + sum(s.ready, (b) => b.qty * b.price);
           s.earn = sum(s.sell, (x) => x.units * x.target * (1 - feeOf(x.city) + STATION));
-          s.fee = sum(s.craft, (c) => c.units * (sells.find((x) => x.s.key === c.key)?.last || 0) * STATION) + sum(s.refine, (x) => x.qty * x.buy * REFINE_STATION);
+          s.fee = sum(s.craft, (c) => c.units * (valueOf.get(c.key) || 0) * STATION) + sum(s.refine, (x) => x.qty * x.buy * REFINE_STATION);
         }
         const max = legs.reduce((a, l) => (l.kg > a.kg ? l : a), { kg: 0 });
         return { order, legs, stops, max };
@@ -408,6 +410,42 @@ ABP.crafting = (() => {
       return { craftCity, order, legs, stops: L.stops, max: L.max, cap, fits: L.max.kg <= cap, tot, dayOne, saved, fullSave, moved, cut: [...new Set(cut)], refinables, refined: st.refine };
     }
 
+    /* "Expand this loop": add more no-focus crafts to a stage's plan until the mount is about 90% full.
+       Candidates are every item in the category the stage has unlocked, best silver per kilo first, each still
+       capped at its safe daily amount in its city. An addition is kept only when the whole loop keeps more silver
+       (after any refining it pushes out), so a heavy, thin-margin item never displaces a better one. The material
+       budget is not a limit here: the result says how much more it spends. */
+    function expand(P, stageIdx, cap, target = 0.9) {
+      const S = STAGES[stageIdx];
+      if (!P?.rows.length) return null;
+      const rows = P.rows.slice();
+      const used = new Map(), id = (s) => s.key + "|" + s.city;
+      for (const r of rows) used.set(id(r.s), (used.get(id(r.s)) || 0) + r.units);
+      const kgEach = (s) => kgOf(s.key) + sum(s.e.lines, (l) => l.n * (l.noRet ? 1 : 1 - s.e.place.rates.none) * wOf(l.m)) / s.e.amt;
+      const pool = royalSlots.filter((s) => tierOf(s.key) <= S.maxTier && s.profitNo > 0 && s.profitNo / s.price >= MIN_MARGIN)
+        .map((s) => ({ s, perKg: s.profitNo / Math.max(0.1, kgEach(s)) })).sort((a, b) => b.perKg - a.perKg).slice(0, 60);
+      let L = loop({ ...P, rows }, cap);
+      const added = [];
+      for (const { s } of pool) {
+        if (L.max.kg >= cap * target) break;
+        const left = Math.floor(s.cap - (used.get(id(s)) || 0));
+        if (left < 1) continue;
+        for (const n of [left, Math.ceil(left / 2), Math.ceil(left / 4), Math.ceil(left / 8)]) {
+          if (n < 1) continue;
+          const tryRows = rows.concat([{ s, units: n, focus: false, each: s.profitNo, cost: s.e.cost0, fu: 0 }]);
+          const T = loop({ ...P, rows: tryRows }, cap);
+          if (T.fits && T.tot.keep > L.tot.keep) {
+            rows.push(tryRows[tryRows.length - 1]); used.set(id(s), (used.get(id(s)) || 0) + n);
+            const a = added.find((x) => x.key === s.key && x.city === s.city);
+            if (a) a.units += n; else added.push({ key: s.key, city: s.city, units: n });
+            L = T; break;
+          }
+        }
+      }
+      const profit = sum(rows, (r) => r.units * r.each), spent = sum(rows, (r) => r.units * r.cost);
+      return { P: { ...P, rows, profit, spent }, added, before: P, full: L.max.kg >= cap * target };
+    }
+
     /* Price sheet: targets and hard limits for everything the plan makes and buys. */
     const sheetKeys = new Map();
     for (const st of stages) for (const r of st.royal.rows) if (!sheetKeys.has(r.s.key + r.s.city)) sheetKeys.set(r.s.key + r.s.city, r.s);
@@ -431,7 +469,7 @@ ABP.crafting = (() => {
       return { m, city: b.city, last: b.price, med: st?.med, lo: st?.lo, hi: st?.hi, max, noRet: [...sheetKeys.values()].some((x) => x.e.lines.find((y) => y.m === m)?.noRet) };
     }).filter(Boolean).sort((a, b) => (b.last || 0) - (a.last || 0));
 
-    return { catKey, label: CATS.find((c) => c.key === catKey)?.label, keys, priced, noSales, ranked, stages, focusOnlyTiers, refine, ownPrice, shopping, loop, sells, buys, kgOf, craftPlace, risky, focus, feeOf, now };
+    return { catKey, label: CATS.find((c) => c.key === catKey)?.label, keys, priced, noSales, ranked, stages, focusOnlyTiers, refine, ownPrice, shopping, loop, expand, sells, buys, kgOf, craftPlace, risky, focus, feeOf, now };
   }
 
   return { CATS, ROYAL, RISKY, RING, MOUNTS, STATION, DAYS, MAX_ITEMS, items, idsFor, analyse, tierOf, enchOf, baseOf, refinedRes };
