@@ -19,6 +19,9 @@ ABP.crafting = (() => {
     { id: "ox6", name: "Master's Transport Ox (T6)", kg: 2577 },
     { id: "ox5", name: "Expert's Transport Ox (T5)", kg: 2204 },
   ];
+  /* Elder's Transport Mammoth: spells.json gives it maxload 113.86 against the Elder's ox's 16.18, so at the same
+     Excellent-quality scale it carries 113.86 / 16.18 × 3,657 ≈ 25,730 kg. Chosen with its own checkbox. */
+  const MAMMOTH = { id: "mammoth8", name: "Elder's Transport Mammoth (T8)", kg: Math.round(113.86 / 16.18 * 3657) };
   const STATION = 0.02; /* station fee allowance on crafts, as a share of the sale price */
   const REFINE_STATION = 0.01;
   const DAYS = 28;
@@ -423,7 +426,7 @@ ABP.crafting = (() => {
       for (const r of rows) used.set(id(r.s), (used.get(id(r.s)) || 0) + r.units);
       const kgEach = (s) => kgOf(s.key) + sum(s.e.lines, (l) => l.n * (l.noRet ? 1 : 1 - s.e.place.rates.none) * wOf(l.m)) / s.e.amt;
       const pool = royalSlots.filter((s) => tierOf(s.key) <= S.maxTier && s.profitNo > 0 && s.profitNo / s.price >= MIN_MARGIN)
-        .map((s) => ({ s, perKg: s.profitNo / Math.max(0.1, kgEach(s)) })).sort((a, b) => b.perKg - a.perKg).slice(0, 60);
+        .map((s) => ({ s, perKg: s.profitNo / Math.max(0.1, kgEach(s)) })).sort((a, b) => b.perKg - a.perKg).slice(0, cap > 10000 ? 250 : 60);
       let L = loop({ ...P, rows }, cap);
       const added = [];
       for (const { s } of pool) {
@@ -472,5 +475,5 @@ ABP.crafting = (() => {
     return { catKey, label: CATS.find((c) => c.key === catKey)?.label, keys, priced, noSales, ranked, stages, focusOnlyTiers, refine, ownPrice, shopping, loop, expand, sells, buys, kgOf, craftPlace, risky, focus, feeOf, now };
   }
 
-  return { CATS, ROYAL, RISKY, RING, MOUNTS, STATION, DAYS, MAX_ITEMS, items, idsFor, analyse, tierOf, enchOf, baseOf, refinedRes };
+  return { CATS, ROYAL, RISKY, RING, MOUNTS, MAMMOTH, STATION, DAYS, MAX_ITEMS, items, idsFor, analyse, tierOf, enchOf, baseOf, refinedRes };
 })();

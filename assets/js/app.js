@@ -2828,6 +2828,7 @@
      until the player sets Stages 2 and 3 themselves. */
   if (!Array.isArray(cr.tiers)) { const t = cr.maxTier || 8; cr.tiers = [t, Math.min(8, t + 1), Math.min(8, t + 2)]; cr.tiersAuto = true; }
   const crTop = () => Math.max(...cr.tiers);
+  const crMount = () => (cr.mammoth ? ABP.crafting.MAMMOTH : ABP.crafting.MOUNTS.find((m) => m.id === cr.mount) || ABP.crafting.MOUNTS[0]);
   function renderCrafting() {
     const C = ABP.crafting, p = $("#panel-crafting");
     const groups = [...new Set(C.CATS.map((c) => c.group))];
@@ -2841,10 +2842,11 @@
           <label class="field"><span>Stage 1 materials a day (silver)</span><input type="number" id="cr-b1" min="0" step="500000" value="${cr.b1}"></label>
           <label class="field"><span>Stage 2 and 3 materials a day</span><input type="number" id="cr-b2" min="0" step="1000000" value="${cr.b2}"></label>
           ${["Highest tier you can craft now (Stage 1)", "Stage 2 unlocks up to", "Stage 3 unlocks up to"].map((lab, i) => `<label class="field"><span>${lab}</span><select id="cr-tier${i}">${[4, 5, 6, 7, 8].filter((t) => t >= (i ? cr.tiers[i - 1] : 4)).map((t) => `<option value="${t}" ${cr.tiers[i] === t ? "selected" : ""}>T${t}</option>`).join("")}</select></label>`).join("")}
-          <label class="field"><span>Your pack mount</span><select id="cr-mount">${C.MOUNTS.map((m) => `<option value="${m.id}" ${cr.mount === m.id ? "selected" : ""}>${esc(m.name)}, ${full(m.kg)} kg</option>`).join("")}</select></label>
+          <label class="field"><span>Your pack mount</span><select id="cr-mount" ${cr.mammoth ? "disabled" : ""}>${C.MOUNTS.map((m) => `<option value="${m.id}" ${cr.mount === m.id ? "selected" : ""}>${esc(m.name)}, ${full(m.kg)} kg</option>`).join("")}</select></label>
         </div>
         <div class="row"><button class="btn" id="cr-go">Build plan</button>
           <label class="toggle"><input type="checkbox" id="cr-risky" ${cr.risky ? "checked" : ""}><span>Also sell in Caerleon and the Black Market</span></label>
+          <label class="toggle"><input type="checkbox" id="cr-mammoth" ${cr.mammoth ? "checked" : ""}><span>I have a T8 Transport Mammoth</span></label>
           <span class="small muted" id="cr-time"></span></div>
       </div>
       <div id="cr-out" class="stack cr-report"></div>`;
@@ -2859,6 +2861,7 @@
     $("#cr-risky").addEventListener("change", (e) => { cr.risky = e.target.checked; saveCr(); if (cr.cat) buildCraft(); });
     /* the mount only changes the loops, so no new prices are needed */
     $("#cr-mount").addEventListener("change", (e) => { cr.mount = e.target.value; saveCr(); if (crLast) drawCraft(); });
+    $("#cr-mammoth").addEventListener("change", (e) => { cr.mammoth = e.target.checked; $("#cr-mount").disabled = cr.mammoth; saveCr(); if (crLast) drawCraft(); });
     $("#cr-go").addEventListener("click", () => { if (!cr.cat) { $("#cr-cat").focus(); $("#cr-time").textContent = "Choose a category first."; return; } ABP.api.clearCache(); buildCraft(); });
     if (cr.cat) buildCraft();
   }
@@ -3019,7 +3022,7 @@
       </tbody></table></div>
       <p class="small muted">Premium refills 10,000 focus a day. At 100/100 the same focus makes ${(1 / Math.pow(0.5, 3.1)).toFixed(1)} times as many focus crafts; crafts without focus don't change with spec, except for quality.</p>` : ""}</section>`);
 
-    const mount = C.MOUNTS.find((m) => m.id === cr.mount) || C.MOUNTS[0];
+    const mount = crMount();
     sec.push(`<section class="box stack" id="cr-loop"><h3>Daily loop, city by city</h3>
       ${loopsHtml(A, mount)}</section>`);
 
@@ -3046,7 +3049,7 @@
     out.innerHTML = sec.join("");
     wire();
     $$("#cr-loop [data-expand]").forEach((b) => b.addEventListener("click", () => {
-      const mount = C.MOUNTS.find((m) => m.id === cr.mount) || C.MOUNTS[0];
+      const mount = crMount();
       const k = `${cr.cat}|${(cr.lines || {})[cr.cat] || ""}|${b.dataset.expand}|${mount.id}`;
       cr.expanded = Object.assign({}, cr.expanded, { [k]: b.dataset.on === "1" });
       saveCr();
@@ -3067,10 +3070,12 @@
     const sel = (cr.lines || {})[cr.cat] || "";
     const exKey = (i) => `${cr.cat}|${sel}|${i}|${mount.id}`;
     const F = crLast.full;
+    /* with a Mammoth weight stops being the limit, so every loop is filled as far as profit and the markets allow */
+    const auto = mount.id === C.MAMMOTH.id;
     const done = A.stages.map((S, i) => {
       const P = S.royal;
       if (!P.rows.length) return { S, i, M: null };
-      if ((cr.expanded || {})[exKey(i)] && F) {
+      if ((auto || (cr.expanded || {})[exKey(i)]) && F) {
         const E = F.expand(P, i, mount.kg);
         const base = A.loop(P, mount.kg);
         return { S, i, M: F.loop(E.P, mount.kg), O: F.loop(E.P, other.kg), E, base };
@@ -3098,8 +3103,8 @@
         for (const x of E.added) byKey.set(x.key, (byKey.get(x.key) || 0) + x.units);
         const grouped = [...byKey].sort((a, b) => b[1] - a[1]);
         const names = grouped.slice(0, 5).map(([k, u]) => `${full(u)} ${L(k)}`).concat(grouped.length > 5 ? [`${grouped.length - 5} more items`] : []);
-        expandHtml = `<div class="notice"><p class="small"><strong>Expanded:</strong> ${names.length ? `added ${and(names)}, each sold where the table below says` : "nothing more pays at a volume the markets can take"}. The mount now carries ${pct(use, 0)} of its limit${E.full ? "" : `; the rest would mean selling more than each market's safe daily amount`}. This spends about ${fmt(M.tot.spend - base.tot.spend)} more a day and keeps about <strong>${fmt(M.tot.keep - base.tot.keep)}</strong> more.</p>
-          <button type="button" class="btn ghost" data-expand="${i}" data-on="0">Back to the normal loop</button></div>`;
+        expandHtml = `<div class="notice"><p class="small"><strong>${auto ? "Filled for the Mammoth" : "Expanded"}:</strong> ${names.length ? `added ${and(names)}, each sold where the table below says` : "nothing more pays at a volume the markets can take"}. The mount now carries ${pct(use, 0)} of its limit${E.full ? "" : auto ? ". It stops there because anything more would sell past a market's safe daily amount or add no profit" : `; the rest would mean selling more than each market's safe daily amount`}. This spends about ${fmt(M.tot.spend - base.tot.spend)} more a day and keeps about <strong>${fmt(M.tot.keep - base.tot.keep)}</strong> more.</p>
+          ${auto ? "" : `<button type="button" class="btn ghost" data-expand="${i}" data-on="0">Back to the normal loop</button>`}</div>`;
       } else if (M.fits && M.order.length > 1 && use < 0.9) {
         expandHtml = `<div class="row"><button type="button" class="btn" data-expand="${i}" data-on="1">Expand this loop</button><span class="small muted">It uses only ${pct(use, 0)} of your mount. Expanding adds more ${esc(A.label.toLowerCase())} this stage can craft, best silver per kilo first, until the mount is about 90% full.</span></div>`;
       }
@@ -3146,7 +3151,7 @@
     if (!any.length) return `<p class="muted">Nothing pays at any stage.</p>`;
     const refiningCity = [...new Set(A.refine.map((x) => x.res.city))];
     return `
-      <p>Do the stops in this order every day, through blue and yellow zones only. Each stage has its own loop, sized so every leg fits on your ${esc(mount.name)} (${full(mount.kg)} kg), with no Transport Mammoth. Change the mount at the top to resize them. Prices: aim for the target, never cross the limit. The <strong>Silver</strong> row closing each stop is what you spend or earn there, at last week's prices after market fees.</p>
+      <p>Do the stops in this order every day, through blue and yellow zones only. Each stage has its own loop, sized so every leg fits on your ${esc(mount.name)} (${full(mount.kg)} kg)${auto ? `. The Mammoth won't be full: each loop carries as much as still adds profit without selling past any market's safe daily amount` : `, with no Transport Mammoth. Change the mount at the top to resize them`}. Prices: aim for the target, never cross the limit. The <strong>Silver</strong> row closing each stop is what you spend or earn there, at last week's prices after market fees.</p>
       ${done.map(stageHtml).join("")}
       <h4>Mounts and weight</h4>
       <div class="table-wrap"><table><thead><tr><th>Stage</th><th>Heaviest leg</th><th>${esc(mount.name)}</th><th>${esc(other.name)}</th><th>Refining saves a day</th></tr></thead><tbody>
