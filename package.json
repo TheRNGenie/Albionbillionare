@@ -1,0 +1,61 @@
+{
+  "name": "albion-billionaire",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Albion Billionaire: a year-long plan to 1 billion silver, as a web app, an Android app and a Windows app.",
+  "scripts": {
+    "build:web": "node tools/build-web.mjs",
+    "android:sync": "npm run build:web && npx cap sync android",
+    "desktop": "npm run build:web && electron .",
+    "desktop:win": "npm run build:web && electron-builder --win portable nsis --publish never"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/filesystem": "^8.0.0",
+    "@capacitor/local-notifications": "^8.0.0",
+    "@capacitor/share": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^8.0.0",
+    "electron": "^44.8.0",
+    "electron-builder": "^26.15.3"
+  },
+  "main": "desktop/main.js",
+  "author": "TheRNGenie",
+  "build": {
+    "appId": "com.therngenie.albionbillionaire",
+    "productName": "Albion Billionaire",
+    "files": [
+      "desktop/**",
+      "www/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "icon": "desktop/icon.png",
+    "publish": null,
+    "win": {
+      "target": [
+        "portable",
+        "nsis"
+      ],
+      "icon": "desktop/icon.png"
+    },
+    "portable": {
+      "artifactName": "Albion-Billionaire-portable.exe"
+    },
+    "nsis": {
+      "artifactName": "Albion-Billionaire-Setup.exe",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "electronLanguages": [
+      "en-US"
+    ],
+    "compression": "maximum"
+  }
+}

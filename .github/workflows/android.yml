@@ -1,0 +1,83 @@
+name: Android APK
+
+# Builds the Android app (a Capacitor wrapper around this web app) and publishes the APK
+# as a GitHub release, so the newest build is always at releases/latest.
+on:
+  push:
+    branches: [main, claude/albion-billionaire-app]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # GitHub's Ubuntu runners ship the Android SDK.
+      - name: Check Android SDK
+        run: echo "ANDROID_HOME=$ANDROID_HOME" && ls "$ANDROID_HOME"
+
+      - name: Install
+        run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+      - name: Build the web app and the Android project
+        run: |
+          npm run build:web
+          npx cap add android
+          npx @capacitor/assets generate --android --assetPath resources \
+            --iconBackgroundColor '#15100b' --iconBackgroundColorDark '#15100b' \
+            --splashBackgroundColor '#15100b' --splashBackgroundColorDark '#15100b'
+          npx cap sync android
+
+      - name: Version the build
+        run: |
+          sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"1.0.${{ github.run_number }}\"/" android/app/build.gradle
+          grep -n "versionCode\|versionName" android/app/build.gradle
+
+      # Every build is signed with the same key so a new APK installs over the old one and keeps your data.
+      - name: Use the app's signing key
+        run: mkdir -p ~/.android && cp tools/android-debug.keystore ~/.android/debug.keystore
+
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Collect APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk albion-billionaire.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: albion-billionaire-apk
+          path: albion-billionaire.apk
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-build-${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          name: Albion Billionaire for Android, build ${{ github.run_number }}
+          make_latest: true
+          files: albion-billionaire.apk
+          body: |
+            Install on your phone: download albion-billionaire.apk, open it, and allow installing from your browser or files app when Android asks.
+            Each new build installs over the last one and keeps your data.
+            Built from ${{ github.sha }}.
