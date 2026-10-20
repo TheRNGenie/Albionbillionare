@@ -76,7 +76,7 @@ ABP.crafting = (() => {
     return { items: keys, mats: [...mats] };
   }
 
-  function analyse({ R, keys, hist, catKey, budgets = [5e6, 20e6], tiers = [8, 8, 8], focus = 10000, risky = false, now = Date.now() }) {
+  function analyse({ R, keys, hist, catKey, budgets = [5e6, 20e6], tiers = [8, 8, 8], focus = 10000, risky = false, noCap = false, now = Date.now() }) {
     const F = ABP.FEES, RET = ABP.RETURN;
     const stats = new Map();
     function stat(id, city) {
@@ -142,7 +142,9 @@ ABP.crafting = (() => {
           const price = st.w[0].price;
           const profitNo = netOf(price, city) - e.cost0, profitF = e.fb > 0 ? netOf(price, city) - e.costF : profitNo;
           const sd = ABP.advisor.safeDaily(st.pts, { margin: profitNo / price });
-          const cap = sd.ok ? sd.safe : 0;
+          /* safe daily amount by default; with the limit off, a whole normal day's sales in that city (you still
+             can't sell more than the market buys) */
+          const cap = noCap ? st.perDay : sd.ok ? sd.safe : 0;
           if (cap < 1) continue;
           out.push({ key, city, price, cap, profitNo, profitF, e, st, sd });
         }
@@ -472,7 +474,7 @@ ABP.crafting = (() => {
       return { m, city: b.city, last: b.price, med: st?.med, lo: st?.lo, hi: st?.hi, max, noRet: [...sheetKeys.values()].some((x) => x.e.lines.find((y) => y.m === m)?.noRet) };
     }).filter(Boolean).sort((a, b) => (b.last || 0) - (a.last || 0));
 
-    return { catKey, label: CATS.find((c) => c.key === catKey)?.label, keys, priced, noSales, ranked, stages, focusOnlyTiers, refine, ownPrice, shopping, loop, expand, sells, buys, kgOf, craftPlace, risky, focus, feeOf, now };
+    return { noCap, catKey, label: CATS.find((c) => c.key === catKey)?.label, keys, priced, noSales, ranked, stages, focusOnlyTiers, refine, ownPrice, shopping, loop, expand, sells, buys, kgOf, craftPlace, risky, focus, feeOf, now };
   }
 
   return { CATS, ROYAL, RISKY, RING, MOUNTS, MAMMOTH, STATION, DAYS, MAX_ITEMS, items, idsFor, analyse, tierOf, enchOf, baseOf, refinedRes };

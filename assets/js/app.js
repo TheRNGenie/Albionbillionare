@@ -2847,6 +2847,7 @@
         <div class="row"><button class="btn" id="cr-go">Build plan</button>
           <label class="toggle"><input type="checkbox" id="cr-risky" ${cr.risky ? "checked" : ""}><span>Also sell in Caerleon and the Black Market</span></label>
           <label class="toggle"><input type="checkbox" id="cr-mammoth" ${cr.mammoth ? "checked" : ""}><span>I have a T8 Transport Mammoth</span></label>
+          <label class="toggle"><input type="checkbox" id="cr-nocap" ${cr.noCap ? "checked" : ""}><span>Remove the safe daily sell limit</span></label>
           <span class="small muted" id="cr-time"></span></div>
       </div>
       <div id="cr-out" class="stack cr-report"></div>`;
@@ -2861,6 +2862,7 @@
     $("#cr-risky").addEventListener("change", (e) => { cr.risky = e.target.checked; saveCr(); if (cr.cat) buildCraft(); });
     /* the mount only changes the loops, so no new prices are needed */
     $("#cr-mount").addEventListener("change", (e) => { cr.mount = e.target.value; saveCr(); if (crLast) drawCraft(); });
+    $("#cr-nocap").addEventListener("change", (e) => { cr.noCap = e.target.checked; saveCr(); if (cr.cat) buildCraft(); });
     $("#cr-mammoth").addEventListener("change", (e) => { cr.mammoth = e.target.checked; $("#cr-mount").disabled = cr.mammoth; saveCr(); if (crLast) drawCraft(); });
     $("#cr-go").addEventListener("click", () => { if (!cr.cat) { $("#cr-cat").focus(); $("#cr-time").textContent = "Choose a category first."; return; } ABP.api.clearCache(); buildCraft(); });
     if (cr.cat) buildCraft();
@@ -2882,7 +2884,7 @@
       ]);
       if (gen !== crGen) return;
       const hist = Object.assign({}, hm, hi);
-      const run = (ks) => C.analyse({ R, keys: ks, hist, catKey: cr.cat, budgets: [cr.b1, cr.b2], tiers: cr.tiers, risky: cr.risky });
+      const run = (ks) => C.analyse({ R, keys: ks, hist, catKey: cr.cat, budgets: [cr.b1, cr.b2], tiers: cr.tiers, risky: cr.risky, noCap: !!cr.noCap });
       /* each item line (Mercenary Jacket, Claymore, ...) on its own, best first; the mix plans only the top 4 */
       const lines = linesOf(keys).map((ln) => ({ ...ln, A: run(ln.keys) })).sort((a, b) => b.A.stages[1].royal.med - a.A.stages[1].royal.med);
       const A = run(lines.filter((l) => l.A.stages[1].royal.med > 0).slice(0, MIX_LINES).flatMap((l) => l.keys));
@@ -2959,6 +2961,7 @@
     const sec = [picker];
     const tiers = top.slice(0, 4).map(tierOf);
     const tierList = tiers.length > 1 ? tiers.slice(0, -1).join(", ") + " and " + tiers[tiers.length - 1] : tiers[0];
+    if (A.noCap) sec.push(`<div class="notice err"><p><strong>The safe daily sell limit is off.</strong> Each item can now sell up to a whole normal day's sales in its city, not the cautious share that keeps the price steady. Selling that much will push prices down, so treat these profits as the best case and watch the price after each batch.</p></div>`);
     sec.push(`<section class="box stack" id="cr-pick">
       ${line ? `<h3>The pick: ${esc(line.name)}, ${tierList}</h3>
       <p>Craft ${esc(line.name)}s ${where}, and sell them in the royal cities. ${tiers.length > 1 ? "These tiers" : "This tier"} paid best of the ${A.priced.length} tiers and enchants up to T${crTop()}, priced from the last four weeks of daily trades.</p>`
@@ -3038,7 +3041,7 @@
       <p class="small muted">Prices are average traded prices of normal-quality items from the Albion Online Data Project. Max to pay is break-even against last week's price of the cheapest item in the plan that uses that material, with no focus. Place buy orders a little under last week's price and sell orders near it.</p></section>`);
 
     sec.push(`<section class="box stack"><h3>Risks and what is estimated</h3><ul>
-      <li>The biggest risk is flooding your own market. Stop listing an item once its safe daily amount is sold and move to the next one.</li>
+      <li>The biggest risk is flooding your own market. ${A.noCap ? "The safe daily limit is off, so the plan sells up to a full day's sales per item: expect lower prices than the targets, and stop listing an item when its price starts to slide." : "Stop listing an item once its safe daily amount is sold and move to the next one."}</li>
       <li>Prices drift. ${s2.weeks.length ? `Stage 2's daily profit ran from ${fmt(Math.min(...s2.weeks))} to ${fmt(Math.max(...s2.weeks))} across the last four weeks.` : ""} Rebuild this plan before each session; it uses fresh prices every time.</li>
       ${A.risky ? "<li>Caerleon and Black Market runs are full-loot trips through red zones. Carry only what you can afford to lose and use the loss budget under Tools; the royal-city plan never needs them.</li>" : ""}
       <li>Volumes are undercounted: the Data Project only sees trades its users record, and this plan counts normal quality only, so the safe amounts are cautious.</li>
