@@ -3,87 +3,76 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Albion Billionaire</title>
-<meta name="description" content="A year-long plan to reach 1 billion silver in Albion Online, with live market prices, profit calculators and a wiki reference.">
+<title>Albion Billionaire v2</title>
+<meta name="description" content="Albion Billionaire v2: market plays for Albion Online with calibrated profit ranges, a confidence score on every number, and a Monte Carlo road to one billion silver.">
+<meta name="theme-color" content="#0b0d10">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Alegreya+Sans:wght@400;500;700&display=swap">
-<link rel="stylesheet" href="assets/styles.css">
-<link rel="stylesheet" href="assets/matchups.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="assets/css/app.css">
+<link rel="stylesheet" href="assets/css/pages.css">
+<script>
+  /* Apply the saved theme before the first paint. */
+  try { var t = JSON.parse(localStorage.getItem("ab2.theme") || '"auto"'); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
 </head>
 <body>
-<header class="top">
-  <div class="wrap top-inner">
-    <div class="brand">
-      <span class="coin" aria-hidden="true"></span>
-      <div>
-        <h1>Albion Billionaire</h1>
-        <p class="sub">One billion silver in 365 days</p>
-        <p class="sub clock" id="clock" aria-live="off"></p>
+<a class="skip" href="#page">Skip to content</a>
+<div class="shell">
+  <aside class="side" aria-label="Main">
+    <a class="brand" href="#/command" aria-label="Albion Billionaire v2, home">
+      <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+        <defs><linearGradient id="bm-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6dc8a"/><stop offset="0.55" stop-color="#e2b350"/><stop offset="1" stop-color="#a8761c"/></linearGradient></defs>
+        <circle cx="20" cy="20" r="18" fill="url(#bm-g)"/>
+        <circle cx="20" cy="20" r="14.5" fill="none" stroke="#7a5414" stroke-opacity="0.55" stroke-width="1.2"/>
+        <path d="M11.5 25.5l-1-9 5.2 4 4.3-8 4.3 8 5.2-4-1 9z" fill="#5a3d0c" fill-opacity="0.85"/>
+        <path d="M11.5 28h17" stroke="#5a3d0c" stroke-opacity="0.85" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      <span class="brand-text"><span class="brand-name">Albion Billionaire <span class="v2">v2</span></span><span class="brand-sub">Silver, with error bars</span></span>
+    </a>
+    <nav class="nav" id="nav" aria-label="Sections"></nav>
+    <div class="side-foot" id="sideFoot"></div>
+  </aside>
+  <div class="main">
+    <header class="top">
+      <a class="top-brand" href="#/command" aria-label="Albion Billionaire v2, home"><svg viewBox="0 0 40 40" aria-hidden="true"><defs><linearGradient id="tb-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6dc8a"/><stop offset="0.55" stop-color="#e2b350"/><stop offset="1" stop-color="#a8761c"/></linearGradient></defs><circle cx="20" cy="20" r="18" fill="url(#tb-g)"/><circle cx="20" cy="20" r="14.5" fill="none" stroke="#7a5414" stroke-opacity="0.55" stroke-width="1.2"/><path d="M11.5 25.5l-1-9 5.2 4 4.3-8 4.3 8 5.2-4-1 9z" fill="#5a3d0c" fill-opacity="0.85"/><path d="M11.5 28h17" stroke="#5a3d0c" stroke-opacity="0.85" stroke-width="1.8" stroke-linecap="round"/></svg></a>
+      <div class="top-title" id="topTitle"></div>
+      <div class="spacer"></div>
+      <div class="search" role="search">
+        <span id="searchIcon"></span>
+        <input id="search" type="search" placeholder="Search any item: t6 bag, claymore, relic…" autocomplete="off" spellcheck="false" aria-label="Search items" aria-controls="searchList" aria-expanded="false">
+        <div class="search-list" id="searchList" role="listbox" hidden></div>
       </div>
-    </div>
-    <div class="goal" id="goalMeter" aria-live="polite"></div>
-  </div>
-  <nav class="tabs wrap" role="tablist" aria-label="Sections">
-    <button role="tab" data-tab="plan" id="tab-plan">Plan</button>
-    <button role="tab" data-tab="picks" id="tab-picks">Best picks</button>
-    <button role="tab" data-tab="crafting" id="tab-crafting">Crafting</button>
-    <button role="tab" data-tab="matchups" id="tab-matchups">Matchups</button>
-    <button role="tab" data-tab="methods" id="tab-methods">Methods</button>
-    <button role="tab" data-tab="market" id="tab-market">Market</button>
-    <button role="tab" data-tab="calc" id="tab-calc">Calculators</button>
-    <button role="tab" data-tab="wiki" id="tab-wiki">Wiki</button>
-    <button role="tab" data-tab="wealth" id="tab-wealth">Wealth</button>
-    <button role="tab" data-tab="progress" id="tab-progress">Progress</button>
-    <button role="tab" data-tab="tools" id="tab-tools">Tools</button>
-    <button role="tab" data-tab="times" id="tab-times">Times</button>
-    <button class="chip welcome-btn" id="refreshAll" type="button" title="Reload all prices and data">Refresh</button>
-    <button class="chip" id="paceOpen" type="button">Change of pace</button>
-    <button class="chip" id="wheelOpen" type="button">Spend real money?</button>
-    <button class="chip" id="welcomeOpen" type="button">Welcome</button>
-  </nav>
-</header>
-
-<main class="wrap">
-  <section class="panel" id="panel-plan" role="tabpanel" aria-labelledby="tab-plan"></section>
-  <section class="panel" id="panel-picks" role="tabpanel" aria-labelledby="tab-picks" hidden></section>
-  <section class="panel" id="panel-crafting" role="tabpanel" aria-labelledby="tab-crafting" hidden></section>
-  <section class="panel" id="panel-matchups" role="tabpanel" aria-labelledby="tab-matchups" hidden></section>
-  <section class="panel" id="panel-methods" role="tabpanel" aria-labelledby="tab-methods" hidden></section>
-  <section class="panel" id="panel-market" role="tabpanel" aria-labelledby="tab-market" hidden></section>
-  <section class="panel" id="panel-calc" role="tabpanel" aria-labelledby="tab-calc" hidden></section>
-  <section class="panel" id="panel-wiki" role="tabpanel" aria-labelledby="tab-wiki" hidden></section>
-  <section class="panel" id="panel-wealth" role="tabpanel" aria-labelledby="tab-wealth" hidden></section>
-  <section class="panel" id="panel-progress" role="tabpanel" aria-labelledby="tab-progress" hidden></section>
-  <section class="panel" id="panel-tools" role="tabpanel" aria-labelledby="tab-tools" hidden></section>
-  <section class="panel" id="panel-times" role="tabpanel" aria-labelledby="tab-times" hidden></section>
-</main>
-
-<footer class="wrap foot">
-  <p>Prices from the <a href="https://www.albion-online-data.com/" target="_blank" rel="noopener">Albion Online Data Project</a>. Item names from <a href="https://github.com/ao-data/ao-bin-dumps" target="_blank" rel="noopener">ao-bin-dumps</a>. Matchups and builds from <a href="https://murderledger.albiononline2d.com/" target="_blank" rel="noopener">Murder Ledger</a>. Income figures are estimates; check prices before you commit silver. Not affiliated with Sandbox Interactive.</p>
-</footer>
-
-<div class="welcome-back" id="wheel" role="dialog" aria-modal="true" aria-labelledby="wh-title" hidden>
-  <div class="welcome wheel-card">
-    <h2 id="wh-title">Should I spend real money?</h2>
-    <p class="small">One spin, one answer, then the wheel rests for 4 hours. It has 30 slices: 1 says YES, 29 say NO.</p>
-    <div class="wheel-wrap"><canvas id="wh-canvas" width="300" height="300" aria-hidden="true"></canvas><span class="wheel-pointer" aria-hidden="true"></span></div>
-    <p class="wheel-result" id="wh-result" aria-live="polite">&nbsp;</p>
-    <div class="row"><button class="btn" type="button" id="wh-spin">Spin</button><button class="btn ghost" type="button" id="wh-close">Close</button></div>
-    <p class="small" id="wh-wait" aria-live="polite"></p>
-    <p class="small" id="wh-tally"></p>
+      <button class="status-pill" type="button" id="statusPill" data-mode="loading" aria-live="polite"><span class="dot"></span><span class="sp-text">Starting</span></button>
+      <button class="icon-btn" type="button" id="refreshBtn" aria-label="Reload prices" title="Reload prices"></button>
+      <button class="icon-btn hide-sm" type="button" id="themeBtn" aria-label="Switch light or dark" title="Switch light or dark"></button>
+    </header>
+    <main id="page" class="page" tabindex="-1"></main>
   </div>
 </div>
-<div class="welcome-back" id="pace" role="dialog" aria-modal="true" aria-labelledby="pc-title" hidden>
-  <div class="welcome stack" id="pc-card"></div>
-</div>
-<div class="welcome-back" id="welcome" role="dialog" aria-modal="true" aria-labelledby="wl-title" hidden></div>
+<nav class="bottom-nav" id="bottomNav" aria-label="Sections"></nav>
+<div class="more-sheet" id="moreSheet" role="dialog" aria-label="More sections" hidden></div>
 
-<script src="assets/js/data.js"></script>
-<script src="assets/js/api.js"></script>
-<script src="assets/js/advisor.js"></script>
-<script src="assets/js/crafting.js"></script>
-<script src="assets/js/matchups.js"></script>
+<script src="assets/js/core/util.js"></script>
+<script src="assets/js/core/stats.js"></script>
+<script src="assets/js/core/store.js"></script>
+<script src="assets/js/core/catalog.js"></script>
+<script src="assets/js/core/api.js"></script>
+<script src="assets/js/core/confidence.js"></script>
+<script src="assets/js/charts/charts.js"></script>
+<script src="assets/js/ui.js"></script>
+<script src="assets/js/engine/market.js"></script>
+<script src="assets/js/engine/scanners.js"></script>
+<script src="assets/js/engine/sim.js"></script>
+<script src="assets/js/pages/detail.js"></script>
+<script src="assets/js/pages/command.js"></script>
+<script src="assets/js/pages/opps.js"></script>
+<script src="assets/js/pages/lab.js"></script>
+<script src="assets/js/pages/markets.js"></script>
+<script src="assets/js/pages/planner.js"></script>
+<script src="assets/js/pages/trust.js"></script>
+<script src="assets/js/pages/ledger.js"></script>
+<script src="assets/js/pages/settings.js"></script>
 <script src="assets/js/app.js"></script>
 </body>
 </html>
