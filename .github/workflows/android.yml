@@ -1,17 +1,20 @@
-name: Android APK
+name: Android APK (v2)
 
-# Builds the Android app (a Capacitor wrapper around this web app) and publishes the APK
-# as a GitHub release, so the newest build is always at releases/latest.
+# Builds Albion Billionaire v2 for Android (a Capacitor wrapper around this web app) and publishes the APK as a
+# GitHub release tagged v2-android-build-N. v2 has its own app id, so it installs next to the original app, and its
+# releases are never marked "latest", so the original app's download link keeps pointing at the original app.
+# Runs only when started by hand (Actions tab, "Run workflow"). GitHub offers that button only for workflows on the
+# repository's default branch, so to build straight from the v2 branch instead, add this under "on:":
+#   push:
+#     branches: [claude/project-thread-m3rrj0]
 on:
-  push:
-    branches: [main, claude/albion-billionaire-app]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: android-${{ github.ref }}
+  group: android-v2-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -44,13 +47,13 @@ jobs:
           npm run build:web
           npx cap add android
           npx @capacitor/assets generate --android --assetPath resources \
-            --iconBackgroundColor '#15100b' --iconBackgroundColorDark '#15100b' \
-            --splashBackgroundColor '#15100b' --splashBackgroundColorDark '#15100b'
+            --iconBackgroundColor '#0b0d10' --iconBackgroundColorDark '#0b0d10' \
+            --splashBackgroundColor '#0b0d10' --splashBackgroundColorDark '#0b0d10'
           npx cap sync android
 
       - name: Version the build
         run: |
-          sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"1.0.${{ github.run_number }}\"/" android/app/build.gradle
+          sed -i "s/versionCode 1$/versionCode ${{ github.run_number }}/; s/versionName \"1.0\"/versionName \"2.0.${{ github.run_number }}\"/" android/app/build.gradle
           grep -n "versionCode\|versionName" android/app/build.gradle
 
       # Every build is signed with the same key so a new APK installs over the old one and keeps your data.
@@ -62,22 +65,22 @@ jobs:
         run: ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Collect APK
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk albion-billionaire.apk
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk albion-billionaire-v2.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: albion-billionaire-apk
-          path: albion-billionaire.apk
+          name: albion-billionaire-v2-apk
+          path: albion-billionaire-v2.apk
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: android-build-${{ github.run_number }}
+          tag_name: v2-android-build-${{ github.run_number }}
           target_commitish: ${{ github.sha }}
-          name: Albion Billionaire for Android, build ${{ github.run_number }}
-          make_latest: true
-          files: albion-billionaire.apk
+          name: Albion Billionaire v2 for Android, build ${{ github.run_number }}
+          make_latest: false
+          files: albion-billionaire-v2.apk
           body: |
-            Install on your phone: download albion-billionaire.apk, open it, and allow installing from your browser or files app when Android asks.
-            Each new build installs over the last one and keeps your data.
+            Install on your phone: download albion-billionaire-v2.apk, open it, and allow installing from your browser or files app when Android asks.
+            Each new v2 build installs over the last one and keeps your data. It installs next to the original Albion Billionaire app; neither touches the other.
             Built from ${{ github.sha }}.

@@ -1,17 +1,21 @@
-name: Windows app
+name: Windows app (v2)
 
 # Builds the Windows desktop app (an Electron window around this web app) and attaches it to a GitHub release.
-# The app ships its own data files and only contacts GitHub when the player presses "Check for updates" (Tools tab).
+# The app ships its own data files and only contacts GitHub when the player presses "Check for updates" (Settings page).
+# v2 builds are tagged v2-windows-build-N and named Albion-Billionaire-v2-*.exe; the v2 app's update check looks only
+# at those, and the original app looks only at windows-build-N, so the two never mix.
+# Runs only when started by hand (Actions tab, "Run workflow"). GitHub offers that button only for workflows on the
+# repository's default branch, so to build straight from the v2 branch instead, add this under "on:":
+#   push:
+#     branches: [claude/project-thread-m3rrj0]
 on:
-  push:
-    branches: [main, claude/albion-billionaire-app]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: windows-${{ github.ref }}
+  group: windows-v2-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -30,7 +34,7 @@ jobs:
 
       - name: Version the build
         shell: bash
-        run: npm version "1.0.${{ github.run_number }}" --no-git-tag-version --allow-same-version
+        run: npm version "2.0.${{ github.run_number }}" --no-git-tag-version --allow-same-version
 
       - name: Build the Windows app
         run: npm run desktop:win
@@ -39,23 +43,23 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: albion-billionaire-windows
+          name: albion-billionaire-v2-windows
           path: |
-            dist/Albion-Billionaire-portable.exe
-            dist/Albion-Billionaire-Setup.exe
+            dist/Albion-Billionaire-v2-portable.exe
+            dist/Albion-Billionaire-v2-Setup.exe
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: windows-build-${{ github.run_number }}
+          tag_name: v2-windows-build-${{ github.run_number }}
           target_commitish: ${{ github.sha }}
-          name: Albion Billionaire for Windows, build ${{ github.run_number }}
+          name: Albion Billionaire v2 for Windows, build ${{ github.run_number }}
           make_latest: false
           files: |
-            dist/Albion-Billionaire-portable.exe
-            dist/Albion-Billionaire-Setup.exe
+            dist/Albion-Billionaire-v2-portable.exe
+            dist/Albion-Billionaire-v2-Setup.exe
           body: |
-            Albion-Billionaire-Setup.exe installs the app with a Start menu and desktop shortcut.
-            Albion-Billionaire-portable.exe runs without installing (handy on a USB stick); it starts a little slower.
+            Albion-Billionaire-v2-Setup.exe installs the app with a Start menu and desktop shortcut.
+            Albion-Billionaire-v2-portable.exe runs without installing (handy on a USB stick); it starts a little slower.
             Windows may say it "protected your PC" because the app isn't code-signed: click More info, then Run anyway.
             Built from ${{ github.sha }}.
