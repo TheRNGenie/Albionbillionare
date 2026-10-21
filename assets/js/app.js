@@ -28,6 +28,9 @@ AB.app = (() => {
     $("#themeBtn").innerHTML = icon(dark ? "sun" : "moon");
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.content = dark ? "#0b0d10" : "#f3f1ec";
+    /* The Android app draws under the status bar: light icons on the dark theme, dark icons on the light one. */
+    const bars = AB.util.nativePlugin("SystemBars");
+    if (bars) Promise.resolve().then(() => bars.setStyle({ style: dark ? "DARK" : "LIGHT" })).catch(() => {});
   }
   function toggleTheme() {
     const t = store.get("theme");

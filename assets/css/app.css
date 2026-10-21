@@ -74,12 +74,15 @@
 
 /* ---------- base ---------- */
 *, *::before, *::after { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+/* Where the app is drawn under the phone's status bar (the Android app on current WebViews, home-screen web apps),
+   the safe-area insets say how far: the page starts below the bar, and a band of page colour covers the bar on scroll. */
+html { -webkit-text-size-adjust: 100%; padding-top: env(safe-area-inset-top, 0px); }
 body {
   margin: 0; background: var(--page); color: var(--text-1);
   font: 14px/1.5 var(--font); letter-spacing: -0.003em;
-  -webkit-font-smoothing: antialiased; min-height: 100vh;
+  -webkit-font-smoothing: antialiased; min-height: calc(100vh - env(safe-area-inset-top, 0px));
 }
+body::before { content: ""; position: fixed; inset: 0 0 auto; z-index: 35; height: env(safe-area-inset-top, 0px); background: var(--page); pointer-events: none; }
 a { color: var(--gold); text-decoration: none; }
 a:hover { text-decoration: underline; }
 h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.015em; line-height: 1.25; }
@@ -101,9 +104,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* ---------- shell ---------- */
-.shell { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); min-height: 100vh; }
+.shell { display: grid; grid-template-columns: calc(var(--sidebar) + env(safe-area-inset-left, 0px)) minmax(0, 1fr); min-height: calc(100vh - env(safe-area-inset-top, 0px)); }
 .side {
-  position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 18px 14px;
+  position: sticky; top: env(safe-area-inset-top, 0px); height: calc(100vh - env(safe-area-inset-top, 0px)); overflow-y: auto;
+  padding: 18px 14px 18px calc(14px + env(safe-area-inset-left, 0px));
   border-right: 1px solid var(--line); background: var(--surface-1);
   display: flex; flex-direction: column; gap: 6px;
 }
@@ -127,8 +131,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .main { min-width: 0; display: flex; flex-direction: column; }
 .top {
-  position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 12px;
-  padding: 10px 24px; background: color-mix(in srgb, var(--page) 86%, transparent);
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 30; display: flex; align-items: center; gap: 12px;
+  padding: 10px max(24px, env(safe-area-inset-right, 0px)) 10px 24px; background: color-mix(in srgb, var(--page) 86%, transparent);
   backdrop-filter: saturate(1.2) blur(10px); -webkit-backdrop-filter: saturate(1.2) blur(10px);
   border-bottom: 1px solid var(--line);
 }
@@ -166,7 +170,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .icon-btn.spin svg { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.page { padding: 22px 24px 64px; width: 100%; max-width: 1480px; margin: 0 auto; }
+.page { padding: 22px max(24px, env(safe-area-inset-right, 0px)) 64px 24px; width: 100%; max-width: 1480px; margin: 0 auto; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 4px 0 18px; }
 .page-head h1 { font-size: 26px; }
 .page-head p { margin: 4px 0 0; color: var(--text-2); max-width: 760px; }
@@ -384,23 +388,23 @@ table.t th button:hover { color: var(--text-1); }
 .drawer-back { position: fixed; inset: 0; z-index: 60; background: var(--overlay); opacity: 0; transition: opacity 0.18s; }
 .drawer-back.on { opacity: 1; }
 .drawer {
-  position: fixed; top: 0; right: 0; bottom: 0; z-index: 61; width: min(760px, 100vw); background: var(--page);
+  position: fixed; top: env(safe-area-inset-top, 0px); right: 0; bottom: 0; z-index: 61; width: min(760px, 100vw); background: var(--page);
   border-left: 1px solid var(--line-2); box-shadow: -20px 0 50px rgba(0,0,0,0.35); overflow-y: auto;
   transform: translateX(24px); opacity: 0; transition: transform 0.2s ease, opacity 0.2s ease;
 }
 .drawer.on { transform: none; opacity: 1; }
-.drawer-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 14px 18px; background: color-mix(in srgb, var(--page) 90%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+.drawer-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 12px; padding: 14px max(18px, env(safe-area-inset-right, 0px)) 14px 18px; background: color-mix(in srgb, var(--page) 90%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
 .drawer-head .dh-text { flex: 1; min-width: 0; }
-.drawer-body { padding: 16px 18px 48px; display: flex; flex-direction: column; gap: 16px; }
+.drawer-body { padding: 16px max(18px, env(safe-area-inset-right, 0px)) calc(48px + env(safe-area-inset-bottom, 0px)) 18px; display: flex; flex-direction: column; gap: 16px; }
 
 /* ---------- toast ---------- */
-.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px); z-index: 120; background: var(--surface-3); color: var(--text-1); border: 1px solid var(--line-2); border-radius: 12px; padding: 10px 16px; box-shadow: var(--shadow); opacity: 0; transition: all 0.2s; font-size: 13px; max-width: calc(100vw - 32px); }
+.toast { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%) translateY(20px); z-index: 120; background: var(--surface-3); color: var(--text-1); border: 1px solid var(--line-2); border-radius: 12px; padding: 10px 16px; box-shadow: var(--shadow); opacity: 0; transition: all 0.2s; font-size: 13px; max-width: calc(100vw - 32px); }
 .toast.on { opacity: 1; transform: translateX(-50%); }
 
 /* ---------- loading ---------- */
 .skel { border-radius: 8px; background: linear-gradient(90deg, var(--surface-2), var(--surface-3), var(--surface-2)); background-size: 200% 100%; animation: shimmer 1.4s infinite; }
 @keyframes shimmer { to { background-position: -200% 0; } }
-.progress { height: 3px; position: fixed; left: 0; right: 0; top: 0; z-index: 200; pointer-events: none; }
+.progress { height: 3px; position: fixed; left: 0; right: 0; top: env(safe-area-inset-top, 0px); z-index: 200; pointer-events: none; }
 .progress i { display: block; height: 100%; width: 0; background: var(--gold); transition: width 0.3s ease; box-shadow: 0 0 8px var(--gold); }
 
 /* ---------- mobile navigation ---------- */
@@ -423,13 +427,14 @@ table.t th button:hover { color: var(--text-1); }
 @media (max-width: 680px) {
   .shell { grid-template-columns: 1fr; }
   .side { display: none; }
-  .top { padding: 8px 16px; gap: 8px; }
+  .top { padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px)); gap: 8px; }
   .top-title, .top .spacer { display: none; }
   .top-brand { display: block; }
   .search { width: auto; flex: 1; min-width: 0; }
   .status-pill .sp-text { display: none; }
   .status-pill { padding: 0 10px; }
-  .page { padding: 16px 16px 96px; }
+  .page { padding: 16px max(16px, env(safe-area-inset-right, 0px)) calc(96px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+  .toast { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
   .page-head h1 { font-size: 22px; }
   .grid { gap: 12px; }
   .span-3, .span-4, .span-6 { grid-column: span 12; }

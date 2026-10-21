@@ -129,10 +129,12 @@ AB.util = (() => {
     return jsonCache.get(path);
   }
 
+  /* A plugin of the Android app (Capacitor), or null in a browser and the Windows app. */
+  const isNative = () => !!window.Capacitor?.isNativePlatform?.();
+  const plugin = (n) => (isNative() ? window.Capacitor.Plugins?.[n] || window.Capacitor.registerPlugin?.(n) || null : null);
+
   /* Save text as a file: a normal download in browsers and the Windows app; in the Android app, where web downloads
      don't work, the file is written to the app's cache and handed to the share sheet. */
-  const isNative = () => !!window.Capacitor?.isNativePlatform?.();
-  const plugin = (n) => (isNative() ? window.Capacitor.Plugins?.[n] || window.Capacitor.registerPlugin?.(n) : null);
   async function saveFile(name, text, type = "application/json") {
     if (plugin("Filesystem") && plugin("Share")) {
       const res = await plugin("Filesystem").writeFile({ path: name, data: text, directory: "CACHE", encoding: "utf8" });
@@ -147,5 +149,5 @@ AB.util = (() => {
     return "downloaded";
   }
 
-  return { $, esc, clamp, sleep, debounce, raf, int, silver, pct, spct, H, D, parseUTC, ago, ageText, date, dateFull, month, monthYear, emitter, bus, icon, toast, progress, loadJSON, saveFile };
+  return { $, esc, clamp, sleep, debounce, raf, int, silver, pct, spct, H, D, parseUTC, ago, ageText, date, dateFull, month, monthYear, emitter, bus, icon, toast, progress, loadJSON, saveFile, nativePlugin: plugin };
 })();
