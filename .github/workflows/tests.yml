@@ -1,7 +1,7 @@
 name: Tests (v2)
 
-# Runs the v2 test suite (Node's built-in test runner, no packages to install) and the lint check on every push to
-# the v2 branch and on pull requests. It builds and publishes nothing.
+# Runs the v2 test suite (Node's built-in test runner; the page tests use jsdom, a simulated browser, from the
+# lockfile) and the lint check on every push to the v2 branch and on pull requests. It builds and publishes nothing.
 on:
   push:
     branches: [claude/project-thread-m3rrj0]
@@ -14,13 +14,20 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          cache: npm
+
+      - name: Install packages
+        run: npm ci
+        env:
+          # the tests never start Electron, so skip its 100 MB download
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
 
       - name: Tests
         run: npm test

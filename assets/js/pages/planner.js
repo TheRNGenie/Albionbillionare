@@ -71,20 +71,7 @@ AB.pages.planner = (() => {
       ui.onSeg(root, "min", (x) => { minScore = +x; AB.app.rerender(); });
       const off = store.on("change", (k) => { if (["netWorth", "goal", "deadline", "hours", "risk", "safeOnly"].includes(k)) AB.app.rerender(); });
 
-      /* fan */
-      const step = Math.max(1, Math.round(days / 150));
-      const idx = []; for (let d = 0; d <= days; d += step) idx.push(d); if (idx[idx.length - 1] !== days) idx.push(days);
-      const t = (d) => Date.now() + d * D;
-      ui.plot("p-fan", "line", {
-        height: 300, x: { type: "time" }, y: { min: 0 },
-        bands: [{ name: "80% of paths", color: "s1", opacity: 0.12, data: idx.map((d) => [t(d), res.fan[d][0], res.fan[d][4]]) }, { name: "Middle half", color: "s1", opacity: 0.24, data: idx.map((d) => [t(d), res.fan[d][1], res.fan[d][3]]) }],
-        series: [{ name: "Middle path", color: "s1", data: idx.map((d) => [t(d), res.fan[d][2]]) }],
-        hlines: [{ y: v.goal, label: `${silver(v.goal)} goal`, color: "var(--gold)" }],
-        tooltip: { title: (x) => dateFull(x) },
-      }, {
-        legend: [{ name: "Middle path", color: "s1", kind: "line" }, { name: "Middle half and 80% of paths", color: "s1", kind: "band" }, { name: "Goal", color: "var(--gold)", kind: "line" }],
-        table: { cols: ["Date", { label: "10%", r: true }, { label: "25%", r: true }, { label: "Middle", r: true }, { label: "75%", r: true }, { label: "90%", r: true }], rows: idx.filter((_, i) => i % 5 === 0).map((d) => [dateFull(t(d)), ...res.fan[d].map((x) => silver(x))]) },
-      });
+      kit.fanChart("p-fan", res, { goal: v.goal, height: 300 });
 
       /* bottlenecks by calendar month (a month label repeats only across a year boundary, so those carry the year) */
       const months = [], keyOf = (d) => { const x = new Date(Date.now() + d * D); return `${x.getUTCFullYear()}-${x.getUTCMonth()}`; };

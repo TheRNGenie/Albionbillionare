@@ -122,7 +122,12 @@ AB.kit = (() => {
     if (!M) return;
     const xs = AB.scan.samples(o, 2000).sort((a, b) => a - b);
     const legs = o.legs.filter((lg) => lg.id && lg.city);
-    const chartLegs = [legs.find((lg) => lg.role === "sell"), ...legs.filter((lg) => lg.role !== "sell").sort((a, b) => (pointCost(b) - pointCost(a)))].filter(Boolean).slice(0, 2);
+    /* the market you sell in, then the costliest market you buy in; one chart when they're the same market (a dip
+       or an order flip buys and sells the same item in the same city) */
+    const sellLeg = legs.find((lg) => lg.role === "sell");
+    const chartLegs = [sellLeg, ...legs.filter((lg) => lg.role !== "sell").sort((a, b) => (pointCost(b) - pointCost(a)))]
+      .filter((lg, i, a) => lg && a.findIndex((x) => x && x.id === lg.id && x.city === lg.city) === i).slice(0, 2);
+    const both = sellLeg && legs.some((lg) => lg.role !== "sell" && lg.id === sellLeg.id && lg.city === sellLeg.city);
     const kp = [
       ui.kpi({ label: `Profit, ${int(o.qty)} units`, value: esc(silver(o.total.p50, { sign: true })), range: `80%: ${esc(silver(o.total.p10))} to ${esc(silver(o.total.p90))}` }),
       ui.kpi({ label: "Per hour", value: esc(silver(o.perHour)), range: `${o.hours.toFixed(1)} h for the batch` }),
@@ -141,7 +146,7 @@ AB.kit = (() => {
       ${ui.chartCard({ id: "d-hist", title: "What could happen", sub: `2,000 simulated runs of this batch. Bars left of zero lose silver.`, height: 200 })}
       ${ui.card({ title: "Step by step", body: `<ol class="steps">${o.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` })}
       ${ui.card({ title: "What each price rests on", body: `<div class="legs">${legRows}</div>` })}
-      ${chartLegs.map((lg, i) => ui.chartCard({ id: `d-leg${i}`, title: `${cat.label(lg.id)} in ${lg.city}`, sub: lg.role === "sell" ? "Where you sell: four weeks of daily sales and the calibrated range for the next week." : "Where you buy: four weeks of daily sales and the calibrated range for the next week.", height: 220 })).join("")}
+      ${chartLegs.map((lg, i) => ui.chartCard({ id: `d-leg${i}`, title: `${cat.label(lg.id)} in ${lg.city}`, sub: `${lg.role !== "sell" ? "Where you buy" : both ? "Where you buy and sell" : "Where you sell"}: four weeks of daily sales and the calibrated range for the next week.`, height: 220 })).join("")}
       ${evidenceCard(o)}
       <div class="row"><button class="btn primary" type="button" data-log>${icon("plus")}Log this trade</button><a class="btn" href="#/markets/${encodeURIComponent(o.item)}">${icon("chart")}Open ${esc(cat.shortName(o.item))} in Markets</a></div>
       <p class="small muted">Not included: station fees for crafting, refining and enchanting, travel risk beyond what the zone tag says, and buy or sell orders filling at a different price than listed. Check the order book in game before you commit.</p>`;
@@ -245,11 +250,39 @@ AB.kit = (() => {
         <label class="field"><span>Note (optional)</span><input class="input" name="note" type="text" maxlength="140" placeholder="e.g. bought 3 below the listing"></label>`,
       onOk: (fd) => {
         const qty = Math.max(1, +fd.get("qty") || o.qty), k = qty / o.qty;
-        AB.store.addTrade({ key: o.key, title: o.title, kind: o.kind, item: o.item, qty, cost: +fd.get("cost") || o.capital, note: String(fd.get("note") || "").slice(0, 140), pred: { p10: o.total.p10 * k, p50: o.total.p50 * k, p90: o.total.p90 * k }, score: o.score, result: null });
+        /* an empty field means the plan's capital; 0 is a real answer (items you already owned) */
+        const spent = String(fd.get("cost") ?? "").trim(), cost = spent === "" || !(+spent >= 0) ? o.capital : +spent;
+        AB.store.addTrade({ key: o.key, title: o.title, kind: o.kind, item: o.item, qty, cost, note: String(fd.get("note") || "").slice(0, 140), pred: { p10: o.total.p10 * k, p50: o.total.p50 * k, p90: o.total.p90 * k }, score: o.score, result: null });
         AB.util.toast("Logged. Add the result on the Ledger page when it's done.");
       },
     });
   }
 
-  return { head, waiting, modeBanner, kindTag, zoneTag, LIMIT, ic, scaleOf, oppRow, oppHead, pickRow, wireOpps, gauge, verdict, priceSpec, openOpp, plotHist };
+  /* The road to the goal as a fan of net worth: the middle path, the middle half and 80% of the simulated paths,
+     and the goal line. Command and Planner draw it from the same forecast. */
+  function fanChart(id, res, { goal, height }) {
+    const days = res.days, step = Math.max(1, Math.round(days / 150));
+    const idx = [];
+    for (let d = 0; d <= days; d += step) idx.push(d);
+    if (idx[idx.length - 1] !== days) idx.push(days);
+    const t = (d) => Date.now() + d * D;
+    ui.plot(id, "line", {
+      label: "Net worth paths", height, x: { type: "time" }, y: { fmt: (v) => silver(v), min: 0 },
+      bands: [
+        { name: "80% of paths", color: "s1", opacity: 0.12, data: idx.map((d) => [t(d), res.fan[d][0], res.fan[d][4]]) },
+        { name: "Middle half", color: "s1", opacity: 0.24, data: idx.map((d) => [t(d), res.fan[d][1], res.fan[d][3]]) },
+      ],
+      series: [{ name: "Middle path", color: "s1", data: idx.map((d) => [t(d), res.fan[d][2]]) }],
+      hlines: [{ y: goal, label: `${silver(goal)} goal`, color: "var(--gold)" }],
+      tooltip: { title: (x) => dateFull(x) },
+    }, {
+      legend: [{ name: "Middle path", color: "s1", kind: "line" }, { name: "Middle half and 80% of paths", color: "s1", kind: "band" }, { name: "Goal", color: "var(--gold)", kind: "line" }],
+      table: { cols: ["Date", { label: "10%", r: true }, { label: "25%", r: true }, { label: "Middle", r: true }, { label: "75%", r: true }, { label: "90%", r: true }], rows: idx.filter((_, i) => i % 5 === 0).map((d) => [dateFull(t(d)), ...res.fan[d].map((v) => silver(v))]) },
+    });
+  }
+
+  /* What a restored backup says, given how many of its parts (settings, or the ledger) were refused. */
+  const restored = (refused) => (refused ? `Backup restored. ${refused} part${refused === 1 ? " wasn't" : "s weren't"} valid, so ${refused === 1 ? "that part keeps" : "those keep"} what you had.` : "Backup restored.");
+
+  return { head, waiting, modeBanner, kindTag, zoneTag, LIMIT, ic, scaleOf, oppRow, oppHead, pickRow, wireOpps, gauge, verdict, priceSpec, openOpp, plotHist, fanChart, restored };
 })();

@@ -31,9 +31,18 @@ AB.api = (() => {
       get: (k) => tx("readonly", (s) => s.get(k)).catch(() => undefined),
       set: (k, v) => tx("readwrite", (s) => s.put(v, k)).catch(() => undefined),
       clear: () => tx("readwrite", (s) => s.clear()).catch(() => undefined),
+      /* Drop copies saved before `cut`. History addresses carry the date, so each day writes new keys. */
+      prune: (cut) => tx("readwrite", (s) => {
+        const cur = s.openCursor();
+        cur.onsuccess = () => { const c = cur.result; if (!c) return; if (!(c.value?.t > cut)) c.delete(); c.continue(); };
+        return null;
+      }).catch(() => undefined),
     };
   })();
   const mem = new Map();
+  /* Older than any cache time below, so nothing pruned could still have been used. Once per session. */
+  const KEEP = 24 * 36e5;
+  let pruned = false;
 
   /* ---------- request queue: 6 at a time, identical requests shared, one retry on rate limit ---------- */
   let active = 0;
@@ -63,6 +72,7 @@ AB.api = (() => {
   /* Cached GET: a copy younger than ttl from memory or IndexedDB, else one request (shared by identical callers). */
   async function getJSON(url, ttl) {
     const now = Date.now();
+    if (!pruned) { pruned = true; idb.prune(now - KEEP); }
     const m = mem.get(url);
     if (m && now - m.t < ttl) return m.v;
     if (!m) {
@@ -121,6 +131,8 @@ AB.api = (() => {
     return mode;
   }
   function setMode(m, w) { const changed = m !== mode; mode = m; why = w; if (changed) ev.emit("mode", m); }
+  /* The live server failed partway through a load: finish that load on the snapshot. */
+  async function fallback(w) { await loadSnap(); setMode("snapshot", w); }
 
   /* ---------- the calls the app uses ---------- */
   /* Current orders: [{id, city, quality, sell, sellDate, buy, buyDate, src}] */
@@ -205,7 +217,7 @@ AB.api = (() => {
   async function clear() { mem.clear(); await idb.clear(); }
 
   return {
-    probe, prices, index, daily, hourly, gold, clear, loadSnap, snapshotInfo, host,
+    probe, fallback, prices, index, daily, hourly, gold, clear, loadSnap, snapshotInfo, host,
     on: (e, fn) => ev.on(e, fn),
     get mode() { return mode; }, get why() { return why; }, get calls() { return calls; },
   };

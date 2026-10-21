@@ -62,10 +62,12 @@ AB.app = (() => {
     document.querySelectorAll("[data-route]").forEach((a) => (a.dataset.route === id ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
   }
 
+  /* A hand-typed or cut-off link can hold a broken escape (a stray %): keep that part as typed instead of failing. */
+  const decode = (s) => { try { return decodeURIComponent(s); } catch (e) { return s; } };
   function parseHash() {
     const h = location.hash.replace(/^#\/?/, "");
     const [path, query = ""] = h.split("?");
-    const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
+    const parts = path.split("/").filter(Boolean).map(decode);
     const q = Object.fromEntries(new URLSearchParams(query));
     return { id: AB.pages[parts[0]] ? parts[0] : "command", args: parts.slice(1), q };
   }
@@ -80,8 +82,11 @@ AB.app = (() => {
     markNav(id);
     $("#topTitle").textContent = page.title;
     document.title = `${page.title} · Albion Billionaire v2`;
-    const root = $("#page");
-    root.innerHTML = "";
+    /* Each render gets a fresh, empty page element. Pages attach their click and change handlers to it, so those
+       leave with the old element instead of piling up on one that every page shares. */
+    const old = $("#page");
+    const root = old.cloneNode(false);
+    old.replaceWith(root);
     root.dataset.page = id;
     try { cleanup = page.render(root, { args, q }) || null; }
     catch (e) { console.error(e); root.innerHTML = `<div class="banner warn">${icon("alert")}<div class="b-body"><div class="b-title">This page hit a problem</div><div class="small">${esc(e.message)}</div></div></div>`; }
@@ -113,33 +118,48 @@ AB.app = (() => {
   }
 
   /* ---------- data ---------- */
+  /* One load at a time. A reload asked for during a load runs right after it; a change of server or data source
+     during a load (see `invalidate`) also throws away what that load was gathering, since it may mix the two. */
+  let again = null, wanted = 0;
+  function invalidate() { wanted++; AB.market.reset(); }
   async function refresh({ quiet = false } = {}) {
-    if (AB.state.loading) return;
+    if (AB.state.loading) { again = { quiet: quiet && (again ? again.quiet : true) }; return; }
     AB.state.loading = true;
     AB.state.error = null;
+    const gen = wanted;
+    let applied = false;
     const btn = $("#refreshBtn");
     btn.classList.add("spin");
     setStatus("loading", "Loading");
     progress(0.04);
     try {
       const M = await AB.market.load({ onStep: (msg, f) => { progress(f); setStatus("loading", msg); } });
+      if (gen !== wanted) { again = again || { quiet: true }; return; }
       AB.state.M = M;
       AB.state.R = AB.scan.run(M);
+      applied = true;
       progress(1);
       setStatus(M.mode, statusText(M));
       if (!quiet) toast(M.live ? `Live prices loaded: ${AB.state.R.opps.length} plays scored.` : `Using the saved snapshot: ${AB.state.R.opps.length} plays scored.`);
     } catch (e) {
+      if (gen !== wanted) { again = again || { quiet: true }; return; }
       console.error(e);
       AB.state.error = e;
+      applied = true;
       progress(1);
       setStatus("snapshot", "No data");
       toast(e.message || "Couldn't load prices.");
     } finally {
       AB.state.loading = false;
       btn.classList.remove("spin");
-      sideFoot();
-      AB.util.bus.emit("data");
-      rerender();
+      if (applied) {
+        sideFoot();
+        AB.util.bus.emit("data");
+        rerender();
+      }
+      const next = again;
+      again = null;
+      if (next) refresh(next);
     }
   }
   /* Settings that change the numbers (premium, capital, focus) re-score without reloading prices. */
@@ -194,12 +214,12 @@ AB.app = (() => {
     matchMedia("(prefers-color-scheme: light)").addEventListener?.("change", () => { applyTheme(); if (store.get("theme") === "auto") rerender(); });
     store.on("change", (k) => {
       if (["premium", "capital", "focus", "refineSpec", "mountKg"].includes(k)) rescore();
-      if (["server", "dataMode"].includes(k)) { AB.market.reset(); AB.api.clear().then(() => refresh()); }
+      if (["server", "dataMode"].includes(k)) { invalidate(); AB.api.clear().then(() => refresh()); }
       sideFoot();
     });
     window.addEventListener("hashchange", route);
     sideFoot();
-    route();
+    try { route(); } catch (e) { console.error(e); } // a page that fails to draw must not stop the data loading
     try { await Promise.all([AB.cat.ready(), AB.conf.ready()]); }
     catch (e) {
       $("#page").insertAdjacentHTML("afterbegin", `<div class="banner warn">${icon("alert")}<div class="b-body"><div class="b-title">The app's data files didn't load</div><div class="small">${esc(e.message)}. Reload the page to try again.</div></div></div>`);

@@ -24,22 +24,54 @@ AB.store = (() => {
   const read = (k) => { try { const v = localStorage.getItem(NS + k); return v == null ? undefined : JSON.parse(v); } catch (e) { return undefined; } };
   const write = (k, v) => { try { localStorage.setItem(NS + k, JSON.stringify(v)); return true; } catch (e) { return false; } };
 
+  /* What each setting may hold. Values come from this browser's storage and from backup files, which anyone can
+     edit, and some are printed into pages, so each one is checked: numbers are clamped into a sane range, choices
+     must be one of the options, and anything else (undefined) is refused and keeps the current value. */
+  const clampTo = (lo, hi) => (v) => (typeof v === "number" && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : undefined);
+  const oneOf = (...xs) => (v) => (xs.includes(v) ? v : undefined);
+  const bool = (v) => (typeof v === "boolean" ? v : undefined);
+  const { isItem } = AB.util;
+  const SILVER = clampTo(0, 1e13);
+  const CHECK = {
+    server: oneOf("west", "europe", "east"),
+    premium: bool,
+    theme: oneOf("auto", "light", "dark"),
+    dataMode: oneOf("auto", "live", "snapshot"),
+    safeOnly: bool,
+    goal: clampTo(1e6, 1e13),
+    netWorth: SILVER,
+    capital: SILVER,
+    hours: clampTo(0.5, 24),
+    deadline: (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && isFinite(Date.parse(v + "T00:00:00Z")) ? v : undefined),
+    focus: clampTo(0, 1e6),
+    mountKg: clampTo(0, 1e5),
+    refineSpec: (v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(DEFAULTS.refineSpec).map((r) => [r, clampTo(0, 60000)(v[r]) ?? 0])) : undefined),
+    watch: (v) => (Array.isArray(v) ? [...new Set(v.filter(isItem))].slice(0, 60) : undefined),
+    risk: oneOf("cautious", "balanced", "bold"),
+  };
+  const clean = (k, v) => (v == null ? undefined : CHECK[k](v));
+
   const fresh = (k) => (k === "deadline" ? year() : JSON.parse(JSON.stringify(DEFAULTS[k])));
   const state = {};
   for (const k of Object.keys(DEFAULTS)) {
-    const v = read(k);
-    state[k] = v === undefined || v === null ? fresh(k) : v;
+    const v = clean(k, read(k));
+    state[k] = v === undefined ? fresh(k) : v;
   }
-  if (read("deadline") == null) write("deadline", state.deadline);
+  if (clean("deadline", read("deadline")) === undefined) write("deadline", state.deadline);
   const ev = AB.util.emitter();
 
   function get(k) { return state[k]; }
+  /* Returns false when the value isn't one the setting can hold (nothing changes then). */
   function set(k, v) {
-    if (JSON.stringify(state[k]) === JSON.stringify(v)) return; // unchanged: no re-score, no reload
-    state[k] = v;
-    write(k, v);
-    ev.emit("change", k, v);
-    ev.emit("change:" + k, v);
+    if (!(k in CHECK)) return false;
+    const c = clean(k, v);
+    if (c === undefined) return false;
+    if (JSON.stringify(state[k]) === JSON.stringify(c)) return true; // unchanged: no re-score, no reload
+    state[k] = c;
+    write(k, c);
+    ev.emit("change", k, c);
+    ev.emit("change:" + k, c);
+    return true;
   }
   const on = (e, fn) => ev.on(e, fn);
   /* Every setting back to its default (the deadline to a year from today); the watchlist and the ledger stay. */
@@ -49,30 +81,70 @@ AB.store = (() => {
   const setupFee = 0.025;
 
   /* ---------- ledger: net worth check-ins and logged sessions ---------- */
-  const ledger = read("ledger") || { worth: [], trades: [] };
+  /* The same care for the ledger: known fields only, numbers finite, text cut to length. */
+  const fin = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+  const text = (v, n) => (typeof v === "string" ? v.slice(0, n) : "");
+  function cleanLedger(j) {
+    const worth = (Array.isArray(j?.worth) ? j.worth : [])
+      .map((w) => ({ t: fin(w?.t), v: fin(w?.v) }))
+      .filter((w) => w.t != null && w.v != null && w.v >= 0)
+      .sort((a, b) => a.t - b.t);
+    const trades = (Array.isArray(j?.trades) ? j.trades : []).filter((x) => x && typeof x === "object").map((x) => {
+      const p = x.pred && typeof x.pred === "object" ? { p10: fin(x.pred.p10), p50: fin(x.pred.p50), p90: fin(x.pred.p90) } : null;
+      return {
+        t: fin(x.t) ?? Date.now(), key: text(x.key, 300), title: text(x.title, 200), kind: text(x.kind, 24), item: isItem(x.item) ? x.item : "",
+        qty: Math.max(0, fin(x.qty) ?? 0), cost: Math.max(0, fin(x.cost) ?? 0), note: text(x.note, 140),
+        pred: p && p.p10 != null && p.p50 != null && p.p90 != null ? p : null, score: fin(x.score), result: fin(x.result),
+      };
+    });
+    return { worth, trades };
+  }
+  const ledger = cleanLedger(read("ledger"));
   function saveLedger() { write("ledger", ledger); ev.emit("ledger"); }
+  /* Returns false for a value or date that can't be a check-in (nothing is saved then). */
   function addWorth(v, t = Date.now()) {
-    ledger.worth.push({ t, v: +v });
+    v = +v;
+    if (!(isFinite(v) && v >= 0 && isFinite(t))) return false;
+    v = Math.min(v, 1e13);
+    ledger.worth.push({ t, v });
     ledger.worth.sort((a, b) => a.t - b.t);
     saveLedger();
     /* a back-dated check-in fills in history; only the newest one is your net worth now */
-    if (ledger.worth[ledger.worth.length - 1].t === t) set("netWorth", +v);
+    if (ledger.worth[ledger.worth.length - 1].t === t) set("netWorth", v);
+    return true;
   }
   function addTrade(x) { ledger.trades.unshift({ t: Date.now(), ...x }); saveLedger(); }
   function removeTrade(i) { ledger.trades.splice(i, 1); saveLedger(); }
-  function updateTrade(i, patch) { if (ledger.trades[i]) { Object.assign(ledger.trades[i], patch); saveLedger(); } }
+  function updateTrade(i, patch) {
+    if (!ledger.trades[i]) return;
+    if ("result" in patch) patch = { ...patch, result: fin(patch.result) };
+    Object.assign(ledger.trades[i], patch);
+    saveLedger();
+  }
   function removeWorth(i) { ledger.worth.splice(i, 1); saveLedger(); }
 
   function exportAll() {
     const out = { app: "albion-billionaire-v2", at: new Date().toISOString(), settings: { ...state }, ledger };
     return JSON.stringify(out, null, 1);
   }
-  function importAll(text) {
-    const j = JSON.parse(text);
+  /* Restores a backup. Returns how many parts were refused: settings it can't hold keep their current value, and a
+     ledger that isn't one leaves yours as it is. */
+  function importAll(raw) {
+    let j;
+    try { j = JSON.parse(raw); } catch (e) { j = null; }
     if (!j || j.app !== "albion-billionaire-v2") throw new Error("That file isn't an Albion Billionaire v2 backup.");
-    for (const [k, v] of Object.entries(j.settings || {})) if (k in DEFAULTS) set(k, v);
-    if (j.ledger) { ledger.worth = j.ledger.worth || []; ledger.trades = j.ledger.trades || []; saveLedger(); }
+    let refused = 0;
+    for (const [k, v] of Object.entries(j.settings && typeof j.settings === "object" ? j.settings : {})) {
+      if (k in DEFAULTS && !set(k, v)) refused++;
+    }
+    if (j.ledger && typeof j.ledger === "object" && !Array.isArray(j.ledger)) {
+      const L = cleanLedger(j.ledger);
+      ledger.worth = L.worth;
+      ledger.trades = L.trades;
+      saveLedger();
+    } else if (j.ledger != null) refused++;
+    return refused;
   }
 
-  return { get, set, on, reset, tax, setupFee, DEFAULTS, ledger, addWorth, addTrade, removeTrade, updateTrade, removeWorth, exportAll, importAll };
+  return { get, set, on, reset, tax, setupFee, DEFAULTS, ledger, addWorth, addTrade, removeTrade, updateTrade, removeWorth, exportAll, importAll, cleanLedger };
 })();

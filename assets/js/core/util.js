@@ -52,11 +52,20 @@ AB.util = (() => {
   const monthYear = fmt({ month: "long", year: "numeric" });
 
   /* ---------- events ---------- */
+  /* A listener added while an event is being delivered waits for the next one, and one removed before its turn is
+     skipped: a page that re-renders on a change (and so swaps its listener) can't be called again in the same pass. */
   function emitter() {
     const m = new Map();
     return {
       on(ev, fn) { (m.get(ev) || m.set(ev, new Set()).get(ev)).add(fn); return () => m.get(ev)?.delete(fn); },
-      emit(ev, ...a) { (m.get(ev) || []).forEach((fn) => { try { fn(...a); } catch (e) { console.error(e); } }); },
+      emit(ev, ...a) {
+        const set = m.get(ev);
+        if (!set) return;
+        for (const fn of [...set]) {
+          if (!set.has(fn)) continue;
+          try { fn(...a); } catch (e) { console.error(e); }
+        }
+      },
     };
   }
   const bus = emitter();
@@ -129,6 +138,9 @@ AB.util = (() => {
     return jsonCache.get(path);
   }
 
+  /* An Albion item id, such as T4_BAG or T6_PLANKS@2. Ids arrive from links and backup files, so pages check them. */
+  const isItem = (id) => typeof id === "string" && /^[A-Z0-9_@]{2,80}$/.test(id);
+
   /* A plugin of the Android app (Capacitor), or null in a browser and the Windows app. */
   const isNative = () => !!window.Capacitor?.isNativePlatform?.();
   const plugin = (n) => (isNative() ? window.Capacitor.Plugins?.[n] || window.Capacitor.registerPlugin?.(n) || null : null);
@@ -149,5 +161,5 @@ AB.util = (() => {
     return "downloaded";
   }
 
-  return { $, esc, clamp, sleep, debounce, raf, int, silver, pct, spct, H, D, parseUTC, ago, ageText, date, dateFull, month, monthYear, emitter, bus, icon, toast, progress, loadJSON, saveFile, nativePlugin: plugin };
+  return { $, esc, clamp, sleep, debounce, raf, int, silver, pct, spct, H, D, parseUTC, ago, ageText, date, dateFull, month, monthYear, emitter, bus, icon, toast, progress, loadJSON, saveFile, isItem, nativePlugin: plugin };
 })();

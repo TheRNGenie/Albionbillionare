@@ -280,7 +280,8 @@ AB.scan = (() => {
           caps: { market: volCap(st, 0.3) },
           hours: 0.3, lockDays: 7,
           agree: st.lastPrice ? F.agree(l.price, st.lastPrice) : null,
-          agreeNote: st.lastPrice ? `The listing is ${pct(Math.abs(l.price / st.lastPrice - 1))} ${l.price > st.lastPrice ? "above" : "below"} the last day's average sale, so the crash ${Math.abs(Math.log(l.price / st.lastPrice)) < 0.1 ? "shows up in real sales too" : "may be one stray listing"}.` : "",
+          agreeNote: !st.lastPrice ? "" : !M.live ? "In the saved snapshot this price is the last day's average sale, so the crash is in real sales, not one stray listing."
+            : `The listing is ${pct(Math.abs(l.price / st.lastPrice - 1))} ${l.price > st.lastPrice ? "above" : "below"} the last day's average sale, so the crash ${Math.abs(Math.log(l.price / st.lastPrice)) < 0.1 ? "shows up in real sales too" : "may be one stray listing"}.`,
           evidence: { f: row.beatFees, text: `Drops of ${row.label} in markets selling ${conf.LIQ_LABEL[conf.liqIndex(st.v14)]} a day: the next week's average price beat today's price plus fees ${pct(row.beatFees)} of the time (${int(row.n)} cases); typical rebound ${pct(Math.exp(row.f7) - 1, 1)}.` },
           extra: { dev, row, typical: st.m14 },
           steps: [

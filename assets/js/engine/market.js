@@ -56,22 +56,35 @@ AB.market = (() => {
     return [...new Set([...gear, ...U.res, ...U.ench, ...U.extra.slice(0, 120)])];
   }
 
+  /* Every load asks the price server first, so a reload after the connection comes back switches to live prices. If
+     the server answers that check but fails partway through the load, the load finishes on the snapshot instead of
+     failing, and says why. */
   async function load({ onStep = () => {} } = {}) {
     if (pending) return pending;
     pending = (async () => {
       try {
         await Promise.all([cat.ready(), conf.ready()]);
         onStep("Checking the price server", 0.08);
-        if (api.mode === "loading" || !M) await api.probe();
+        await api.probe();
         const U = universe();
-        onStep(api.mode === "live" ? "Loading current prices" : "Opening the saved snapshot", 0.2);
-        const rows = await api.prices(U.all, cat.MARKETS);
-        const P = api.index(rows);
-        onStep(api.mode === "live" ? "Loading four weeks of sales" : "Reading four weeks of sales", 0.5);
-        const histIds = api.mode === "live" ? candidates(P, U) : U.all;
-        const hist = await api.daily(histIds, cat.MARKETS, 28);
+        const gather = async () => {
+          onStep(api.mode === "live" ? "Loading current prices" : "Opening the saved snapshot", 0.2);
+          const rows = await api.prices(U.all, cat.MARKETS);
+          const P = api.index(rows);
+          onStep(api.mode === "live" ? "Loading four weeks of sales" : "Reading four weeks of sales", 0.5);
+          const histIds = api.mode === "live" ? candidates(P, U) : U.all;
+          const hist = await api.daily(histIds, cat.MARKETS, 28);
+          return { rows, P, hist };
+        };
+        let got;
+        try { got = await gather(); }
+        catch (e) {
+          if (api.mode !== "live") throw e;
+          await api.fallback(`${e.message || "Live prices stopped loading."} The app is using the saved snapshot until the next reload.`);
+          got = await gather();
+        }
         onStep("Scoring every play", 0.8);
-        M = build(P, hist, U, rows);
+        M = build(got.P, got.hist, U, got.rows);
         ev.emit("ready", M);
         return M;
       } finally { pending = null; }

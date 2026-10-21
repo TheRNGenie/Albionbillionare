@@ -66,11 +66,12 @@ Or open `index.html` from any static host (GitHub Pages works as is).
 ### Tests and lint
 
 ```sh
-npm test         # 49 tests with Node's built-in runner (Node 22); nothing to install
+ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci   # once: the page tests need jsdom, a simulated browser
+npm test         # 68 tests with Node's built-in runner (Node 22)
 npm run lint     # ESLint's correctness rules (fetches a pinned ESLint on first run)
 ```
 
-The tests load the real app scripts in Node and check the statistics, the calibration claims the Trust page makes, the scanners, the simulator, the shipped data files, and live mode against a fake price server (URL limits, a rate-limited retry, order flips, listing freshness, prices captured by the Windows app). `.github/workflows/tests.yml` runs both on every push to the v2 branch and on pull requests.
+The tests load the real app scripts in Node and check the statistics, the calibration claims the Trust page makes, the scanners, the simulator, the shipped data files, the settings and ledger against doctored backups, and live mode against a fake price server (URL limits, a rate-limited retry, order flips, listing freshness, prices captured by the Windows app). The page tests boot the whole app in jsdom and use it as a player would: a play opens once however many pages came before, one delete removes one trade, each page keeps its own filters, a Planner edit draws the page once, a restored backup can't put markup into a page, a broken link still loads, and the price source ends where the player last asked for it. `.github/workflows/tests.yml` runs the tests and lint on every push to the v2 branch and on pull requests.
 
 ### Android and Windows
 

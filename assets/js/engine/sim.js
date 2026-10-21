@@ -36,24 +36,34 @@ AB.sim = (() => {
   const kept = (m, edge) => edge * m.pos + m.neg;
   const laterMenu = (mu, edge) => mu.filter((m) => kept(m, edge) > 0).sort((a, b) => (kept(b, edge) * b.units) / b.hours - (kept(a, edge) * a.units) / a.hours);
 
-  /* One day: fill the hours with the best plays the capital allows; report what stopped the day growing. */
+  /* One day: fill the hours with the best plays the capital allows; report what stopped the day growing. A batch's
+     time is its play's own clock for that many units (a haul's trip takes as long for 10 units as for 40), so a
+     squeezed batch is charged what it really takes, and a play that can't fit even one unit is left for tomorrow. */
   function choose(menu, capital, hours) {
-    let capLeft = capital, hLeft = hours, cut = false;
+    let capLeft = capital, hLeft = hours, cut = false, late = false;
     const picks = [];
     for (const m of menu) {
       if (hLeft < 0.1) break;
       const afford = Math.floor(capLeft / (m.unitCost * m.lock));
       /* a batch squeezed to under a quarter of its size by capital isn't worth the trip */
       if (afford < Math.max(1, m.units * 0.25)) { cut = true; continue; }
-      const units = Math.min(m.units, afford);
+      let units = Math.min(m.units, afford);
       if (units < m.units) cut = true;
-      const frac = Math.min(1, hLeft / m.hours);
-      const u = Math.max(1, Math.floor(units * frac));
-      picks.push({ m, units: u, hours: m.hours * frac });
-      capLeft -= u * m.unitCost * m.lock;
-      hLeft -= m.hours * frac;
+      const fits = (u) => hoursFor(m.o, u) <= hLeft + 1e-9;
+      if (!fits(units)) {
+        late = true;
+        /* the most units that fit in the hours left (a play's time never falls as units rise) */
+        let lo = 0, hi = units - 1;
+        while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (fits(mid)) lo = mid; else hi = mid - 1; }
+        if (lo < 1 || !fits(lo)) continue;
+        units = lo;
+      }
+      const h = hoursFor(m.o, units);
+      picks.push({ m, units, hours: h });
+      capLeft -= units * m.unitCost * m.lock;
+      hLeft -= h;
     }
-    const stop = hLeft < 0.1 ? (cut ? "capital" : "hours") : cut ? "capital" : "market";
+    const stop = cut ? "capital" : hLeft < 0.1 || late ? "hours" : "market";
     const mean = picks.reduce((a, p) => a + p.units * p.m.mean, 0);
     return { picks, stop, mean, capitalUsed: capital - capLeft, hoursUsed: hours - hLeft };
   }

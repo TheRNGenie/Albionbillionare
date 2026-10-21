@@ -48,6 +48,36 @@ test("a day's plan never spends more capital or time than you have, and says wha
   assert.deepEqual(sim.choose([], 1e6, 2).picks, []);
 });
 
+test("a day's plan charges each batch the hours its size takes, and skips a play whose time doesn't fit", () => {
+  /* plays made to measure: an hour's work scales with the batch, or is fixed (a haul takes the trip however much you carry) */
+  const play = (key, hoursFn, { units = 100, unitCost = 1000, mean = 50 } = {}) => {
+    const o = { key, hoursFn };
+    return { o, units, unitCost, lock: 1, mean, hours: sim.hoursFor(o, units) };
+  };
+  const scaled = play("scaled", (q) => 0.25 + q * 0.01);
+  /* half the batch affordable: half the batch's hours, not the full batch's 1.25 */
+  let d = sim.choose([scaled], 50 * 1000, 8);
+  assert.equal(d.picks[0].units, 50);
+  assert.ok(Math.abs(d.picks[0].hours - 0.75) < 1e-9 && Math.abs(d.hoursUsed - 0.75) < 1e-9);
+  assert.equal(d.stop, "capital");
+  /* plenty of silver but an hour to spend: the biggest batch that fits in it */
+  d = sim.choose([scaled], 1e9, 1);
+  assert.equal(d.picks[0].units, 75);
+  assert.ok(d.hoursUsed <= 1 + 1e-9);
+  assert.equal(d.stop, "hours");
+  /* a fixed three-hour trip doesn't fit in two hours at any size, so the next play gets the time */
+  const trip = play("trip", 3), quick = play("quick", 0.5);
+  d = sim.choose([trip, quick], 1e9, 2);
+  assert.deepEqual(d.picks.map((p) => p.m.o.key), ["quick"]);
+  assert.equal(d.stop, "hours");
+  /* and the real menu: every pick's hours are its own batch's */
+  for (const [capital, hours] of [[5e6, 1], [15e6, 2], [1e8, 6]]) {
+    const r = sim.choose(mu, capital, hours);
+    for (const p of r.picks) assert.ok(Math.abs(p.hours - sim.hoursFor(p.m.o, p.units)) < 1e-9);
+    assert.ok(Math.abs(r.hoursUsed - r.picks.reduce((a, p) => a + p.hours, 0)) < 1e-6);
+  }
+});
+
 test("a day's profit range: ordered, losses kept in full, only gains shared", () => {
   const picks = sim.choose(mu, 15e6, 2).picks;
   const full = sim.dayRange(picks, 1), half = sim.dayRange(picks, 0.5);

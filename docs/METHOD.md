@@ -29,7 +29,7 @@ The full id lists are in that branch's `.github/workflows/price-history.yml`. `h
 
 **Snapshot.** `assets/data/v2/snapshot.json` is the last 28 days of the history (2026-09-20 to 2026-10-17) for the 1,838 items the scanners check. The app uses it when the live server can't be reached, and says so on every page.
 
-**Live data.** From the player's own device the app reads current orders (`/api/v2/stats/prices`, normal quality) and daily history (`/api/v2/stats/history`, normal quality, 28 days) from the server the player picks. Requests are split to stay under the URL length limit, run six at a time, are retried once after a rate limit, and are cached in IndexedDB (orders for 5 minutes, daily history for 3 hours). History is fetched only for items that could be part of a play. In the Windows app, prices the player's own Albion Data Client captured replace public prices whenever they are newer.
+**Live data.** From the player's own device the app reads current orders (`/api/v2/stats/prices`, normal quality) and daily history (`/api/v2/stats/history`, normal quality, 28 days) from the server the player picks. Requests are split to stay under the URL length limit, run six at a time, are retried once after a rate limit, and are cached in IndexedDB (orders for 5 minutes, daily history for 3 hours; copies older than a day are dropped once a session). History is fetched only for items that could be part of a play. If live prices stop loading partway through, the app finishes on the saved snapshot and says why until the next reload, rather than mixing the two. In the Windows app, prices the player's own Albion Data Client captured replace public prices whenever they are newer.
 
 ## 2. Calibrated price ranges
 
@@ -115,7 +115,7 @@ The score is the weighted geometric mean, × 100, with each check floored at 0.0
 *Code: `assets/js/engine/sim.js`.*
 
 - **The menu.** Plays with a score of at least 35 (adjustable in the Planner) and a positive expected profit, each sized as a batch the market could absorb every day, best profit per hour first, at most 40.
-- **A day.** Fill your hours with the best plays your capital can fund, keeping 15% of it in reserve (a play that ties silver up for several days needs that many days' worth); a batch squeezed below a quarter of its size by capital is skipped. Your whole net worth counts toward the goal, but only the trading capital is traded, and profits are reinvested. The day's limit (capital, hours or market size) is recorded, which gives "What holds you back, month by month".
+- **A day.** Fill your hours with the best plays your capital can fund, keeping 15% of it in reserve (a play that ties silver up for several days needs that many days' worth); a batch squeezed below a quarter of its size by capital is skipped. Each batch is charged the hours its own size takes: a batch cut short by capital takes less time, the last play of the day shrinks to the biggest batch that fits the hours left, and a trip of fixed length that doesn't fit is skipped for a play that does. Your whole net worth counts toward the goal, but only the trading capital is traded, and profits are reinvested. The day's limit (capital, hours or market size) is recorded, which gives "What holds you back, month by month".
 - **Competition.** Today's gaps are yours; later days keep only part of the edge: losses in full, gains times the share you keep (35%, 50% or 70%: cautious, balanced or bold). Later days rank plays by what you keep an hour and drop the ones that stop paying.
 - **Uncertainty.** Each path draws its own edge share (a lognormal around the chosen one, about ±50%) and a market mood each week (about ±25%), on top of each play's calibrated outcome every day. Without those two the fan would be far too narrow to be honest.
 - **Shared luck.** Path p's outcome for menu play i on day d is a fixed hash of (seed, p, d, i), and its edge share and moods come from its own stream, so two runs that differ only in capital or hours live through the same luck. That is why the Planner's grid moves the right way cell to cell, and why its ringed cell matches the headline odds exactly.
@@ -125,15 +125,17 @@ Command and Planner share one memoized forecast, so both pages always show the s
 
 ## 9. What is tested
 
-`npm test` runs 49 tests with Node's built-in runner, loading the real app scripts with small browser stubs:
+`npm test` runs 68 tests with Node's built-in runner, loading the real app scripts with small browser stubs, or the whole app in jsdom for the page tests:
 
 - **Statistics** (`stats.test.mjs`): quantiles match numpy, the seeded generator repeats, MAD estimates σ, Wilson intervals stay in [0, 1], quantile sampling and interpolation.
 - **Confidence** (`confidence.test.mjs`): series statistics on hand-made markets, every model cell resolves to an increasing table, ranges widen with time, the sampler draws exactly the range `priceAt` describes, the score's bounds, weights and monotonicity, and the calibration claims the Trust page makes hold in the shipped model.
 - **Data** (`data.test.mjs`): the snapshot's dates, markets and coverage of the scanning universe, the train and test months, and sane item data.
 - **Engine** (`engine.test.mjs`): snapshot mode, every strategy present, every play internally consistent, every batch limit respected, determinism, and settings flowing through.
 - **Live mode** (`live.test.mjs`): against a fake price server: URL limits, a rate-limited retry, history only for candidates, order flips priced one silver inside the spread, freshness from listing ages, and Windows-captured prices winning when newer.
-- **Simulator** (`sim.test.mjs`): the menu, the competition rule, a day never overspending capital or hours, day ranges, the fan's shape and odds, the direction of every setting, shared luck across runs, the deadline, and Command and Planner agreeing.
-- **Formatting** (`util.test.mjs`): silver amounts, percentages, ages and HTML escaping.
+- **Simulator** (`sim.test.mjs`): the menu, the competition rule, a day never overspending capital or hours, each batch charged the hours its size takes, day ranges, the fan's shape and odds, the direction of every setting, shared luck across runs, the deadline, and Command and Planner agreeing.
+- **Formatting and events** (`util.test.mjs`): silver amounts, percentages, ages, HTML escaping, item ids, and the event rule that a listener added during an event waits for the next one.
+- **Settings and ledger** (`store.test.mjs`): each setting takes only values it can hold, numbers stay in range, a check-in needs a real amount and date, a backup comes back as saved, and a doctored backup keeps only what it may and leaves your ledger alone if its own is broken.
+- **Pages** (`pages.test.mjs`): the whole app in jsdom, clicked through: a play opens once however many pages came before, one delete removes one trade, Opportunities and Planner keep their own filters, a Planner edit draws once, a restored backup can't put markup into any page, a link with a broken escape still loads, Reload goes back to live prices once the server answers, a live load that fails partway finishes on the snapshot, choosing Snapshot only mid-load wins, a trade logged with 0 silver records 0, and a play that buys and sells in one market shows that market's chart once.
 
 ## 10. What the app can't know
 

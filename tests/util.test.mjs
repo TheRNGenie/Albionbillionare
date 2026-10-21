@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { loadAB } from "./load.mjs";
 
-const { silver, pct, spct, esc, ageText } = loadAB().util;
+const { silver, pct, spct, esc, ageText, emitter, isItem } = loadAB().util;
 
 test("silver reads like the game: thousands, k, M and B with sensible precision", () => {
   const cases = [
@@ -29,4 +29,29 @@ test("percentages, signed percentages and ages", () => {
 test("esc makes any text safe to put in HTML", () => {
   assert.equal(esc(`<img src=x onerror="go()">&'`), "&lt;img src=x onerror=&quot;go()&quot;&gt;&amp;&#39;");
   assert.equal(esc(null), "");
+});
+
+test("events: a listener added during an event waits for the next one, one removed before its turn is skipped", (t) => {
+  t.mock.method(console, "error", () => {});
+  const ev = emitter();
+  const seen = [];
+  let offB = null, added = false;
+  ev.on("x", () => {
+    seen.push("a");
+    if (!added) { added = true; ev.on("x", () => seen.push("late")); }
+    offB();
+  });
+  offB = ev.on("x", () => seen.push("b"));
+  ev.on("x", () => { throw new Error("a listener that throws doesn't stop the rest"); });
+  ev.on("x", (n) => seen.push("c" + n));
+  ev.emit("x", 1);
+  assert.deepEqual(seen, ["a", "c1"]);
+  ev.emit("x", 2);
+  assert.deepEqual(seen, ["a", "c1", "a", "c2", "late"]);
+  ev.emit("nobody listens");
+});
+
+test("isItem takes item ids and nothing else", () => {
+  for (const id of ["T4_BAG", "T6_PLANKS@2", "T5_PLANKS_LEVEL1@1", "T8_2H_TOOL_SICKLE_AVALON", "UNIQUE_HIDEOUT"]) assert.ok(isItem(id), id);
+  for (const x of ["", "T", "t4_bag", "T4_BAG%", "T4 BAG", '"><img src=x>', "A".repeat(81), null, 42, ["T4_BAG"]]) assert.ok(!isItem(x), String(x));
 });

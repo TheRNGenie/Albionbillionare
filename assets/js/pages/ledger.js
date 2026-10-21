@@ -37,7 +37,7 @@ AB.pages.ledger = {
         ${ui.card({ span: 12, title: "Trades", sub: L.trades.length ? "Type the final profit (after fees) when a trade is done." : "", body: L.trades.length ? `<div class="table-wrap"><table class="t"><thead><tr><th>Logged</th><th>Play</th><th class="r">Units</th><th class="r">Spent</th><th class="r">80% range</th><th class="r">Result</th><th></th><th></th></tr></thead><tbody>${L.trades.map((t, i) => {
           const ok = t.result != null && t.pred ? t.result >= t.pred.p10 && t.result <= t.pred.p90 : null;
           return `<tr><td class="num">${esc(dateFull(t.t))}</td><td>${esc(t.title)}${t.note ? `<div class="small muted">${esc(t.note)}</div>` : ""}</td><td class="r num">${int(t.qty)}</td><td class="r num">${esc(silver(t.cost))}</td><td class="r num">${t.pred ? `${esc(silver(t.pred.p10))} – ${esc(silver(t.pred.p90))}` : "—"}</td>
-            <td class="r"><input class="input num" style="width:120px;text-align:right" type="number" step="any" data-result="${i}" value="${t.result ?? ""}" placeholder="profit" aria-label="Result for ${esc(t.title)}"></td>
+            <td class="r"><input class="input num" style="width:120px;text-align:right" type="number" step="any" data-result="${i}" value="${esc(t.result ?? "")}" placeholder="profit" aria-label="Result for ${esc(t.title)}"></td>
             <td>${ok == null ? "" : ok ? `<span class="pill-ok">${icon("check")}Inside</span>` : `<span class="pill-miss">${icon("stop")}Outside</span>`}</td>
             <td class="r"><button class="icon-btn sm" type="button" data-del-trade="${i}" aria-label="Delete this trade">${icon("trash")}</button></td></tr>`;
         }).join("")}</tbody></table></div>` : ui.empty("No trades logged yet. Open any play and press Log this trade.") })}
@@ -100,7 +100,7 @@ AB.pages.ledger = {
     root.querySelector("#g-import").addEventListener("change", async (e) => {
       const f = e.target.files?.[0];
       if (!f) return;
-      try { store.importAll(await f.text()); toast("Backup restored."); AB.app.rerender(); }
+      try { toast(AB.kit.restored(store.importAll(await f.text()))); AB.app.rerender(); }
       catch (err) { toast(err.message || "That file couldn't be read."); }
     });
   },

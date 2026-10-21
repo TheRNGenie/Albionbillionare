@@ -21,7 +21,8 @@
     "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.0.0",
     "electron": "^44.8.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "jsdom": "29.1.1"
   },
   "main": "desktop/main.js",
   "author": "TheRNGenie",

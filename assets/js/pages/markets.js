@@ -17,12 +17,14 @@ AB.pages.markets = (() => {
     render(root, { args }) {
       const { esc, icon, silver, int, dateFull, ageText } = AB.util;
       const ui = AB.ui, kit = AB.kit, cat = AB.cat, conf = AB.conf, store = AB.store;
-      const id = args[0];
+      /* a link that doesn't name an item (typed by hand, or cut short) shows the lookup page and says so */
+      const id = AB.util.isItem(args[0]) ? args[0] : null;
       const watch = store.get("watch") || [];
       const H = { eyebrow: "Markets", title: id ? cat.label(id) : "Markets", sub: "" };
 
       if (!id) {
-        root.innerHTML = `${kit.head({ ...H, title: "Look up any item", sub: "Search in the top bar, or pick from your watchlist. Every item shows all eight markets, four weeks of sales, a calibrated forecast and how far to trust each price." })}
+        const bad = args[0] ? `That link doesn't name an item (“${esc(args[0].slice(0, 80))}”). ` : "";
+        root.innerHTML = `${kit.head({ ...H, title: "Look up any item", sub: `${bad}Search in the top bar, or pick from your watchlist. Every item shows all eight markets, four weeks of sales, a calibrated forecast and how far to trust each price.` })}
           <div class="grid">${ui.card({ title: "Your watchlist", body: watch.length ? `<div class="picks">${watch.map((w, i) => `<a class="pick" href="#/markets/${encodeURIComponent(w)}" style="color:inherit;text-decoration:none"><span class="p-n">${i + 1}</span><div>${ui.item(w, { sub: esc(w), small: true })}</div><span class="p-right">${icon("arrow")}</span></a>`).join("")}</div>` : ui.empty("Nothing on your watchlist yet. Open an item and press Watch.") })}
           ${AB.state.R ? ui.card({ title: "Most traded right now", sub: "The scanner's busiest items.", body: `<div class="watch">${[...new Set(AB.state.R.opps.slice(0, 40).map((o) => o.item))].slice(0, 16).map((x) => `<a class="chip" href="#/markets/${encodeURIComponent(x)}">${esc(cat.label(x))}</a>`).join("")}</div>` }) : ""}</div>`;
         return;
@@ -80,9 +82,8 @@ AB.pages.markets = (() => {
         /* one small panel per market on a shared scale (eight colours can't all be told apart, eight panels can) */
         const series = has.filter((c) => (d.hist[c] || []).length).map((c) => ({ key: c, name: c === cat.BM ? "Black Market" : c, data: d.hist[c].map((x) => [x.t, x.price]) }));
         const days = [...new Set(series.flatMap((s) => s.data.map((x) => x[0])))].sort((a, b) => a - b);
-        const med = (a) => { const v = a.filter((x) => x != null).sort((x, y) => x - y); return v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : null; };
         const royal = series.filter((s) => cat.ROYAL.includes(s.key));
-        const ref = royal.length >= 2 ? days.map((t) => [t, med(royal.map((s) => s.data.find((x) => x[0] === t)?.[1]))]) : null;
+        const ref = royal.length >= 2 ? days.map((t) => [t, AB.stats.median(royal.map((s) => s.data.find((x) => x[0] === t)?.[1]))]) : null;
         ui.plot("m-all", "multi", {
           panels: series.map((s) => ({ key: s.key, title: s.name, data: s.data, on: s.key === city, value: silver(s.data[s.data.length - 1][1]), sub: stats[s.key].v14 != null ? `${stats[s.key].v14 < 10 ? stats[s.key].v14.toFixed(1) : int(stats[s.key].v14)} sold a day` : "" })),
           ref: ref ? { name: "Royal-city median", data: ref } : null,

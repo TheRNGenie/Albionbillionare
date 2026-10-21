@@ -60,7 +60,7 @@ AB.pages.settings = {
     root.querySelector("#s-import").addEventListener("change", async (e) => {
       const f = e.target.files?.[0];
       if (!f) return;
-      try { store.importAll(await f.text()); toast("Backup restored."); AB.app.rerender(); } catch (err) { toast(err.message || "That file couldn't be read."); }
+      try { toast(AB.kit.restored(store.importAll(await f.text()))); AB.app.rerender(); } catch (err) { toast(err.message || "That file couldn't be read."); }
     });
     root.querySelector("#s-reset").addEventListener("click", () => {
       ui.ask({
