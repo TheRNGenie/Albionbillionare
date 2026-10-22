@@ -15,6 +15,7 @@ AB.app = (() => {
     { id: "planner", label: "Planner", icon: "target" },
     { id: "trust", label: "Trust", icon: "shield" },
     { id: "ledger", label: "Ledger", icon: "book" },
+    { id: "alerts", label: "Alerts", icon: "bell" },
     { id: "settings", label: "Settings", icon: "gear", sep: true },
   ];
   let current = null, cleanup = null;
@@ -39,12 +40,14 @@ AB.app = (() => {
   }
 
   /* ---------- navigation ---------- */
+  /* Alerts carries a count of the price alerts that are met right now. */
+  const link = (n) => `<a href="#/${n.id}" data-route="${n.id}">${icon(n.icon)}<span>${esc(n.label)}</span>${n.id === "alerts" ? '<b class="nav-badge" data-badge hidden></b>' : ""}</a>`;
   function buildNav() {
-    $("#nav").innerHTML = NAV.map((n) => `${n.sep ? '<div class="nav-sep"></div>' : ""}<a href="#/${n.id}" data-route="${n.id}">${icon(n.icon)}<span>${esc(n.label)}</span></a>`).join("");
+    $("#nav").innerHTML = NAV.map((n) => `${n.sep ? '<div class="nav-sep"></div>' : ""}${link(n)}`).join("");
     const mob = NAV.filter((n) => n.mobile);
     $("#bottomNav").innerHTML = mob.map((n) => `<a href="#/${n.id}" data-route="${n.id}">${icon(n.icon)}<span>${esc(n.label === "Opportunities" ? "Plays" : n.label)}</span></a>`).join("") +
-      `<button type="button" id="moreBtn" aria-haspopup="dialog">${icon("menu")}<span>More</span></button>`;
-    $("#moreSheet").innerHTML = `<div class="row between" style="margin-bottom:8px"><b>More</b><button class="icon-btn sm" type="button" id="moreClose" aria-label="Close">${icon("x")}</button></div><nav class="nav">${NAV.filter((n) => !n.mobile).map((n) => `<a href="#/${n.id}" data-route="${n.id}">${icon(n.icon)}<span>${esc(n.label)}</span></a>`).join("")}</nav>`;
+      `<button type="button" id="moreBtn" aria-haspopup="dialog">${icon("menu")}<span>More</span><b class="nav-dot" data-badge-dot hidden></b></button>`;
+    $("#moreSheet").innerHTML = `<div class="row between" style="margin-bottom:8px"><b>More</b><button class="icon-btn sm" type="button" id="moreClose" aria-label="Close">${icon("x")}</button></div><nav class="nav">${NAV.filter((n) => !n.mobile).map(link).join("")}</nav>`;
     const sheet = $("#moreSheet"), more = $("#moreBtn");
     const show = (on) => {
       sheet.hidden = !on;
@@ -60,6 +63,11 @@ AB.app = (() => {
   }
   function markNav(id) {
     document.querySelectorAll("[data-route]").forEach((a) => (a.dataset.route === id ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
+  }
+  function badges() {
+    const now = Date.now(), n = store.get("alerts").filter((a) => AB.alerts.met(a, now)).length;
+    document.querySelectorAll("[data-badge]").forEach((b) => { b.hidden = !n; b.textContent = n; b.setAttribute("aria-label", `${n} price alert${n === 1 ? "" : "s"} met`); });
+    document.querySelectorAll("[data-badge-dot]").forEach((b) => (b.hidden = !n));
   }
 
   /* A hand-typed or cut-off link can hold a broken escape (a stray %): keep that part as typed instead of failing. */
@@ -114,7 +122,27 @@ AB.app = (() => {
   function sideFoot() {
     const M = AB.state.M;
     const srv = AB.cat.SERVERS.find((s) => s.id === store.get("server"))?.label || "Americas";
-    $("#sideFoot").innerHTML = `${esc(srv)} server · ${store.get("premium") ? "premium" : "no premium"}<br>${M ? (M.live ? "Live prices" : "Saved snapshot to " + esc(dateFull(M.asOf))) : "Loading prices"}<br><span class="muted">Not affiliated with Sandbox Interactive.</span>`;
+    const r = AB.clock.nextReset(store.get("server"));
+    const maint = r.down ? `Maintenance now, back about ${AB.clock.utc(r.back)}` : `Maintenance in ${AB.clock.until(r.at - Date.now())}`;
+    $("#sideFoot").innerHTML = `${esc(srv)} server · ${store.get("premium") ? "premium" : "no premium"}<br>${esc(maint)}<br>${M ? (M.live ? "Live prices" : "Saved snapshot to " + esc(dateFull(M.asOf))) : "Loading prices"}<br><span class="muted">Not affiliated with Sandbox Interactive.</span>`;
+  }
+
+  /* ---------- reminders and alert checks ---------- */
+  /* The timer reminders the player asked for go to the system (a week of them on Android, which holds them with the
+     app closed) and are refreshed when the timers, the server or the focus refill change, and every hour. */
+  let scheduledAt = 0;
+  function scheduleReminders() {
+    scheduledAt = Date.now();
+    const list = AB.clock.reminders(store.get("timers"), { server: store.get("server"), perDay: store.get("focus"), days: AB.notify.native ? 7 : 1 });
+    AB.notify.schedule(list).catch(() => {});
+  }
+  const checkAlerts = () => { AB.alerts.check().catch(() => {}); };
+  function tick() {
+    sideFoot();
+    badges(); // a "met" from over 48 hours ago stops counting
+    AB.util.bus.emit("tick");
+    if (Date.now() - scheduledAt > 36e5) scheduleReminders();
+    checkAlerts(); // at most every 10 minutes (see engine/alerts.js)
   }
 
   /* ---------- data ---------- */
@@ -156,6 +184,7 @@ AB.app = (() => {
         sideFoot();
         AB.util.bus.emit("data");
         rerender();
+        if (AB.state.M?.live) checkAlerts();
       }
       const next = again;
       again = null;
@@ -172,32 +201,9 @@ AB.app = (() => {
 
   /* ---------- search ---------- */
   function wireSearch() {
-    const input = $("#search"), list = $("#searchList");
+    const input = $("#search");
     $("#searchIcon").outerHTML = icon("search");
-    let items = [], sel = -1;
-    const close = () => { list.hidden = true; input.setAttribute("aria-expanded", "false"); sel = -1; };
-    const go = (id) => { close(); input.value = ""; input.blur(); location.hash = `#/markets/${encodeURIComponent(id)}`; };
-    const draw = () => {
-      list.innerHTML = items.length ? items.map((it, i) => `<button type="button" role="option" data-id="${esc(it.id)}" aria-selected="${i === sel}">${AB.ui.item(it.id, { sub: esc(it.id), small: true })}</button>`).join("") : `<div class="empty">No item matches that.</div>`;
-      list.hidden = false;
-      input.setAttribute("aria-expanded", "true");
-    };
-    input.addEventListener("input", debounce(() => {
-      const q = input.value.trim();
-      if (!q) return close();
-      items = AB.cat.search(q, 12);
-      sel = -1;
-      draw();
-    }, 120));
-    input.addEventListener("keydown", (e) => {
-      if (list.hidden) return;
-      if (e.key === "ArrowDown") { sel = Math.min(items.length - 1, sel + 1); draw(); e.preventDefault(); }
-      else if (e.key === "ArrowUp") { sel = Math.max(0, sel - 1); draw(); e.preventDefault(); }
-      else if (e.key === "Enter") { const it = items[sel >= 0 ? sel : 0]; if (it) go(it.id); e.preventDefault(); }
-      else if (e.key === "Escape") close();
-    });
-    list.addEventListener("click", (e) => { const b = e.target.closest("button[data-id]"); if (b) go(b.dataset.id); });
-    document.addEventListener("click", (e) => { if (!e.target.closest(".search")) close(); });
+    AB.ui.picker(input, $("#searchList"), (id) => { input.value = ""; input.blur(); location.hash = `#/markets/${encodeURIComponent(id)}`; });
   }
 
   async function boot() {
@@ -215,10 +221,17 @@ AB.app = (() => {
     store.on("change", (k) => {
       if (["premium", "capital", "focus", "refineSpec", "mountKg"].includes(k)) rescore();
       if (["server", "dataMode"].includes(k)) { invalidate(); AB.api.clear().then(() => refresh()); }
+      if (["timers", "server", "focus"].includes(k)) scheduleReminders();
+      if (k === "alerts") badges();
       sideFoot();
     });
     window.addEventListener("hashchange", route);
     sideFoot();
+    badges();
+    scheduleReminders();
+    setInterval(tick, 30e3);
+    /* back on screen (a phone app resumed, a tab shown): catch up on alerts and top the reminders back up */
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { scheduleReminders(); checkAlerts(); } });
     try { route(); } catch (e) { console.error(e); } // a page that fails to draw must not stop the data loading
     try { await Promise.all([AB.cat.ready(), AB.conf.ready()]); }
     catch (e) {
@@ -229,7 +242,7 @@ AB.app = (() => {
     refresh({ quiet: true });
   }
 
-  return { boot, refresh, rerender, route, NAV, get page() { return current; } };
+  return { boot, refresh, rerender, route, reschedule: scheduleReminders, NAV, get page() { return current; } };
 })();
 
 AB.pages = AB.pages || {};

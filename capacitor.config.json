@@ -11,6 +11,10 @@
     },
     "SystemBars": {
       "initialViewportFitValueHint": "cover"
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_crown",
+      "iconColor": "#e2b350"
     }
   }
 }

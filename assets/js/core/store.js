@@ -20,7 +20,11 @@ AB.store = (() => {
     refineSpec: { wood: 0, ore: 0, hide: 0, fiber: 0, rock: 0 },
     watch: ["T4_BAG", "T6_MAIN_SWORD", "T5_LEATHER", "T6_2H_CLAYMORE@1", "T7_RELIC", "T5_PLANKS_LEVEL1@1"],
     risk: "balanced",
+    alerts: [], // price alerts (see engine/alerts.js)
+    timers: { planted: null, laborers: null, focus: null, focusAt: null, remind: { harvest: true, laborers: true, focus: true, reset: false } },
   };
+  /* Kept by "Reset settings": they're the player's own lists, not preferences. */
+  const KEEP = new Set(["watch", "alerts", "timers"]);
   const read = (k) => { try { const v = localStorage.getItem(NS + k); return v == null ? undefined : JSON.parse(v); } catch (e) { return undefined; } };
   const write = (k, v) => { try { localStorage.setItem(NS + k, JSON.stringify(v)); return true; } catch (e) { return false; } };
 
@@ -30,8 +34,27 @@ AB.store = (() => {
   const clampTo = (lo, hi) => (v) => (typeof v === "number" && isFinite(v) ? Math.min(hi, Math.max(lo, v)) : undefined);
   const oneOf = (...xs) => (v) => (xs.includes(v) ? v : undefined);
   const bool = (v) => (typeof v === "boolean" ? v : undefined);
+  const fin = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+  const obj = (v) => v && typeof v === "object" && !Array.isArray(v);
   const { isItem } = AB.util;
   const SILVER = clampTo(0, 1e13);
+  /* A market name: letters and spaces only, so it can't carry markup into a page or a request. */
+  const PLACE = /^[A-Za-z ]{2,30}$/;
+  function cleanAlert(a) {
+    if (!obj(a) || !isItem(a.id) || typeof a.city !== "string" || !PLACE.test(a.city) || !["below", "above"].includes(a.kind) || !(fin(a.price) > 0)) return null;
+    return {
+      id: a.id, city: a.city, kind: a.kind, price: Math.min(a.price, 1e12), t: fin(a.t) ?? 0,
+      firedAt: Math.max(0, fin(a.firedAt) ?? 0), last: fin(a.last), seen: fin(a.seen), checked: fin(a.checked), hit: a.hit === true,
+    };
+  }
+  function cleanTimers(v) {
+    if (!obj(v)) return undefined;
+    const r = obj(v.remind) ? v.remind : DEFAULTS.timers.remind;
+    return {
+      planted: fin(v.planted), laborers: fin(v.laborers), focus: v.focus == null ? null : clampTo(0, 30000)(v.focus) ?? null, focusAt: fin(v.focusAt),
+      remind: Object.fromEntries(Object.keys(DEFAULTS.timers.remind).map((k) => [k, r[k] === true])),
+    };
+  }
   const CHECK = {
     server: oneOf("west", "europe", "east"),
     premium: bool,
@@ -48,6 +71,8 @@ AB.store = (() => {
     refineSpec: (v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.fromEntries(Object.keys(DEFAULTS.refineSpec).map((r) => [r, clampTo(0, 60000)(v[r]) ?? 0])) : undefined),
     watch: (v) => (Array.isArray(v) ? [...new Set(v.filter(isItem))].slice(0, 60) : undefined),
     risk: oneOf("cautious", "balanced", "bold"),
+    alerts: (v) => (Array.isArray(v) ? v.map(cleanAlert).filter(Boolean).slice(0, 50) : undefined),
+    timers: cleanTimers,
   };
   const clean = (k, v) => (v == null ? undefined : CHECK[k](v));
 
@@ -74,15 +99,14 @@ AB.store = (() => {
     return true;
   }
   const on = (e, fn) => ev.on(e, fn);
-  /* Every setting back to its default (the deadline to a year from today); the watchlist and the ledger stay. */
-  function reset() { for (const k of Object.keys(DEFAULTS)) if (k !== "watch") set(k, fresh(k)); }
+  /* Every setting back to its default (the deadline to a year from today); the ledger and the lists in KEEP stay. */
+  function reset() { for (const k of Object.keys(DEFAULTS)) if (!KEEP.has(k)) set(k, fresh(k)); }
   /* Sales tax: 4% with premium, 8% without; listing (setup) fee 2.5% on every order placed. */
   const tax = () => (state.premium ? 0.04 : 0.08);
   const setupFee = 0.025;
 
   /* ---------- ledger: net worth check-ins and logged sessions ---------- */
   /* The same care for the ledger: known fields only, numbers finite, text cut to length. */
-  const fin = (v) => (typeof v === "number" && isFinite(v) ? v : null);
   const text = (v, n) => (typeof v === "string" ? v.slice(0, n) : "");
   function cleanLedger(j) {
     const worth = (Array.isArray(j?.worth) ? j.worth : [])

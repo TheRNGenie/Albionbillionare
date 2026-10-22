@@ -4,8 +4,14 @@
    or a throw for a failed request) stands in for it, so by default the app runs on the saved snapshot. */
 import fs from "node:fs";
 import path from "node:path";
+import { after } from "node:test";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { ROOT } from "./load.mjs";
+
+/* The app keeps a clock running (every 30 seconds), so a window left open keeps the test process alive. A test that
+   fails before its close() would hang the whole run; closing every window still open once the tests end prevents it. */
+const open = new Set();
+after(() => { for (const w of open) w.close(); open.clear(); });
 
 const HTML = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
 const SCRIPTS = [...HTML.matchAll(/<script src="([^"]+)"><\/script>/g)].map((m) => m[1]);
@@ -28,6 +34,7 @@ export async function boot({ net = null, hash = "", storage = {} } = {}) {
   vc.on("jsdomError", (e) => errors.push(String(e && (e.detail || e.message || e))));
   const dom = new JSDOM(PAGE, { url: "https://app.test/index.html" + hash, runScripts: "outside-only", pretendToBeVisual: true, virtualConsole: vc });
   const w = dom.window;
+  open.add(w);
   for (const [k, v] of Object.entries(storage)) w.localStorage.setItem("ab2." + k, JSON.stringify(v));
   w.fetch = async (url) => {
     const u = String(url);
@@ -64,6 +71,6 @@ export async function boot({ net = null, hash = "", storage = {} } = {}) {
       return n;
     },
     /* stop background work (the Planner's grid) so the test process can end */
-    close: () => { w.location.hash = "#/settings"; setTimeout(() => w.close(), 50); },
+    close: () => { w.location.hash = "#/settings"; setTimeout(() => { w.close(); open.delete(w); }, 50); },
   };
 }

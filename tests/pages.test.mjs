@@ -111,15 +111,16 @@ test("a link with a broken escape still loads the app, and Markets says it names
   app.close();
 });
 
-/* A price server that can be switched on, slowed down, or made to fail partway. Its answers are valid but empty: these
-   tests are about which source the app ends up on, not the prices. */
+/* A price server that can be switched on, slowed down, or made to fail partway. Its answers are valid but empty (these
+   tests are about which source the app ends up on, not the prices), except for any current prices a test puts in
+   `prices`, which every price request gets. */
 function server() {
-  const s = { online: false, delay: 0, failPrices: false };
+  const s = { online: false, delay: 0, failPrices: false, prices: [] };
   s.net = async (url) => {
     if (!s.online) throw new TypeError("offline");
     if (s.delay) await sleep(s.delay);
     if (url.includes("/gold.json")) return respond([{ price: 4000, timestamp: new Date().toISOString().slice(0, 19) }]);
-    if (s.failPrices && url.includes("/prices/")) throw new TypeError("connection reset");
+    if (url.includes("/prices/")) { if (s.failPrices) throw new TypeError("connection reset"); return respond(s.prices); }
     return respond([]);
   };
   return s;
@@ -193,5 +194,121 @@ test("a play that buys and sells in one market shows that market's chart once", 
   const charts = app.$$('.drawer [id^="d-leg"]');
   assert.equal(charts.length, 1);
   assert.match(charts[0].closest(".card").textContent, /Where you buy and sell/);
+  app.close();
+});
+
+/* ---------- alerts and timers ---------- */
+/* A stand-in for the browser's notifications, already allowed, that records what it shows. */
+function notifications(w) {
+  const shown = [];
+  w.Notification = class { constructor(title, o) { shown.push([title, o.body]); } static get permission() { return "granted"; } static requestPermission() { return Promise.resolve("granted"); } };
+  return shown;
+}
+const isoNow = () => new Date().toISOString().slice(0, 19);
+
+test("an alert set from an item page fires when its price is met: one notification, a badge, and Met in the list", async () => {
+  const s = server();
+  s.online = true;
+  s.prices = [{ item_id: "T6_BAG", city: "Lymhurst", quality: 1, sell_price_min: 9000, sell_price_min_date: isoNow(), buy_price_max: 12000, buy_price_max_date: isoNow() }];
+  const app = await boot({ net: s.net });
+  const shown = notifications(app.w);
+  const { store, cat } = app.AB;
+  await app.go("#/markets/T6_BAG");
+  await until(() => /city=Lymhurst/.test(app.$("#m-alert")?.getAttribute("href")));
+  await app.go(app.$("#m-alert").getAttribute("href"));
+  assert.equal(app.$("#al-item").value, cat.label("T6_BAG"));
+  assert.equal(app.$("#al-picked").textContent, "T6_BAG · normal quality");
+  assert.equal(app.$("#al-city").value, "Lymhurst");
+  app.$("#al-price").value = "10000";
+  app.submit(app.$("#al-form"));
+  await until(() => shown.length === 1);
+  assert.deepEqual(plain(shown), [[`${cat.label("T6_BAG")} in Lymhurst`, "Listed at 9,000 silver, at or under your 10,000 (seen just now)."]]);
+  assert.deepEqual(plain(store.get("alerts").map((a) => [a.id, a.city, a.kind, a.price, a.last, a.hit])), [["T6_BAG", "Lymhurst", "below", 10000, 9000, true]]);
+  await until(() => /Met/.test(app.$("#al-list").textContent));
+  assert.equal(app.$("#nav [data-badge]").hidden, false);
+  assert.equal(app.$("#nav [data-badge]").textContent, "1");
+  /* checked again while it stays met: no second notification */
+  app.click(app.$("#al-check"));
+  await until(() => /already told/.test(app.$("#toast")?.textContent || ""));
+  assert.equal(shown.length, 1);
+  /* deleted: the badge goes */
+  app.click(app.$('[data-del-alert="0"]'));
+  assert.equal(store.get("alerts").length, 0);
+  assert.equal(app.$("#nav [data-badge]").hidden, true);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("the alert form refuses what can't work: no item, no price, a twin, or a listing rule on the Black Market", async () => {
+  const app = await boot();
+  const { store } = app.AB;
+  await app.go("#/alerts");
+  const toast = () => app.$("#toast")?.textContent;
+  app.$("#al-price").value = "500";
+  app.submit(app.$("#al-form"));
+  assert.equal(toast(), "Pick an item from the list first.");
+  /* search and pick, as a player would */
+  app.change(app.$("#al-item"), "t6 bag");
+  await until(() => app.$("#al-results button[data-id]"));
+  app.click(app.$('#al-results button[data-id="T6_BAG"]') || app.$("#al-results button[data-id]"));
+  const id = app.$("#al-picked").textContent.split(" ")[0];
+  assert.ok(app.AB.util.isItem(id), id);
+  app.$("#al-price").value = "";
+  app.submit(app.$("#al-form"));
+  assert.equal(toast(), "Type the price to watch for.");
+  /* the Black Market only has buy orders to watch */
+  app.change(app.$("#al-city"), "Black Market");
+  assert.equal(app.$("#al-kind").value, "above");
+  assert.equal(app.$('#al-kind [value="below"]').disabled, true);
+  app.$("#al-price").value = "20000";
+  app.submit(app.$("#al-form"));
+  app.$("#al-price").value = "20000";
+  app.submit(app.$("#al-form"));
+  assert.equal(toast(), "You already have that alert.");
+  assert.deepEqual(plain(store.get("alerts").map((a) => [a.id, a.city, a.kind, a.price])), [[id, "Black Market", "above", 20000]]);
+  /* typing over the picked item un-picks it */
+  app.change(app.$("#al-item"), "something else");
+  app.$("#al-price").value = "300";
+  app.submit(app.$("#al-form"));
+  assert.equal(toast(), "Pick an item from the list first.");
+  assert.equal(store.get("alerts").length, 1);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("timers count down from what the player sets, reminders follow them, and Reset settings keeps them", async () => {
+  const app = await boot();
+  const { store, notify } = app.AB;
+  const sent = [];
+  const orig = notify.schedule;
+  notify.schedule = (list) => { sent.push(plain(list)); return orig(list); };
+  await app.go("#/alerts");
+  const t0 = Date.now();
+  app.click(app.$('[data-now="planted"]'));
+  assert.ok(Math.abs(store.get("timers").planted - t0) < 5000);
+  assert.match(app.$("#al-clock .kpi .k-value").textContent, /^(22 h 00 min|21 h 59 min)$/);
+  app.change(app.$('[data-ago="laborers"]'), 23);
+  assert.ok(Math.abs(store.get("timers").laborers - (t0 - 23 * 36e5)) < 5000);
+  assert.equal(app.$$("#al-clock .kpi .k-value")[1].textContent, "Back");
+  app.change(app.$("#al-focus"), 12000);
+  assert.equal(store.get("timers").focus, 12000);
+  assert.match(app.$$("#al-clock .kpi")[2].textContent, /12,000.*full/);
+  /* the laborers are back already, so only the crops and focus are ahead, soonest first */
+  const last = sent[sent.length - 1];
+  assert.deepEqual(last.map((r) => r.key).sort(), ["focus", "harvest"]);
+  assert.ok(last[0].at <= last[1].at);
+  assert.match(app.$("#al-next").textContent, /Next reminder: (Crops ready|Focus nearly full)/);
+  /* the maintenance reminder, when ticked, joins them */
+  const box = app.$('[data-remind="reset"]');
+  box.checked = true;
+  box.dispatchEvent(new app.w.Event("change", { bubbles: true }));
+  assert.equal(store.get("timers").remind.reset, true);
+  assert.ok(sent[sent.length - 1].some((r) => r.key === "reset0"));
+  assert.equal(app.$$("#al-maint tbody tr").length, 3);
+  assert.match(app.$("#al-maint tr.al-mine").textContent, /Americas/);
+  store.reset();
+  assert.equal(store.get("timers").focus, 12000);
+  assert.equal(store.get("timers").remind.reset, true);
+  assert.deepEqual(app.errors, []);
   app.close();
 });

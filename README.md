@@ -12,6 +12,7 @@ Every money-making play in Albion Online, scored twice: once for what it could e
 - **A road to a billion with odds.** A Monte Carlo of your silver: 400 paths of a year of trading with today's plays, each path keeping a different share of the edge and living through different market weeks. It answers "what's my chance of 1B by my deadline", and what holds you back (capital, hours or market size), month by month.
 - **An Edge Lab.** What 200 days of trades say: which edges are real, and which popular ideas ("buy midweek, sell on Sunday", "raw prices lead refined prices") fail out of sample.
 - **A Trust page and a Ledger.** The app shows its own calibration (promised against delivered), and the Ledger checks its ranges against the trades you actually make.
+- **Alerts and timers.** A price alert on any item in any market (when the cheapest listing drops to your price, or the best buy order reaches it), checked against live prices every 10 minutes, with the item's usual range as a starting price. Island, laborer and focus timers, and a countdown to each server's daily maintenance. The Android app's reminders arrive even with the app closed.
 
 ## Pages
 
@@ -24,6 +25,7 @@ Every money-making play in Albion Online, scored twice: once for what it could e
 | **Planner** | The road to a billion in detail: the fan of paths, the odds for other hours and capital (with your own spot ringed), what holds you back month by month, and today's routine. |
 | **Trust** | How far to believe every number: calibration charts, how the score works, today's plays by confidence, price freshness, and what the app can't know. |
 | **Ledger** | Net worth check-ins against the straight pace to your goal, logged trades, and your own calibration. |
+| **Alerts** | Price alerts on any item in any market, your island, laborer and focus timers with reminders, and each server's daily maintenance. Any item page has an Alert button that fills the form in. |
 | **Settings** | Server, premium, your silver, gear and focus, data source, theme, backup and reset. |
 
 ## The strategies
@@ -67,11 +69,11 @@ Or open `index.html` from any static host (GitHub Pages works as is).
 
 ```sh
 ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci   # once: the page tests need jsdom, a simulated browser
-npm test         # 68 tests with Node's built-in runner (Node 22)
+npm test         # 82 tests with Node's built-in runner (Node 22)
 npm run lint     # ESLint's correctness rules (fetches a pinned ESLint on first run)
 ```
 
-The tests load the real app scripts in Node and check the statistics, the calibration claims the Trust page makes, the scanners, the simulator, the shipped data files, the settings and ledger against doctored backups, and live mode against a fake price server (URL limits, a rate-limited retry, order flips, listing freshness, prices captured by the Windows app). The page tests boot the whole app in jsdom and use it as a player would: a play opens once however many pages came before, one delete removes one trade, each page keeps its own filters, a Planner edit draws the page once, a restored backup can't put markup into a page, a broken link still loads, and the price source ends where the player last asked for it. `.github/workflows/tests.yml` runs the tests and lint on every push to the v2 branch and on pull requests.
+The tests load the real app scripts in Node and check the statistics, the calibration claims the Trust page makes, the scanners, the simulator, the shipped data files, the settings and ledger against doctored backups, live mode against a fake price server (URL limits, a rate-limited retry, order flips, listing freshness, prices captured by the Windows app), and the rules behind alerts and timers (which prices meet an alert, how old a price may be, how often one may fire, maintenance across the day line, the focus refill). The page tests boot the whole app in jsdom and use it as a player would: a play opens once however many pages came before, one delete removes one trade, each page keeps its own filters, a Planner edit draws the page once, a restored backup can't put markup into a page, a broken link still loads, the price source ends where the player last asked for it, an alert set from an item page fires once with a notification and a badge, the alert form refuses what can't work, and the timers drive the reminders. `.github/workflows/tests.yml` runs the tests and lint on every push to the v2 branch and on pull requests.
 
 ### Android and Windows
 
@@ -81,6 +83,8 @@ npm run android:sync     # copies the app into www/ and syncs the Capacitor Andr
 npm run desktop          # runs the Windows/Electron app locally
 npm run desktop:win      # builds Albion-Billionaire-v2-Setup.exe and -portable.exe into dist/
 ```
+
+Reminders and price alerts use `@capacitor/local-notifications` on Android, which hands them to the system so they arrive with the app closed (the status-bar icon is `resources/android/drawable/ic_stat_crown.xml`). The Windows app and browsers show them while the app runs, minimised included.
 
 `.github/workflows/android.yml` and `windows.yml` build v2 and publish releases tagged `v2-android-build-N` and `v2-windows-build-N`, never marked "latest", so the original app's download links and update check never see them. They run only when started by hand; see the comment at the top of each file for building from this branch.
 
@@ -104,9 +108,11 @@ npm test                                             # the data tests check the 
 index.html                 the shell: sidebar, top bar, bottom nav on phones
 assets/css/                app.css (tokens, light and dark, components), pages.css (page layouts)
 assets/js/core/            util (formatting, UTC dates), stats, store (settings and ledger),
-                           catalog (items, recipes, cities), api (price server, cache, snapshot),
-                           confidence (calibrated ranges, odds, the score)
-assets/js/engine/          market (the market model), scanners (the eight strategies), sim (the road to a billion)
+                           clock (maintenance and timers), catalog (items, recipes, cities),
+                           api (price server, cache, snapshot), confidence (calibrated ranges, odds, the score),
+                           notify (notifications on Android, Windows and in browsers)
+assets/js/engine/          market (the market model), scanners (the eight strategies), sim (the road to a billion),
+                           alerts (price alerts)
 assets/js/charts/charts.js dependency-free SVG charts: line and fan, bars, scatter, heatmap, forest, network map
 assets/js/ui.js            shared pieces: cards, the play drawer, tables, tooltips
 assets/js/pages/           one file per page, plus detail.js (the play drawer)
@@ -118,7 +124,7 @@ desktop/                   the Electron shell (Windows)
 
 ## Not carried over from the original app
 
-v2 is a fresh start focused on market plays and how far to trust them. These parts of the original app are not in v2: the playstyle plans and method playbooks, the wiki, server times and timers, price alerts and phone notifications, the spec, quality and island calculators, wealth by bank location, the character lookup, the crafting-plan tab, the laborer optimizer and focus budget planner, the loss budget, the Matchups tab, and the "Spend real money?" wheel. Any of them can come back.
+v2 is a fresh start focused on market plays and how far to trust them. These parts of the original app are not in v2: the playstyle plans and method playbooks, the wiki, the spec, quality and island calculators, wealth by bank location, the character lookup, the crafting-plan tab, the laborer optimizer and focus budget planner, the loss budget, the Matchups tab, and the "Spend real money?" wheel. Any of them can come back.
 
 ## Notes
 

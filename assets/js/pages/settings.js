@@ -64,7 +64,7 @@ AB.pages.settings = {
     });
     root.querySelector("#s-reset").addEventListener("click", () => {
       ui.ask({
-        title: "Reset settings?", ok: "Reset", html: `<p>Server, premium, your silver, gear and display go back to their defaults, and the deadline moves to a year from today. Your ledger and watchlist stay.</p>`,
+        title: "Reset settings?", ok: "Reset", html: `<p>Server, premium, your silver, gear and display go back to their defaults, and the deadline moves to a year from today. Your ledger, watchlist, alerts and timers stay.</p>`,
         onOk: () => { store.reset(); toast("Settings reset."); AB.app.rerender(); },
       });
     });

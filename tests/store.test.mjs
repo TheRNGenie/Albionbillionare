@@ -86,3 +86,25 @@ test("the ledger keeps known fields only: numbers finite, text cut to length, it
   assert.ok(!("extra" in x));
   assert.deepEqual(store.cleanLedger(null), { worth: [], trades: [] });
 });
+
+test("alerts and timers keep only what they can use, and Reset settings keeps both", (t) => {
+  t.after(restore);
+  const good = { id: "T6_BAG", city: "Lymhurst", kind: "below", price: 10000, t: 1, firedAt: 0, last: null, seen: null, checked: null, hit: false };
+  const bad = [{ ...good, id: '"><img src=x>' }, { ...good, city: "<b>Lymhurst</b>" }, { ...good, kind: "sideways" }, { ...good, price: -1 }, { ...good, price: "5" }, null, 7, [good]];
+  assert.equal(store.set("alerts", [good, ...bad, { ...good, price: 1e15, hit: "yes", firedAt: -5 }]), true);
+  assert.deepEqual(store.get("alerts").map((a) => [a.id, a.price, a.hit, a.firedAt]), [["T6_BAG", 10000, false, 0], ["T6_BAG", 1e12, false, 0]]);
+  assert.equal(store.set("alerts", Array.from({ length: 60 }, (_, i) => ({ ...good, price: i + 1 }))), true);
+  assert.equal(store.get("alerts").length, 50, "at most 50");
+  assert.equal(store.set("alerts", "lots"), false);
+  assert.equal(store.set("timers", { planted: 5, laborers: "soon", focus: 99999, focusAt: 7, remind: { harvest: "yes", reset: true, extra: true } }), true);
+  assert.deepEqual(store.get("timers"), { planted: 5, laborers: null, focus: 30000, focusAt: 7, remind: { harvest: false, laborers: false, focus: false, reset: true } });
+  assert.equal(store.set("timers", [1, 2]), false);
+  store.set("hours", 9);
+  store.reset();
+  assert.equal(store.get("hours"), 2, "settings went back");
+  assert.equal(store.get("alerts").length, 50, "alerts stayed");
+  assert.equal(store.get("timers").planted, 5, "timers stayed");
+  const copy = JSON.parse(store.exportAll());
+  assert.equal(copy.settings.alerts.length, 50, "backups carry them");
+  assert.equal(copy.settings.timers.focus, 30000);
+});

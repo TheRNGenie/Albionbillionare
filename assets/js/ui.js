@@ -126,6 +126,38 @@ AB.ui = (() => {
       fn(b.dataset.v, b);
     });
   }
+  /* ---------- item search: a text box with a list of matching items (the top bar, the alert form) ---------- */
+  /* Arrow keys move through the list, Enter picks, Escape or a click elsewhere closes it. Returns { close, off };
+     a page that makes one calls off() when it leaves. */
+  function picker(input, list, onPick, limit = 12) {
+    let items = [], sel = -1;
+    const close = () => { list.hidden = true; input.setAttribute("aria-expanded", "false"); sel = -1; };
+    const pick = (id) => { close(); onPick(id); };
+    const draw = () => {
+      list.innerHTML = items.length ? items.map((it, i) => `<button type="button" role="option" data-id="${esc(it.id)}" aria-selected="${i === sel}">${item(it.id, { sub: esc(it.id), small: true })}</button>`).join("") : `<div class="empty">No item matches that.</div>`;
+      list.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+    };
+    input.addEventListener("input", AB.util.debounce(() => {
+      const q = input.value.trim();
+      if (!q) return close();
+      items = AB.cat.search(q, limit);
+      sel = -1;
+      draw();
+    }, 120));
+    input.addEventListener("keydown", (e) => {
+      if (list.hidden) return;
+      if (e.key === "ArrowDown") { sel = Math.min(items.length - 1, sel + 1); draw(); e.preventDefault(); }
+      else if (e.key === "ArrowUp") { sel = Math.max(0, sel - 1); draw(); e.preventDefault(); }
+      else if (e.key === "Enter") { const it = items[sel >= 0 ? sel : 0]; if (it) pick(it.id); e.preventDefault(); }
+      else if (e.key === "Escape") close();
+    });
+    list.addEventListener("click", (e) => { const b = e.target.closest("button[data-id]"); if (b) pick(b.dataset.id); });
+    const box = list.parentNode;
+    const outside = (e) => { if (!box.contains(e.target)) close(); };
+    document.addEventListener("click", outside);
+    return { close, off: () => document.removeEventListener("click", outside) };
+  }
   const chip = (v, label, on, n = null) => `<button class="chip" type="button" data-v="${esc(v)}" aria-pressed="${!!on}">${label}${n != null ? ` <span class="n">${n}</span>` : ""}</button>`;
 
   /* ---------- drawer ---------- */
@@ -193,5 +225,5 @@ AB.ui = (() => {
     });
   }
 
-  return { card, chartCard, plot, sweep, legendHTML, tableHTML, conf, meter, factors, rangeBar, tierLegend, item, tag, riskTag, route, empty, skel, kpi, seg, onSeg, chip, drawer, ask };
+  return { card, chartCard, plot, sweep, legendHTML, tableHTML, conf, meter, factors, rangeBar, tierLegend, item, tag, riskTag, route, empty, skel, kpi, seg, onSeg, picker, chip, drawer, ask };
 })();

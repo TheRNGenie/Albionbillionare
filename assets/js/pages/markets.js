@@ -34,6 +34,7 @@ AB.pages.markets = (() => {
       const p = cat.parse(id);
       const watching = watch.includes(id);
       const up = cat.upgrade(id);
+      const alertLink = (c) => `#/alerts?item=${encodeURIComponent(id)}${c ? `&city=${encodeURIComponent(c)}` : ""}`;
       const facts = [
         ["Item power", cat.ip(id)], ["Weight", cat.weight(id) != null ? `${cat.weight(id)} kg` : null], ["Crafted best in", cat.craftCity(id)],
         ["Enchanted from", up ? `T${p.tier}.${p.ench - 1} with ${up.count} T${p.tier} ${up.mat.split("_")[1].toLowerCase()}s` : null],
@@ -41,7 +42,7 @@ AB.pages.markets = (() => {
       root.innerHTML = `
         <div class="page-head"><div class="mk-head" style="width:100%">
           <div>${ui.item(id, { sub: `<span class="num">${esc(id)}</span>` }).replace('class="item"', 'class="item lg"')}</div>
-          <div class="row"><button class="btn${watching ? " primary" : ""}" type="button" id="m-watch">${icon("star")}${watching ? "Watching" : "Watch"}</button></div>
+          <div class="row"><button class="btn${watching ? " primary" : ""}" type="button" id="m-watch">${icon("star")}${watching ? "Watching" : "Watch"}</button><a class="btn" id="m-alert" href="${alertLink(city)}">${icon("bell")}Alert</a></div>
         </div></div>
         <div class="mk-facts" style="margin:-6px 0 16px">${facts.map(([k, v]) => `<span>${esc(k)} <b>${esc(v)}</b></span>`).join("")}</div>
         ${kit.modeBanner(M)}
@@ -59,6 +60,7 @@ AB.pages.markets = (() => {
         const has = cat.MARKETS.filter((c) => (d.hist[c] || []).length || d.P[c]);
         if (!has.length) { root.querySelector("#m-grid").innerHTML = `<div class="span-12">${ui.empty(M.live ? "No market has reported this item in the last four weeks." : "The saved snapshot doesn't include this item. Live prices would.")}</div>`; return; }
         if (!city || !has.includes(city)) city = has.slice().sort((a, b) => (stats[b].v14 || 0) - (stats[a].v14 || 0))[0];
+        root.querySelector("#m-alert").href = alertLink(city); // the alert starts on the market shown here
         const ageH = (iso) => (iso ? (M.now - AB.util.parseUTC(iso)) / 36e5 : null);
         const rowsT = has.map((c) => {
           const r = d.P[c] || {}, s = stats[c];

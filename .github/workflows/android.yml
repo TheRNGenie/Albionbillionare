@@ -50,6 +50,9 @@ jobs:
             --iconBackgroundColor '#0b0d10' --iconBackgroundColorDark '#0b0d10' \
             --splashBackgroundColor '#0b0d10' --splashBackgroundColorDark '#0b0d10'
           npx cap sync android
+          # the status-bar icon for reminders and price alerts (capacitor.config.json names it)
+          mkdir -p android/app/src/main/res/drawable
+          cp resources/android/drawable/*.xml android/app/src/main/res/drawable/
 
       - name: Version the build
         run: |
