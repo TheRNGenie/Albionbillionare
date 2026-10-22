@@ -1,89 +1,141 @@
-# Albion Billionaire
+# Albion Billionaire v2
 
-A one-page web app, styled after Albion Online (dark leather and brass, parchment in light mode, carved gold capitals), for reaching **1,000,000,000 silver in Albion Online within a year**, built for a player with premium and a fully upgraded personal island.
+Every money-making play in Albion Online, scored twice: once for what it could earn, as an 80% range from simulation, and once for how far to believe it, as a confidence score from 0 to 100. Built from scratch on 200 days of market history.
 
-## What's inside
+> **Where it lives.** v2 is developed on the branch `claude/project-thread-m3rrj0`. The original app on `claude/albion-billionaire-app` is untouched, and v2 installs next to it: its own Android app id, its own Windows app, its own browser storage (`ab2.` keys) and its own release tags (`v2-…`).
 
-- **Plan**: six playstyle paths (Tycoon, Merchant, Artisan, Homesteader, Gatherer, Adventurer). Each path has a day-by-day compounding projection to 1B, four phases with concrete actions, and a daily routine checklist. A *What if* box runs a daily routine for a set number of days and shows the net worth change in silver and percent, plus spec levels gained on each refining, crafting and farming node.
-- **Best picks**: ranks what to plant, what to refine with focus, what to flip on the Black Market, which items to order-flip, and which journals to fill, from live prices and last week's sales. Every pick says why: price and city, costs after fees, profit, how much the market buys per day, and the risk. Selling prices are capped at what the item actually sold for on average there last week, because many buy and sell orders never fill; the Market tab shows that average next to each price.
-- **Methods**: step-by-step playbooks for island farming, focus refining, crafting, order flipping, Black Market flipping, trade routes, gathering, PvE and fishing.
-- **Market**: live prices for every royal city, Brecilien and the Black Market from the free [Albion Online Data Project](https://www.albion-online-data.com/) API. Presets for refined and raw resources, crops and herbs, Black Market flips, plus a searchable watchlist. Click any item for 7-day volume. Shows the live gold price.
-- **Calculators**: your spec (refining tiers, crafting nodes, farming tiers, gathering), refining profit across T4 to T8 with focus cost from your spec, crafting quality odds from your quality bonus (developer-posted quality table and roll rule), order flip profit and break-even, and island harvest profit. Focus cost follows the game rule: base × 0.5^(efficiency / 10,000), with 30 efficiency per level in a line and 250 more per level in the exact tier or item.
-- **Wiki**: premium, islands, focus, taxes and fees, return rates, refining recipes, crafting bonus cities, tiers, zones, the Black Market and journals.
-- **Wealth**: enter each bank's value by location (the estimate the game shows on every bank), plus items on sell orders and silver in buy orders, your silver and gold. Shows net worth, liquid vs solid, a stacked bar chart by location, and net worth over time (saved once a day). Optional item list priced at live market value.
-- **Times**: everything in Vancouver time (DST handled). Daily maintenance for each server (10:00 UTC Americas and Europe, about 23:00 UTC Asia) with countdowns, a header clock, island harvest and focus-full timers, plan milestones and premium end. *Best hours to buy and sell* tests a week of hourly market history and only names an hour when its price gap beats day-to-day noise on most days.
-- **Tools**: a haul planner (fits a load to your mount's carry limit and budget, prices both ends, rates the route risk and the share of runs you can lose and still profit), a crafting shopping list (every material, cheapest city, cost, with return rate), and backup and restore of everything you enter.
-- **Profit ledger** (Progress tab): log each session's method, hours and silver to see what really pays you per hour.
-- **Price alerts** (Market tab): get told when a listing drops to, or a buy order reaches, your price. Checked when the app opens and every 10 minutes while it is open; the Android app sends a phone notification.
-- **Change of pace**: suggests a method outside your chosen path for a few hours or days, with why it's a change and a three-step starter plan.
-- **Progress**: a character lookup from Albion's official game info API shows guild and lifetime crafting, gathering and farming fame, and the fame gained between lookups. Log your wealth over time and compare it with your plan. Gold converts to silver at the live gold price, or a rate you set. Data stays in your browser.
-- **Spend real money? wheel**: 30 slices, 1 YES and 29 NO, picked with a fair random draw.
-- **Welcome message**: a greeting shown when the app opens. Use the Edit message button to change it; placeholders like `{daily}` and `{progress}` fill in with your numbers. Turn it off there too, and reopen it with the Welcome button.
+## What's new
+
+- **Ranges that hold.** Every price and profit comes with a range calibrated on months the model never saw. Across 2,001,387 held-out forecasts, the app's 80% ranges held 79.9% of real outcomes; a plain bell curve built from the same daily swing held 60%. They stay on target in calm and wild markets alike (79.4% to 80.4% across five volatility levels).
+- **A confidence score on every play.** Six checks (fresh prices, a busy market, enough history, the listing matching recent sales, the chance it pays, backtest evidence) blended so that one weak check pulls the whole score down. Every play shows its six bars and why each scored what it did.
+- **Eight strategies, including ones few players run.** Enchanting gear one level up for the Black Market, buying panic crashes in busy markets, Caerleon runs ranked by how long their gap lasts, crafting for the Black Market, alongside safe hauls, Black Market flips, focus refining and order flips.
+- **A road to a billion with odds.** A Monte Carlo of your silver: 400 paths of a year of trading with today's plays, each path keeping a different share of the edge and living through different market weeks. It answers "what's my chance of 1B by my deadline", and what holds you back (capital, hours or market size), month by month.
+- **An Edge Lab.** What 200 days of trades say: which edges are real, and which popular ideas ("buy midweek, sell on Sunday", "raw prices lead refined prices") fail out of sample.
+- **A Trust page and a Ledger.** The app shows its own calibration (promised against delivered), and the Ledger checks its ranges against the trades you actually make.
+- **Prices that keep themselves fresh.** While the app is open, live prices reload by themselves every minute, as often as the free price server comfortably allows, and reach the page at a calm moment: never while you type, read a play or scroll, and with your filters, place and focus kept.
+- **Alerts and timers.** A price alert on any item in any market (when the cheapest listing drops to your price, or the best buy order reaches it), checked against every price reload (and in the Windows app, every price your Data Client captures), with the item's usual range as a starting price. Island, laborer and focus timers, and a countdown to each server's daily maintenance. The Android app's reminders arrive even with the app closed.
+
+## Pages
+
+| Page | What it answers |
+|---|---|
+| **Command** | Your chance of the goal by the deadline, today's plan for your hours and capital, the confidence ladder of the top plays, where the money moves, crashes worth buying and spikes to sell into. |
+| **Opportunities** | Every play (about 1,200 on the snapshot) on a risk-and-reward map and in a ranked table. Filter by strategy, confidence and zone; sort by best bet, per hour, profit, confidence or return. Open any play for its confidence breakdown, outcome histogram, step-by-step instructions, the price behind each leg and its backtest. |
+| **Edge Lab** | The research: crash rebounds, the Black Market premium, which enchanting materials pay, how long gaps between markets last, weekend volume, and the two myths that failed. |
+| **Markets** | Any item in all eight markets: four weeks of sales, a calibrated forecast with its 80% and 50% bands, where to buy and where to sell, and the plays that use it. |
+| **Planner** | The road to a billion in detail: the fan of paths, the odds for other hours and capital (with your own spot ringed), what holds you back month by month, and today's routine. |
+| **Trust** | How far to believe every number: calibration charts, how the score works, today's plays by confidence, price freshness, and what the app can't know. |
+| **Ledger** | Net worth check-ins against the straight pace to your goal, logged trades, and your own calibration. |
+| **Alerts** | Price alerts on any item in any market, your island, laborer and focus timers with reminders, and each server's daily maintenance. Any item page has an Alert button that fills the form in. |
+| **Settings** | Server, premium, your silver, gear and focus, data source, how often prices reload, theme, backup and reset. |
+
+## The strategies
+
+| Strategy | What you do | Evidence behind the odds |
+|---|---|---|
+| Black Market flip | Buy from a Caerleon sell order, sell straight into a Black Market buy order. | Held-out odds that a gap into the Black Market still beats fees the next day. |
+| Enchant forge | Buy the item one enchantment level down, enchant it with runes, souls or relics, sell the upgrade to the Black Market. | Backtest of enchant-and-sell by material (win rate shrunk toward a coin flip when thin). |
+| Safe haul | Buy in one royal city, carry it through blue and yellow zones, list it in another. | Held-out odds that a gap of that size still beats fees the next day (715,189 test gaps). |
+| Caerleon run | Buy in a royal city, sell to the Black Market through red zones. | The same gap odds for Black Market gaps. Gank risk is not in the odds. |
+| Panic buy | Buy what just crashed in a busy market and relist it over the week. | How often crashes of that size and market size came back past fees within a week. |
+| Focus refining | Refine at the bonus city with focus (53.9% return) and sell the result. | Calibrated ranges; not backtested as a whole play, so its evidence check stays neutral. |
+| Craft for the Black Market | Craft gear at its bonus city from the cheapest materials, sell to a Black Market buy order. | Calibrated ranges; neutral evidence. |
+| Order flip | Buy order one silver above the best, relist one silver under the cheapest sell order. | Live order books only; whether your orders fill is a guess, so the evidence check is lower. |
+
+## Reading the numbers
+
+- **Profit range.** "+1.56M, 80%: 663k to 2.79M" means that in 80% of simulated outcomes the batch made between 663k and 2.79M. Each outcome draws every price the play rests on: a listing still holds with a chance equal to its freshness, otherwise the price comes from the calibrated range for the day you act.
+- **Confidence score.** A guide, not a probability: High is 70 and up, Medium 50, Low 30, Very low below 30. It ranks plays together with profit per hour (`rank = expected profit per hour × (score / 100)²`).
+- **Odds.** "Chance it pays", the haul odds and the chance of reaching your goal are probabilities. The goal odds come with a 95% interval for the simulation's own sampling error.
+
+[docs/METHOD.md](docs/METHOD.md) explains every model, its data, its tests and its limits.
+
+## Prices: live or snapshot
+
+With internet, the app reads live order prices and daily sales from the free [Albion Online Data Project](https://www.albion-online-data.com/) (Americas, Europe or Asia server). When that server can't be reached it says so, and uses the saved snapshot in `assets/data/v2/snapshot.json`: 28 days of daily sales for the items the scanners use (Americas, to 2026-10-17). In snapshot mode every range is widened for the snapshot's age and every confidence score is lowered for it. Settings can force either source.
+
+**How often prices reload.** While the app is open on live prices, current prices reload by themselves **every minute** (Settings: every minute, every 5 minutes, or only with the reload button). That is as often as is useful without risking the server's limits:
+
+- The server allows 100 requests a minute and 300 every 5 minutes from one internet connection, and blocks a connection for 5 minutes if it keeps asking after being told to slow down. A reload asks only for current orders (about 7 requests; the four-week histories are kept), and the app holds itself to two thirds of each limit, so your other devices and tools on the same Wi-Fi keep room. If the server does say slow down, nothing is sent until its window resets.
+- The server keeps prices in 5-minute steps and only learns new ones when players open markets with the Albion Data Client, so asking more often would mostly fetch the same numbers again.
+- New prices wait for a calm moment: not while you type in a field, have a play, menu or chart tooltip open, have text selected, or within two seconds of a tap, key or scroll. Pages that show current prices redraw in place, keeping filters, scroll position and keyboard focus. Reloads pause while the app is hidden and catch up when it comes back. A reload that fails keeps the prices on screen and tries again later.
+
+For prices within seconds of the markets you open yourself, run the Data Client from the Windows app (below).
+
+In the Windows app, **Settings → Windows app → Start the Data Client** runs the official Albion Data Client with this app as an extra destination (its normal upload to the public project carries on). Every market you open in game then reaches the app **within about a second**: the prices go straight into the plays and your alerts, replacing older public prices, without a single request to the price server, so they don't count against its limits. While you click through markets the plays are scored again at most every 2 seconds, and while the app is minimised the captures wait, so scoring never takes processor time from the game. Captured prices show as "just now" on item pages, and the Trust page says how many of the prices on screen came from your Data Client.
 
 ## Run it
 
-It is a static site with no build step.
+It is a static site: no build step for the browser.
 
-- **GitHub Pages**: in the repository's Settings → Pages, set *Source* to *Deploy from a branch*, branch `main`, folder `/ (root)`. The app is then served at `https://<user>.github.io/<repo>/`.
-- **Locally**: open `index.html` in a browser, or run `python3 -m http.server` in this folder and visit `http://localhost:8000`.
+```sh
+python3 -m http.server 8000      # then open http://localhost:8000
+```
 
-Live prices are fetched by your browser directly from the Albion Online Data Project. If a host blocks that request, the Market tab offers a link to open the price data and a box to paste it in.
+Or open `index.html` from any static host (GitHub Pages works as is).
+
+### Tests and lint
+
+```sh
+ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci   # once: the page tests need jsdom, a simulated browser
+npm test         # 114 tests with Node's built-in runner (Node 22)
+npm run lint     # ESLint's correctness rules (fetches a pinned ESLint on first run)
+```
+
+The tests load the real app scripts in Node and check the statistics, the calibration claims the Trust page makes, the scanners, the simulator, the shipped data files, the settings and ledger against doctored backups, live mode against a fake price server (URL limits, the request budget, waiting out a rate limit, order flips, listing freshness, prices captured by the Windows app, a reload that asks only for current prices), the Windows app's Data Client link (uploads gathered into one push within a second, the page's own lookups, web pages turned away), and the rules behind alerts and timers (which prices meet an alert, how old a price may be, how often one may fire, maintenance across the day line, the focus refill). The page tests boot the whole app in jsdom and use it as a player would: a play opens once however many pages came before, one delete removes one trade, each page keeps its own filters, a Planner edit draws the page once, a restored backup can't put markup into a page, a broken link still loads, the price source ends where the player last asked for it, an alert set from an item page fires once with a notification and a badge, the alert form refuses what can't work, the timers drive the reminders, and reloaded prices wait while the player types or reads a play, keep filters and table views, update an item page in place, retry after a failure, pause while the app is hidden, never double up, and check alerts without a request of their own, an alert that keeps not firing never stalls the app, and Data Client captures reach the page and fire alerts with no request, survive a reload that's running, wait while the app is hidden, never cut short a failed reload's wait, never put older prices back, and arrive together when they come in bursts. `.github/workflows/tests.yml` runs the tests and lint on every push to the v2 branch and on pull requests.
+
+### Android and Windows
+
+```sh
+npm ci
+npm run android:sync     # copies the app into www/ and syncs the Capacitor Android project
+npm run desktop          # runs the Windows/Electron app locally
+npm run desktop:win      # builds Albion-Billionaire-v2-Setup.exe and -portable.exe into dist/
+```
+
+Reminders and price alerts use `@capacitor/local-notifications` on Android, which hands them to the system so they arrive with the app closed (the status-bar icon is `resources/android/drawable/ic_stat_crown.xml`). The Windows app and browsers show them while the app runs, minimised included.
+
+`.github/workflows/android.yml` and `windows.yml` build v2 and publish releases tagged `v2-android-build-N` and `v2-windows-build-N`, never marked "latest", so the original app's download links and update check never see them. They run only when started by hand; see the comment at the top of each file for building from this branch.
+
+## Refreshing the research
+
+The research and the snapshot are computed from saved daily history; nothing in them is typed in by hand.
+
+```sh
+python3 tools/fetch_history.py 2025-10-01 west       # daily history -> data/history/daily.csv.gz
+python3 tools/v2/build_items.py path/to/items.json  # enchant costs and item power -> assets/data/v2/items.json
+pip install numpy pandas
+python3 tools/v2/build_insights.py                   # -> assets/data/v2/insights.json and snapshot.json (about a minute)
+npm test                                             # the data tests check the rebuilt files
+```
+
+`items.json` comes from [ao-bin-dumps](https://github.com/ao-data/ao-bin-dumps). The other files in `data/history` (raw resources, hides, enchanting materials) come from the same script with an explicit item list; the exact commands are in [docs/METHOD.md](docs/METHOD.md#1-data).
+
+## Code map
+
+```
+index.html                 the shell: sidebar, top bar, bottom nav on phones
+assets/css/                app.css (tokens, light and dark, components), pages.css (page layouts)
+assets/js/core/            util (formatting, UTC dates), stats, store (settings and ledger),
+                           clock (maintenance and timers), catalog (items, recipes, cities),
+                           api (price server, cache, snapshot), confidence (calibrated ranges, odds, the score),
+                           notify (notifications on Android, Windows and in browsers)
+assets/js/engine/          market (the market model), scanners (the eight strategies), sim (the road to a billion),
+                           alerts (price alerts)
+assets/js/charts/charts.js dependency-free SVG charts: line and fan, bars, scatter, heatmap, forest, network map
+assets/js/ui.js            shared pieces: cards, the play drawer, tables, tooltips
+assets/js/pages/           one file per page, plus detail.js (the play drawer)
+assets/data/v2/            insights.json (research), snapshot.json (offline prices), items.json (item data)
+tools/v2/                  build_insights.py and build_items.py
+tests/                     the Node test suite
+desktop/                   the Electron shell (Windows)
+```
+
+## Not carried over from the original app
+
+v2 is a fresh start focused on market plays and how far to trust them. These parts of the original app are not in v2: the playstyle plans and method playbooks, the wiki, the spec, quality and island calculators, wealth by bank location, the character lookup, the crafting-plan tab, the laborer optimizer and focus budget planner, the loss budget, the Matchups tab, and the "Spend real money?" wheel. Any of them can come back.
 
 ## Notes
 
-- Income figures are community estimates. Prices and patches change, so check the Market tab before committing silver.
-- Price freshness depends on players running the Albion Data client. Faded cells in the Market table are more than a day old.
-- Not affiliated with Sandbox Interactive.
-
-## Android app
-
-The same app is packaged for Android with [Capacitor](https://capacitorjs.com/). Every push to `main` or the app branch runs `.github/workflows/android.yml`, which builds `albion-billionaire.apk` and publishes it as a GitHub release.
-
-- **Install**: open the repository's *Releases* page on your phone, download `albion-billionaire.apk` from the newest release and open it. Allow installs from your browser or files app when Android asks.
-- **Updates**: every build is signed with the same key (`tools/android-debug.keystore`), so a new APK installs over the old one and keeps your data.
-- In the app, live prices and the character lookup go through Android's own network stack, so nothing is blocked the way a browser can block it. Price alerts arrive as phone notifications.
-- Recipes, base focus costs and item weights come from Albion's item data (`assets/data/recipes.json`). Rebuild it after a game patch with `python3 tools/build_recipes.py items.json`, using `items.json` from [ao-bin-dumps](https://github.com/ao-data/ao-bin-dumps).
-- Build it yourself: `npm ci`, `npm run android:sync`, then open `android/` in Android Studio.
-
-## Safe daily amounts and hidden gems
-
-- **Safe daily amount** (Tools, and under each Best pick): how many you can add to a market each day before moving its price. It uses up to 28 days of daily sales: the normal and slow-day volume, a fitted price-vs-volume effect (used only when it beats twice its standard error), and a share of a slow day otherwise. The cap is halved when prices are falling more than 5% a week.
-- **Hidden gems** (Best picks): margins of 25% or more on things that sell under 5 a day, each proven by at least 3 sales last week near the price used.
-
-- **Safe Options** (Best picks toggle): only royal cities, linked by blue and yellow zones. Black Market flips are swapped for safe royal-city hauls so the page keeps the same number of picks.
-
-## Island, focus, laborers and losses
-
-- **Focus budget planner** (Tools): spends your focus on the refines and crafts that add the most silver per point, each capped at what its market takes in a day.
-- **Island timers and checklist** (Times): harvest, laborer and focus timers with reminders (scheduled phone notifications in the Android app; desktop notifications while the Windows app runs) and a daily island checklist.
-- **Laborer optimizer** (Tools): what each full journal returns, from `assets/data/laborers.json` (built by `tools/build_laborers.py` from Albion's item data), at your laborers' happiness (100 per tier for full yield, +0.5% per point above, up to +50%, per the official wiki).
-- **Return rate by city** (Tools → Crafting shopping list): every city's return rate for the recipe, its bonus city, and the materials cost in each.
-- **Loss budget** (Tools): log losses and count risky runs; risky Best picks then show your real average loss per run.
-
-## Crafting plans
-
-The Crafting tab builds a full plan for one category the player picks (swords, leather jackets, potions and so on); it never shows a single overall best. Every item in the category, up to the highest tier the player can craft and at every enchant, is priced from the last 28 days of Albion Data Project daily history (normal quality, royal cities, plus Caerleon and the Black Market when that toggle is on). Each item is crafted in its bonus city at the wiki's return rates, after 6.5% market fees and a 2% station-fee allowance.
-
-Each stage (spec 0 to 30, 30 to 75, 75 to 100) has its own highest tier: the player picks what they can craft now for Stage 1, and by default Stages 2 and 3 unlock one and two tiers more (both adjustable). Each stage runs the same day: 10,000 focus on the crafts focus helps most, then the material budget on no-focus crafts with the best return, never more than the safe daily amount per city, and at most 8 different items. The report covers the pick, every item ranked, the route by stage with crafting fame, return rates and focus by spec, a separate city-by-city loop for each stage, refining your own materials, a price sheet with targets and break-even limits, and the risks. The same crafts are re-priced with each of the four weeks to give a worst week. Each stage's loop goes around the royal ring (Thetford, Fort Sterling, Lymhurst, Bridgewatch, Martlock) and is sized to the player's pack mount, with no Transport Mammoth: Elder's Transport Ox 3,657 kg by default, Saddled Direbear 3,090 kg, or a T5 to T7 ox (Excellent quality). Every leg counts what's on board, items not yet sold plus materials from where they're bought to where they're used. When a leg is too heavy, the loop buys materials in the crafting city instead of carrying them, then refines less of what saves the least silver per kilo and buys that ready-made. A loop that leaves the mount under 90% full offers an "Expand this loop" button: it adds more of the category's no-focus crafts that the stage has unlocked, best silver per kilo first, each still within its city's safe daily amount, keeping only additions that raise the silver kept, until the mount is about 90% full. An "I have a T8 Transport Mammoth" checkbox sizes the loops to the Elder's Transport Mammoth (about 25,730 kg: its maxload of 113.86 in Albion's spells.json against the Elder's ox's 16.18) and fills every loop that way automatically, as far as profit and each market's safe daily amount allow, without expecting the Mammoth to be full. A "Remove the safe daily sell limit" checkbox lets each item sell up to a whole normal day's sales in its city instead, with a warning that prices will drop. Logic lives in `assets/js/crafting.js`.
-
-## Matchups
-
-The Matchups tab shows, for a weapon the player picks, the weapons it beats and loses to most in 1v1 fights, its record against each weapon line, and the builds players use with it in three settings: Stalker (900 to 1100 IP), Slayer (above 1200 IP) and Top rated (top 500 by Murder Ledger's 1v1 rating). With no weapon picked it shows the weapons winning and losing the most and the most played ones. Matchups are ranked by the low (or high) end of a 95% Wilson interval, so a 9-1 record doesn't outrank 600-400, and rows whose record could still be luck are marked "close".
-
-The data comes from [Murder Ledger](https://murderledger.albiononline2d.com/) (open-source API, MIT, `gitlab.com/albion-murder-ledger/api`): `/api/weapon-matrix`, `/api/weapon-matrix?slayer=true` and `/api/builds/{1v1_stalker_7_day,1v1_high_ip_7_day,1v1_high_elo_7_day}`. Murder Ledger turns away requests from cloud servers (GitHub's runners got 403 on every address), and its API only lets its own site read it from a web page, so there is no automatic snapshot. The app fetches only when the player presses Load: the Windows app through its main process (`ml:get`, Murder Ledger `/api/` addresses only), the Android app through Capacitor's native HTTP. In a plain browser, or if Load fails, the player opens the five links, saves the pages and imports them. The data is kept in IndexedDB (a full set is too big for localStorage).
-
-## Windows app
-
-The same app runs as a Windows desktop program, built with Electron by `.github/workflows/windows.yml` on every push.
-Each build is attached to a `windows-build-N` release:
-
-- `Albion-Billionaire-Setup.exe` installs it with Start menu and desktop shortcuts.
-- `Albion-Billionaire-portable.exe` runs without installing.
-
-**Albion Data Client link:** Tools → Albion Data Client link starts the official client with `-p http://127.0.0.1:47811`, so it keeps uploading to the public project and also sends this app every market order you view. Those prices replace the public ones whenever they're newer. You can instead add that flag to the client's own shortcut.
-
-Item names and recipes ship inside the app. It only contacts GitHub when you press **Check for updates** under Tools: it compares your build number with the newest `windows-build-N` release, and the installed app downloads that Setup.exe and runs it (it upgrades in place and keeps your data). The portable copy opens the release page instead. Other network calls are the Albion Online Data Project prices, Albion's player lookup and Google Fonts.
-Your data lives in the app on that PC; use **Tools → Backup** to move it between your phone and PC.
-Windows may warn that the app is unsigned: choose **More info → Run anyway**.
-
-Run it locally with `npm install && npm run desktop`; build the Windows files with `npm run desktop:win`.
+- Profit ranges and odds are estimates calibrated on past prices. Check the order book in game before you commit silver.
+- Not affiliated with Sandbox Interactive. Prices from the Albion Online Data Project; item data from ao-bin-dumps.

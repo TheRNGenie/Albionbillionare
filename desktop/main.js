@@ -1,8 +1,8 @@
-// Albion Billionaire for Windows: an Electron window around the same web app the Android build uses.
-// The app is served from inside the package on app://albion. The network calls are the Albion price and player
-// APIs (plus Google Fonts for the lettering), Murder Ledger only when the player presses Load on the Matchups tab,
-// and GitHub only when the player presses "Check for updates".
-const { app, BrowserWindow, protocol, net, session, shell, Menu, ipcMain, dialog } = require("electron");
+// Albion Billionaire v2 for Windows: an Electron window around the same web app the Android build uses.
+// The app is served from inside the package on app://albion. The network calls are the Albion Online Data Project's
+// price API (plus Google Fonts for the lettering) and GitHub only when the player presses "Check for updates".
+// v2 installs next to the original app: its own app id, data folder, Data Client port and update channel.
+const { app, BrowserWindow, protocol, net, shell, Menu, ipcMain, dialog } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const http = require("node:http");
@@ -23,28 +23,15 @@ function serveApp() {
   protocol.handle("app", (req) => {
     const rel = decodeURIComponent(new URL(req.url).pathname).replace(/^\/+/, "") || "index.html";
     const file = path.normalize(path.join(WEB, rel));
-    if (!file.startsWith(WEB)) return new Response("Not found", { status: 404 });
+    if (!file.startsWith(WEB + path.sep)) return new Response("Not found", { status: 404 }); // stay inside www/
     return net.fetch(pathToFileURL(file).toString());
   });
-}
-
-// Albion's player API (gameinfo) doesn't send CORS headers; a desktop app may read it anyway.
-function allowGameinfo() {
-  session.defaultSession.webRequest.onHeadersReceived(
-    { urls: ["https://gameinfo.albiononline.com/*", "https://gameinfo-ams.albiononline.com/*", "https://gameinfo-sgp.albiononline.com/*"] },
-    (details, done) => {
-      const headers = { ...details.responseHeaders };
-      for (const k of Object.keys(headers)) if (k.toLowerCase() === "access-control-allow-origin") delete headers[k];
-      headers["Access-Control-Allow-Origin"] = [ORIGIN];
-      done({ responseHeaders: headers });
-    },
-  );
 }
 
 /* ---------- Albion Data Client link ----------
    The official client can send what it captures to extra "private" addresses with -p, on top of its normal
    upload to the public project (-i, untouched). We listen on this PC only and keep the newest order prices. */
-const PORT = 47811;
+const PORT = 47812; // the original app listens on 47811, so both can run at once
 const INGEST = `http://127.0.0.1:${PORT}`;
 const CITY = { "0007": "Thetford", "1002": "Lymhurst", "2004": "Bridgewatch", "3003": "Black Market", "3005": "Caerleon", "3008": "Martlock", "4002": "Fort Sterling", "5003": "Brecilien" };
 const local = { prices: new Map(), received: 0, lastAt: 0, listening: false, error: null, child: null, gold: null };
@@ -60,6 +47,30 @@ let saveTimer = null;
 function saveLocal() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => { try { fs.writeFileSync(storeFile(), JSON.stringify([...local.prices])); } catch (e) { /* disk full or locked */ } }, 5000);
+  saveTimer.unref?.(); /* before-quit saves too, so a pending save never needs to hold the app open */
+}
+/* New prices reach the window within a second instead of waiting for its next price reload: opening one market in game
+   makes several uploads, so the markets they change are gathered for a moment and sent together. The page merges them
+   into what it shows without asking the price server anything (see AB.market.capture). */
+const PUSH_MS = 800;
+const changed = new Set();
+let pushTimer = null;
+function pushSoon(keys) {
+  for (const k of keys) changed.add(k);
+  if (pushTimer) return;
+  pushTimer = setTimeout(pushNow, PUSH_MS);
+  pushTimer.unref?.();
+}
+function pushNow() {
+  pushTimer = null;
+  const rows = [];
+  for (const key of changed) {
+    const v = local.prices.get(key);
+    const [id, city, q] = key.split("|");
+    if (v) rows.push({ id, city, quality: +q, ...v });
+  }
+  changed.clear();
+  if (rows.length) for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send("dc:orders", rows);
 }
 function cityOf(loc) {
   const id = String(loc ?? "").split("-")[0].padStart(4, "0");
@@ -89,10 +100,12 @@ function takeOrders(body) {
     if (b.buy != null) { cur.buy = b.buy; cur.buyAt = now; }
     local.prices.set(key, cur);
   }
-  if (batch.size) { local.received += batch.size; local.lastAt = now; saveLocal(); }
+  if (batch.size) { local.received += batch.size; local.lastAt = now; saveLocal(); pushSoon(batch.keys()); }
 }
 function startIngest() {
   const server = http.createServer((req, res) => {
+    /* the Data Client never sends an Origin header; a web page posting here from a browser always does */
+    if (req.headers.origin) { res.writeHead(403); res.end(); return; }
     if (req.method !== "POST") { res.writeHead(200); res.end("Albion Billionaire is listening"); return; }
     let size = 0; const chunks = [];
     req.on("data", (c) => { size += c.length; if (size > 20e6) req.destroy(); else chunks.push(c); });
@@ -107,6 +120,7 @@ function startIngest() {
   });
   server.on("error", (e) => { local.error = e.code === "EADDRINUSE" ? `Port ${PORT} is already in use. Close other copies of the app.` : e.message; local.listening = false; });
   server.listen(PORT, "127.0.0.1", () => { local.listening = true; local.error = null; });
+  server.unref(); /* the window keeps the app running, not the listener */
 }
 const CLIENT_PATHS = () => [
   path.join(process.env.ProgramFiles || "C:\\Program Files", "Albion Data Client", "albiondata-client.exe"),
@@ -129,8 +143,10 @@ function launchClient(exe) {
   } catch (e) { return { ok: false, error: e.message }; }
 }
 /* ---------- Updates, only when the player asks ----------
-   Each Windows build is a GitHub release tagged windows-build-N, and the app's version is 1.0.N. The installed app
-   downloads the newer Setup.exe and runs it (it upgrades in place, keeping your data); the portable one opens the page. */
+   Each v2 Windows build is a GitHub release tagged v2-windows-build-N, and the app's version is 2.0.N (the original
+   app looks only at windows-build-N, so the two channels never mix). The installed app downloads the newer Setup.exe
+   and runs it (it upgrades in place, keeping your data); the portable one opens the release page. */
+const SETUP = "Albion-Billionaire-v2-Setup.exe", PORTABLE = "Albion-Billionaire-v2-portable.exe";
 const REPO = "TheRNGenie/Albionbillionare";
 const DOWNLOADS = `https://github.com/${REPO}/releases/download/`;
 const portable = () => !!process.env.PORTABLE_EXECUTABLE_FILE;
@@ -138,18 +154,18 @@ const buildNo = () => +(app.getVersion().split(".")[2] || 0);
 async function checkUpdate() {
   const res = await net.fetch(`https://api.github.com/repos/${REPO}/releases?per_page=40`, { headers: { Accept: "application/vnd.github+json", "User-Agent": "Albion-Billionaire" } });
   if (!res.ok) throw new Error(res.status === 403 ? "GitHub is limiting update checks right now. Try again in an hour." : "GitHub answered " + res.status + ".");
-  const builds = (await res.json()).map((r) => ({ r, n: +((r.tag_name || "").match(/^windows-build-(\d+)$/) || [])[1] || 0 })).filter((x) => x.n && !x.r.draft).sort((a, b) => b.n - a.n);
+  const builds = (await res.json()).map((r) => ({ r, n: +((r.tag_name || "").match(/^v2-windows-build-(\d+)$/) || [])[1] || 0 })).filter((x) => x.n && !x.r.draft).sort((a, b) => b.n - a.n);
   const top = builds[0];
   if (!top) return { current: buildNo(), latest: null, portable: portable() };
-  const asset = top.r.assets.find((a) => a.name === (portable() ? "Albion-Billionaire-portable.exe" : "Albion-Billionaire-Setup.exe"));
+  const asset = top.r.assets.find((a) => a.name === (portable() ? PORTABLE : SETUP));
   return { current: buildNo(), latest: top.n, newer: top.n > buildNo(), date: top.r.published_at, url: asset ? asset.browser_download_url : null, size: asset ? asset.size : null, page: top.r.html_url, portable: portable() };
 }
 async function installUpdate(win, url) {
-  if (typeof url !== "string" || !url.startsWith(DOWNLOADS) || !url.endsWith("/Albion-Billionaire-Setup.exe")) throw new Error("That isn't this app's installer.");
+  if (typeof url !== "string" || !url.startsWith(DOWNLOADS) || !url.endsWith("/" + SETUP)) throw new Error("That isn't this app's installer.");
   const res = await net.fetch(url);
   if (!res.ok || !res.body) throw new Error("The download failed (" + res.status + ").");
   const total = +res.headers.get("content-length") || 0;
-  const file = path.join(app.getPath("temp"), "Albion-Billionaire-Setup.exe");
+  const file = path.join(app.getPath("temp"), SETUP);
   const out = fs.createWriteStream(file);
   const reader = res.body.getReader();
   let got = 0, shown = -1;
@@ -168,24 +184,8 @@ async function installUpdate(win, url) {
   return { ok: true };
 }
 
-/* ---------- Murder Ledger, for the Matchups tab ----------
-   Its API only lets its own website read it from a page, so the window asks through here, and only when the
-   player presses Load. Only Murder Ledger's /api/ addresses are allowed. */
-const ML_HOSTS = ["murderledger.albiononline2d.com", "murderledger-europe.albiononline2d.com", "murderledger-asia.albiononline2d.com", "murderledger.com"];
-async function murderLedger(url) {
-  let u;
-  try { u = new URL(url); } catch (e) { return { ok: false, error: "Not a web address." }; }
-  if (u.protocol !== "https:" || !ML_HOSTS.includes(u.host) || !u.pathname.startsWith("/api/")) return { ok: false, error: "Not a Murder Ledger address." };
-  try {
-    const res = await net.fetch(u.toString(), { headers: { Accept: "application/json", "User-Agent": `Albion-Billionaire/${app.getVersion()} (Windows app)` } });
-    if (!res.ok) return { ok: false, status: res.status, error: "Murder Ledger answered " + res.status + "." };
-    return { ok: true, json: await res.json() };
-  } catch (e) { return { ok: false, error: "Couldn't reach Murder Ledger: " + e.message }; }
-}
-
 function setupIpc() {
   ipcMain.handle("upd:check", () => checkUpdate());
-  ipcMain.handle("ml:get", (e, url) => murderLedger(url));
   ipcMain.handle("upd:install", (e, url) => installUpdate(BrowserWindow.fromWebContents(e.sender), url));
   ipcMain.handle("upd:open", (e, url) => { if (typeof url === "string" && url.startsWith(`https://github.com/${REPO}/releases/`)) shell.openExternal(url); });
   ipcMain.handle("dc:status", () => ({ listening: local.listening, error: local.error, ingest: INGEST, received: local.received, lastAt: local.lastAt, count: local.prices.size, running: !!(local.child && local.child.exitCode == null), clientPath: clientPath || (clientPath = findClient()), gold: local.gold }));
@@ -212,8 +212,8 @@ function setupIpc() {
 function createWindow() {
   const win = new BrowserWindow({
     width: 1440, height: 940, minWidth: 900, minHeight: 600,
-    backgroundColor: "#15100b",
-    title: "Albion Billionaire",
+    backgroundColor: "#0b0d10",
+    title: "Albion Billionaire v2",
     icon: path.join(__dirname, "icon.png"),
     autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, sandbox: true, spellcheck: false, preload: path.join(__dirname, "preload.js") },
@@ -230,7 +230,7 @@ function createWindow() {
   return win;
 }
 
-app.setAppUserModelId("com.therngenie.albionbillionaire");
+app.setAppUserModelId("com.therngenie.albionbillionaire.v2");
 app.on("second-instance", () => {
   const [w] = BrowserWindow.getAllWindows();
   if (w) { if (w.isMinimized()) w.restore(); w.focus(); }
@@ -241,7 +241,6 @@ app.whenReady().then(() => {
     { label: "Edit", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
   ]));
   serveApp();
-  allowGameinfo();
   loadLocal();
   startIngest();
   setupIpc();

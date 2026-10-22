@@ -1,10 +1,20 @@
 {
-  "appId": "com.therngenie.albionbillionaire",
-  "appName": "Albion Billionaire",
+  "appId": "com.therngenie.albionbillionaire.v2",
+  "appName": "Albion Billionaire v2",
   "webDir": "www",
-  "android": { "backgroundColor": "#15100b" },
+  "android": {
+    "backgroundColor": "#0b0d10"
+  },
   "plugins": {
-    "CapacitorHttp": { "enabled": true },
-    "LocalNotifications": { "iconColor": "#e0b04f" }
+    "CapacitorHttp": {
+      "enabled": true
+    },
+    "SystemBars": {
+      "initialViewportFitValueHint": "cover"
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_crown",
+      "iconColor": "#e2b350"
+    }
   }
 }
