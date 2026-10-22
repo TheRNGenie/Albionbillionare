@@ -5,15 +5,23 @@ AB.pages = AB.pages || {};
 
 AB.pages.markets = (() => {
   let city = null;
+  let kept = null; // the item drawn last, its data and where from: a redraw starts from it instead of grey blocks
 
-  async function loadItem(id) {
+  const keyOf = (id, M) => `${AB.api.host()}|${M.mode}|${id}`;
+  /* An item the scan covers has its current prices in the market model, which reloads with it; any other item asks
+     the price server (reusing a copy up to a minute old). */
+  async function loadItem(id, M) {
     const api = AB.api, cat = AB.cat;
-    const [rows, hist] = await Promise.all([api.prices([id], cat.MARKETS), api.daily([id], cat.MARKETS, 28)]);
-    return { P: api.index(rows)[id] || {}, hist: hist[id] || {} };
+    const [P, hist] = await Promise.all([
+      M.U?.all.includes(id) ? M.P[id] || {} : api.prices([id], cat.MARKETS, 1, { maxAge: 60e3 }).then((rows) => api.index(rows)[id] || {}),
+      api.daily([id], cat.MARKETS, 28),
+    ]);
+    return { P, hist: hist[id] || {} };
   }
 
   return {
     title: "Markets",
+    live: true, // redrawn in place when prices reload by themselves (see app.js)
     render(root, { args }) {
       const { esc, icon, silver, int, dateFull, ageText } = AB.util;
       const ui = AB.ui, kit = AB.kit, cat = AB.cat, conf = AB.conf, store = AB.store;
@@ -46,7 +54,7 @@ AB.pages.markets = (() => {
         </div></div>
         <div class="mk-facts" style="margin:-6px 0 16px">${facts.map(([k, v]) => `<span>${esc(k)} <b>${esc(v)}</b></span>`).join("")}</div>
         ${kit.modeBanner(M)}
-        <div class="grid" id="m-grid">${[8, 4, 12].map((s) => `<div class="card span-${s}">${ui.skel(220)}</div>`).join("")}</div>`;
+        <div class="grid" id="m-grid">${kept?.key === keyOf(id, M) ? "" : [8, 4, 12].map((s) => `<div class="card span-${s}">${ui.skel(220)}</div>`).join("")}</div>`;
       root.querySelector("#m-watch").addEventListener("click", () => {
         const w = store.get("watch") || [];
         store.set("watch", w.includes(id) ? w.filter((x) => x !== id) : [id, ...w].slice(0, 30));
@@ -54,8 +62,7 @@ AB.pages.markets = (() => {
       });
 
       let alive = true;
-      loadItem(id).then((d) => {
-        if (!alive) return;
+      function fill(d) {
         const stats = Object.fromEntries(cat.MARKETS.map((c) => [c, conf.seriesStats(d.hist[c] || [], M.asOf)]));
         const has = cat.MARKETS.filter((c) => (d.hist[c] || []).length || d.P[c]);
         if (!has.length) { root.querySelector("#m-grid").innerHTML = `<div class="span-12">${ui.empty(M.live ? "No market has reported this item in the last four weeks." : "The saved snapshot doesn't include this item. Live prices would.")}</div>`; return; }
@@ -119,9 +126,17 @@ AB.pages.markets = (() => {
         root.querySelector("#m-city").addEventListener("change", (e) => { city = e.target.value; AB.app.rerender(); });
         /* a row click (mouse) or its market button (keyboard) forecasts that market */
         root.querySelectorAll("tr[data-city]").forEach((tr) => tr.addEventListener("click", () => { city = tr.dataset.city; AB.app.rerender(); }));
-        kit.wireOpps(root);
-      }).catch((e) => {
+      }
+      kit.wireOpps(root);
+      const key = keyOf(id, M), shown = kept?.key === key;
+      if (shown) fill(kept.d);
+      loadItem(id, M).then((d) => {
         if (!alive) return;
+        const same = kept?.key === key && JSON.stringify(kept.d) === JSON.stringify(d);
+        kept = { key, d };
+        if (!same) fill(d);
+      }).catch((e) => {
+        if (!alive || shown) return; // keep what's on screen; the next reload tries again
         root.querySelector("#m-grid").innerHTML = `<div class="span-12 banner warn">${icon("alert")}<div class="b-body"><div class="b-title">Couldn't load this item</div><div class="small">${esc(e.message)}</div></div></div>`;
       });
       return () => { alive = false; };

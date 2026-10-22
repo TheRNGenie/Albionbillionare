@@ -32,6 +32,7 @@ AB.pages.settings = {
         </div><hr><p class="small">Refining focus efficiency from your Destiny Board (each 10,000 halves the focus a refine costs):</p><div class="form-grid">${cat.RESOURCES.map((r) => `<label class="field"><span>${esc(r.refinedName)}</span><input class="input num" type="number" min="0" max="60000" step="250" data-spec="${r.key}" value="${esc(spec[r.key] || 0)}"></label>`).join("")}</div>` })}
         ${ui.card({ span: 6, cls: "set-group", title: "Data and display", body: `
           <div class="field"><span>Prices</span>${ui.seg("dataMode", [["auto", "Automatic"], ["live", "Live only"], ["snapshot", "Snapshot only"]], g("dataMode"), "Data source")}<span class="hint">Automatic uses live prices when the server answers and the saved snapshot when it doesn't.</span></div>
+          <div class="field" style="margin-top:12px"><span>Reload prices</span>${ui.seg("autoReload", [[60, "Every minute"], [300, "Every 5 min"], [0, "Off"]], g("autoReload"), "Reload prices by themselves")}<span class="hint">While the app is open on live prices. Each reload makes about 7 of the 100 requests a minute the price server allows, and the app keeps to two thirds of its limits. Off: only the reload button in the top bar.</span></div>
           <div class="field" style="margin-top:12px"><span>Theme</span>${ui.seg("theme", [["auto", "Match device"], ["light", "Light"], ["dark", "Dark"]], g("theme"), "Theme")}</div>
           <div class="row" style="margin-top:14px"><button class="btn" type="button" id="s-clear">${icon("refresh")}Clear cached prices</button><span class="small muted">${AB.api.calls} price requests this session.</span></div>` })}
         ${desk ? ui.card({ span: 12, cls: "set-group", title: "Windows app", body: `<div id="s-desk" class="stack"><p class="small">Loading the Albion Data Client link…</p></div>` }) : ""}
@@ -54,6 +55,7 @@ AB.pages.settings = {
       store.set(k, el.value);
     });
     ui.onSeg(root, "dataMode", (v) => store.set("dataMode", v));
+    ui.onSeg(root, "autoReload", (v) => store.set("autoReload", +v));
     ui.onSeg(root, "theme", (v) => store.set("theme", v));
     root.querySelector("#s-clear").addEventListener("click", async () => { await AB.api.clear(); toast("Cached prices cleared."); });
     root.querySelector("#s-export").addEventListener("click", () => AB.util.saveFile(`albion-billionaire-v2-backup-${new Date().toISOString().slice(0, 10)}.json`, store.exportAll()).catch((e) => toast(e.message || "The backup couldn't be saved.")));

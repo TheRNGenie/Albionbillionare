@@ -4,6 +4,7 @@ AB.pages = AB.pages || {};
 
 AB.pages.command = {
   title: "Command",
+  live: true, // redrawn in place when prices reload by themselves (see app.js)
   render(root) {
     const { esc, icon, silver, pct, spct, int, dateFull, date, D, ageText } = AB.util;
     const ui = AB.ui, kit = AB.kit, sim = AB.sim, cat = AB.cat;

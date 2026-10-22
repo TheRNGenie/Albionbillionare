@@ -12,7 +12,8 @@ Every money-making play in Albion Online, scored twice: once for what it could e
 - **A road to a billion with odds.** A Monte Carlo of your silver: 400 paths of a year of trading with today's plays, each path keeping a different share of the edge and living through different market weeks. It answers "what's my chance of 1B by my deadline", and what holds you back (capital, hours or market size), month by month.
 - **An Edge Lab.** What 200 days of trades say: which edges are real, and which popular ideas ("buy midweek, sell on Sunday", "raw prices lead refined prices") fail out of sample.
 - **A Trust page and a Ledger.** The app shows its own calibration (promised against delivered), and the Ledger checks its ranges against the trades you actually make.
-- **Alerts and timers.** A price alert on any item in any market (when the cheapest listing drops to your price, or the best buy order reaches it), checked against live prices every 10 minutes, with the item's usual range as a starting price. Island, laborer and focus timers, and a countdown to each server's daily maintenance. The Android app's reminders arrive even with the app closed.
+- **Prices that keep themselves fresh.** While the app is open, live prices reload by themselves every minute, as often as the free price server comfortably allows, and reach the page at a calm moment: never while you type, read a play or scroll, and with your filters, place and focus kept.
+- **Alerts and timers.** A price alert on any item in any market (when the cheapest listing drops to your price, or the best buy order reaches it), checked against every price reload, with the item's usual range as a starting price. Island, laborer and focus timers, and a countdown to each server's daily maintenance. The Android app's reminders arrive even with the app closed.
 
 ## Pages
 
@@ -26,7 +27,7 @@ Every money-making play in Albion Online, scored twice: once for what it could e
 | **Trust** | How far to believe every number: calibration charts, how the score works, today's plays by confidence, price freshness, and what the app can't know. |
 | **Ledger** | Net worth check-ins against the straight pace to your goal, logged trades, and your own calibration. |
 | **Alerts** | Price alerts on any item in any market, your island, laborer and focus timers with reminders, and each server's daily maintenance. Any item page has an Alert button that fills the form in. |
-| **Settings** | Server, premium, your silver, gear and focus, data source, theme, backup and reset. |
+| **Settings** | Server, premium, your silver, gear and focus, data source, how often prices reload, theme, backup and reset. |
 
 ## The strategies
 
@@ -53,6 +54,14 @@ Every money-making play in Albion Online, scored twice: once for what it could e
 
 With internet, the app reads live order prices and daily sales from the free [Albion Online Data Project](https://www.albion-online-data.com/) (Americas, Europe or Asia server). When that server can't be reached it says so, and uses the saved snapshot in `assets/data/v2/snapshot.json`: 28 days of daily sales for the items the scanners use (Americas, to 2026-10-17). In snapshot mode every range is widened for the snapshot's age and every confidence score is lowered for it. Settings can force either source.
 
+**How often prices reload.** While the app is open on live prices, current prices reload by themselves **every minute** (Settings: every minute, every 5 minutes, or only with the reload button). That is as often as is useful without risking the server's limits:
+
+- The server allows 100 requests a minute and 300 every 5 minutes from one internet connection, and blocks a connection for 5 minutes if it keeps asking after being told to slow down. A reload asks only for current orders (about 7 requests; the four-week histories are kept), and the app holds itself to two thirds of each limit, so your other devices and tools on the same Wi-Fi keep room. If the server does say slow down, nothing is sent until its window resets.
+- The server keeps prices in 5-minute steps and only learns new ones when players open markets with the Albion Data Client, so asking more often would mostly fetch the same numbers again.
+- New prices wait for a calm moment: not while you type in a field, have a play, menu or chart tooltip open, have text selected, or within two seconds of a tap, key or scroll. Pages that show current prices redraw in place, keeping filters, scroll position and keyboard focus. Reloads pause while the app is hidden and catch up when it comes back. A reload that fails keeps the prices on screen and tries again later.
+
+For prices within seconds of the markets you open yourself, run the Data Client from the Windows app (below).
+
 In the Windows app, **Settings → Windows app → Start the Data Client** runs the official Albion Data Client with this app as an extra destination, so market orders you view in game reach the app first and replace older public prices.
 
 ## Run it
@@ -69,11 +78,11 @@ Or open `index.html` from any static host (GitHub Pages works as is).
 
 ```sh
 ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci   # once: the page tests need jsdom, a simulated browser
-npm test         # 82 tests with Node's built-in runner (Node 22)
+npm test         # 100 tests with Node's built-in runner (Node 22)
 npm run lint     # ESLint's correctness rules (fetches a pinned ESLint on first run)
 ```
 
-The tests load the real app scripts in Node and check the statistics, the calibration claims the Trust page makes, the scanners, the simulator, the shipped data files, the settings and ledger against doctored backups, live mode against a fake price server (URL limits, a rate-limited retry, order flips, listing freshness, prices captured by the Windows app), and the rules behind alerts and timers (which prices meet an alert, how old a price may be, how often one may fire, maintenance across the day line, the focus refill). The page tests boot the whole app in jsdom and use it as a player would: a play opens once however many pages came before, one delete removes one trade, each page keeps its own filters, a Planner edit draws the page once, a restored backup can't put markup into a page, a broken link still loads, the price source ends where the player last asked for it, an alert set from an item page fires once with a notification and a badge, the alert form refuses what can't work, and the timers drive the reminders. `.github/workflows/tests.yml` runs the tests and lint on every push to the v2 branch and on pull requests.
+The tests load the real app scripts in Node and check the statistics, the calibration claims the Trust page makes, the scanners, the simulator, the shipped data files, the settings and ledger against doctored backups, live mode against a fake price server (URL limits, the request budget, waiting out a rate limit, order flips, listing freshness, prices captured by the Windows app, a reload that asks only for current prices), and the rules behind alerts and timers (which prices meet an alert, how old a price may be, how often one may fire, maintenance across the day line, the focus refill). The page tests boot the whole app in jsdom and use it as a player would: a play opens once however many pages came before, one delete removes one trade, each page keeps its own filters, a Planner edit draws the page once, a restored backup can't put markup into a page, a broken link still loads, the price source ends where the player last asked for it, an alert set from an item page fires once with a notification and a badge, the alert form refuses what can't work, the timers drive the reminders, and reloaded prices wait while the player types or reads a play, keep filters and table views, update an item page in place, retry after a failure, pause while the app is hidden, never double up, and check alerts without a request of their own. `.github/workflows/tests.yml` runs the tests and lint on every push to the v2 branch and on pull requests.
 
 ### Android and Windows
 

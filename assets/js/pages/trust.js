@@ -4,7 +4,9 @@ AB.pages = AB.pages || {};
 
 AB.pages.trust = {
   title: "Trust",
-  render(root, { q }) {
+  live: true, // redrawn in place when prices reload by themselves (see app.js)
+  scrolled: 0, // the visit whose ?s=data link has been followed
+  render(root, { q, visit }) {
     const { esc, pct, int, dateFull, ageText } = AB.util;
     const ui = AB.ui, kit = AB.kit, conf = AB.conf;
     const H = { eyebrow: "Trust", title: "How far to believe every number", sub: "Two separate promises. Ranges and odds are calibrated: when the app says 80%, it has been right about 80% of the time on months it never saw. The confidence score is a guide that blends six checks into one number." };
@@ -34,7 +36,7 @@ AB.pages.trust = {
         ${ui.chartCard({ id: "t-haul", span: 6, title: "Haul odds, checked", sub: `The app's chance that a gap between markets still beats fees the next day, against what happened (${int(sv.nTest)} held-out gaps). Bigger dots, more cases. On the diagonal is honest.`, height: 470 })}
         ${ui.card({ span: 6, title: "How the confidence score works", sub: "A weighted geometric mean of six checks, each from 0 to 1. One weak check pulls the whole score down, which is the point: a play is only as trustworthy as its weakest link.", body: `<div class="weights">${Object.entries(W).map(([k, w]) => `<div class="factor"><span class="f-name">${esc(FN[k])}</span>${ui.meter(w / 0.2, "neutral", `Weight ${Math.round(w * 100)}%`)}<span class="f-val">${Math.round(w * 100)}%</span><span class="factor-note">${esc(defs[k])}</span></div>`).join("")}</div><hr>${ui.tierLegend()}` })}
         ${R ? ui.chartCard({ id: "t-dist", span: 6, title: "Today's plays by confidence", sub: `${int(R.opps.length)} plays, grouped by score.`, height: 240 }) : ""}
-        ${ui.chartCard({ id: "t-fresh", span: 6, title: "How fresh the prices are", sub: M ? (M.live ? "Median age of the listings the app loaded, by market." : `Median age of the prices in use, by market. The saved snapshot ends ${esc(dateFull(M.asOf))}, ${esc(ageText(M.now - M.asOf))} ago, and quiet items last sold before that.`) : "Loading…", height: 240 })}
+        ${ui.chartCard({ id: "t-fresh", span: 6, title: "How fresh the prices are", sub: M ? (M.live ? `Median age of the listings the app loaded, by market. Prices checked ${esc(AB.clock.local(M.now))}${AB.store.get("autoReload") ? ", and they reload by themselves while the app is open" : ""}.` : `Median age of the prices in use, by market. The saved snapshot ends ${esc(dateFull(M.asOf))}, ${esc(ageText(M.now - M.asOf))} ago, and quiet items last sold before that.`) : "Loading…", height: 240 })}
         ${ui.card({ span: 12, title: "What the app can't know", body: `<ul class="know">
           <li>How many items sit behind a listing. The price server reports the cheapest sell order and the best buy order, not their size, so batch sizes come from how much sells a day.</li>
           <li>Who else is chasing the same gap. The planner assumes you keep only part of each edge; the backtest odds already include gaps closing.</li>
@@ -106,6 +108,7 @@ AB.pages.trust = {
         fmt: (v) => (v <= 0 ? "0" : ageText(v * 36e5)), notes: fr.map((f) => `${int(f.n)} prices. ${pct(f.share6h)} under 6 hours old.`),
       }, { table: { cols: ["Market", { label: "Median age", r: true }, { label: "Under 6 h", r: true }, { label: "Prices", r: true }], rows: fr.map((f) => [f.city, ageText(f.p50 * 36e5), pct(f.share6h), int(f.n)]) } });
     }
-    if (q.s === "data") setTimeout(() => document.getElementById("t-fresh")?.scrollIntoView({ behavior: "smooth", block: "center" }), 60);
+    /* the status pill links here (?s=data): scroll to the freshness chart once per visit, not on every redraw */
+    if (q.s === "data" && R && AB.pages.trust.scrolled !== visit) { AB.pages.trust.scrolled = visit; setTimeout(() => document.getElementById("t-fresh")?.scrollIntoView({ behavior: "smooth", block: "center" }), 60); }
   },
 };

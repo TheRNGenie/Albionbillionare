@@ -312,3 +312,193 @@ test("timers count down from what the player sets, reminders follow them, and Re
   assert.deepEqual(app.errors, []);
   app.close();
 });
+
+/* ---------- automatic price reloads ---------- */
+/* The live server's one current price, for a bag in Lymhurst; tests change it and reload. */
+const bag = (sell) => [{ item_id: "T6_BAG", city: "Lymhurst", quality: 1, sell_price_min: sell, sell_price_min_date: isoNow(), buy_price_max: 0, buy_price_max_date: "0001-01-01T00:00:00" }];
+const shownSell = (app) => app.AB.state.M.P.T6_BAG?.Lymhurst?.sell;
+async function liveApp(extra = {}) {
+  const s = server();
+  s.online = true;
+  s.prices = bag(9000);
+  const asked = [];
+  const app = await boot({ net: (u) => { asked.push(u); return s.net(u); }, ...extra });
+  return { s, app, asked };
+}
+
+test("reloaded prices wait while the player types, then reach the page with its filters and table view kept", async () => {
+  const { s, app } = await liveApp();
+  await app.go("#/opps");
+  app.click(app.$('[data-seg="min"] [data-v="50"]'));
+  app.click(app.$("#o-map [data-table-toggle]"));
+  s.prices = bag(8000);
+  const search = app.$("#search");
+  search.focus();
+  const draws = await app.renders("opps", async () => {
+    await app.AB.app.reloadPrices();
+    await sleep(700);
+    assert.equal(shownSell(app), 9000, "not while a field has focus");
+    search.blur();
+    await until(() => shownSell(app) === 8000);
+  });
+  assert.equal(draws, 1, "the page is redrawn once with the new prices");
+  assert.equal(app.$('[data-seg="min"] [aria-pressed="true"]').dataset.v, "50");
+  assert.equal(app.$("#o-map [data-table-toggle]").getAttribute("aria-pressed"), "true");
+  assert.equal(app.$("#o-map .chart-table").hidden, false);
+  assert.equal(app.$("#statusPill").dataset.mode, "live");
+  assert.match(app.$("#statusPill").title, /checked .*reloading every minute/);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("reloaded prices wait while a play or dialog is open, and a page holding a form isn't redrawn under the player", async () => {
+  const { s, app } = await liveApp();
+  await app.go("#/opps");
+  app.AB.ui.drawer.open({ title: "<h2>A play</h2>", html: "<p>Details</p>" });
+  s.prices = bag(8000);
+  await app.AB.app.reloadPrices();
+  await sleep(700);
+  assert.equal(shownSell(app), 9000, "held back while the drawer is open");
+  app.click(app.$(".drawer [data-close]"));
+  await until(() => shownSell(app) === 8000);
+  await app.go("#/alerts");
+  app.$("#al-price").value = "12345";
+  s.prices = bag(7000);
+  const draws = await app.renders("alerts", async () => {
+    await app.AB.app.reloadPrices();
+    await until(() => shownSell(app) === 7000);
+  });
+  assert.equal(draws, 0);
+  assert.equal(app.$("#al-price").value, "12345");
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("an automatic reload that fails keeps the prices on screen, says it's retrying, and recovers", async () => {
+  const { s, app } = await liveApp();
+  const M = app.AB.state.M;
+  s.failPrices = true;
+  await app.AB.app.reloadPrices();
+  assert.equal(app.AB.state.M, M);
+  assert.equal(app.AB.api.mode, "live", "no switch to the snapshot");
+  assert.equal(app.$("#statusPill").dataset.mode, "retry");
+  assert.equal(app.$("#statusPill .sp-text").textContent, "Live · retrying");
+  assert.match(app.$("#statusPill").title, /can't be reached.*checked at/);
+  s.failPrices = false;
+  s.prices = bag(8500);
+  await app.AB.app.reloadPrices();
+  await until(() => shownSell(app) === 8500);
+  assert.equal(app.$("#statusPill").dataset.mode, "live");
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("a reload is due a minute after the last: showing the app catches up at once, but not while hidden or switched off", async () => {
+  const { s, app, asked } = await liveApp();
+  const { w, AB } = app;
+  const real = w.Date.now.bind(w.Date);
+  w.Date.now = () => real() + 61e3; // a minute and a second after the first load
+  const prices = () => asked.filter((u) => u.includes("/stats/prices/")).length;
+  const shown = () => w.document.dispatchEvent(new w.Event("visibilitychange"));
+  const base = prices();
+  s.prices = bag(8000);
+  Object.defineProperty(w.document, "visibilityState", { value: "hidden", configurable: true });
+  shown();
+  await app.AB.app.reloadPrices();
+  await sleep(50);
+  assert.equal(prices(), base, "nothing while the app is hidden");
+  delete w.document.visibilityState;
+  AB.store.set("autoReload", 0);
+  shown();
+  await sleep(50);
+  assert.equal(prices(), base, "nothing when switched off");
+  AB.store.set("autoReload", 60);
+  await until(() => shownSell(app) === 8000);
+  assert.ok(prices() > base, "switched back on, the overdue reload runs at once");
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("an item page takes reloaded prices in place, without going back to grey blocks", async () => {
+  const { s, app } = await liveApp();
+  await app.go("#/markets/T6_BAG");
+  const now = () => app.$('#m-grid tr[data-city="Lymhurst"] td.r.num')?.textContent || "";
+  await until(() => /9,000/.test(now()));
+  let greyed = 0;
+  new app.w.MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.querySelector?.(".skel") || n.classList?.contains("skel")) greyed++; })
+    .observe(app.w.document.body, { childList: true, subtree: true });
+  s.prices = bag(8000);
+  await app.AB.app.reloadPrices();
+  await until(() => /8,000/.test(now()));
+  await sleep(30);
+  assert.equal(greyed, 0);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("a link acts once per visit: a redraw with new prices doesn't scroll back to the data section", async () => {
+  const { s, app } = await liveApp();
+  let scrolls = 0;
+  app.w.HTMLElement.prototype.scrollIntoView = () => { scrolls++; };
+  await app.go("#/trust?s=data");
+  await sleep(100);
+  assert.equal(scrolls, 1);
+  s.prices = bag(8000);
+  const draws = await app.renders("trust", async () => {
+    await app.AB.app.reloadPrices();
+    await until(() => shownSell(app) === 8000);
+    await sleep(100);
+  });
+  assert.equal(draws, 1);
+  assert.equal(scrolls, 1, "the redraw didn't scroll again");
+  await app.go("#/command");
+  await app.go("#/trust?s=data");
+  await sleep(100);
+  assert.equal(scrolls, 2, "a new visit to the link does");
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("a reload run early takes the place of the one planned, so reloads never double up", async () => {
+  /* the reload timers: the app plans the next reload a minute ahead */
+  const planned = new Set();
+  const setup = (w) => {
+    const set = w.setTimeout.bind(w), clear = w.clearTimeout.bind(w);
+    w.setTimeout = (fn, ms, ...a) => {
+      if (!(ms > 30e3 && ms <= 61e3)) return set(fn, ms, ...a);
+      const id = set(() => { planned.delete(id); fn(...a); }, ms);
+      planned.add(id);
+      return id;
+    };
+    w.clearTimeout = (id) => { planned.delete(id); clear(id); };
+  };
+  const { s, app } = await liveApp({ setup });
+  assert.equal(planned.size, 1, "the first load plans the next reload");
+  s.prices = bag(8000);
+  await app.AB.app.reloadPrices();
+  await until(() => shownSell(app) === 8000);
+  assert.equal(planned.size, 1, "a reload run early replaces it");
+  s.prices = bag(7500);
+  app.w.dispatchEvent(new app.w.Event("online"));
+  await until(() => shownSell(app) === 7500);
+  assert.equal(planned.size, 1, "and so does one run because the device is back online");
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("alerts are checked with every automatic reload, and one on a scanned item costs no request of its own", async () => {
+  const { s, app, asked } = await liveApp();
+  const { AB } = app;
+  const priceRequests = () => asked.filter((u) => u.includes("/stats/prices/")).length;
+  const perLoad = priceRequests();
+  assert.ok(AB.state.M.U.all.includes("T6_BAG"));
+  AB.store.set("alerts", [{ id: "T6_BAG", city: "Lymhurst", kind: "below", price: 8500, t: 0, firedAt: 0, last: null, seen: null, checked: null, hit: false }]);
+  s.prices = bag(8000);
+  await AB.app.reloadPrices();
+  await until(() => AB.store.get("alerts")[0].hit);
+  assert.equal(AB.store.get("alerts")[0].last, 8000);
+  assert.equal(priceRequests(), 2 * perLoad, "the reload's own requests and nothing more");
+  assert.equal(app.$("[data-badge]").hidden, false, "the Alerts badge shows it");
+  assert.deepEqual(app.errors, []);
+  app.close();
+});

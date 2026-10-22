@@ -9,6 +9,7 @@ AB.store = (() => {
     premium: true,
     theme: "auto",
     dataMode: "auto",
+    autoReload: 60, // seconds between automatic price reloads; 0 = only the reload button (see app.js)
     safeOnly: false,
     goal: 1e9,
     netWorth: 25e6,
@@ -60,6 +61,7 @@ AB.store = (() => {
     premium: bool,
     theme: oneOf("auto", "light", "dark"),
     dataMode: oneOf("auto", "live", "snapshot"),
+    autoReload: oneOf(0, 60, 300),
     safeOnly: bool,
     goal: clampTo(1e6, 1e13),
     netWorth: SILVER,

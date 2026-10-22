@@ -158,7 +158,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); }
 .status-pill[data-mode="live"] .dot { background: var(--good); box-shadow: 0 0 0 3px var(--good-wash); }
-.status-pill[data-mode="snapshot"] .dot { background: var(--warning); box-shadow: 0 0 0 3px var(--warning-wash); }
+.status-pill[data-mode="snapshot"] .dot,
+.status-pill[data-mode="retry"] .dot { background: var(--warning); box-shadow: 0 0 0 3px var(--warning-wash); }
 .status-pill[data-mode="loading"] .dot { background: var(--s1); animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 .icon-btn {

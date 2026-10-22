@@ -1,7 +1,8 @@
 /* Boots the whole app, pages included, in jsdom (a simulated browser) for tests of what the pages do: clicks, forms,
    navigation, restored backups. Every call makes a fresh window with its own storage. The app's own scripts load in
    the order index.html lists them, from the files on disk. The price server is offline unless `net` (url -> response,
-   or a throw for a failed request) stands in for it, so by default the app runs on the saved snapshot. */
+   or a throw for a failed request) stands in for it, so by default the app runs on the saved snapshot. `setup(window)`
+   runs before the app's scripts, to stand in for browser parts a test wants to watch. */
 import fs from "node:fs";
 import path from "node:path";
 import { after } from "node:test";
@@ -27,7 +28,7 @@ export async function until(fn, ms = 30000) {
 }
 export const respond = (body, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body) });
 
-export async function boot({ net = null, hash = "", storage = {} } = {}) {
+export async function boot({ net = null, hash = "", storage = {}, setup = null } = {}) {
   const errors = [];
   const vc = new VirtualConsole();
   vc.on("error", (...a) => errors.push(a.map(String).join(" ")));
@@ -49,6 +50,7 @@ export async function boot({ net = null, hash = "", storage = {} } = {}) {
   w.ResizeObserver = class { observe() {} disconnect() {} };
   w.scrollTo = () => {};
   w.HTMLElement.prototype.scrollIntoView = () => {};
+  setup?.(w);
   for (const s of SCRIPTS) w.eval(fs.readFileSync(path.join(ROOT, s), "utf8"));
   const AB = w.AB;
   await until(() => AB.state.R && !AB.state.loading);

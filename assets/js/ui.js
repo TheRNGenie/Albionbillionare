@@ -29,6 +29,8 @@ AB.ui = (() => {
   }
 
   const live = new Map();
+  /* Chart cards switched to their table, by id, so a redraw (new prices, new settings) keeps the player's choice. */
+  const tables = new Set();
   /* Draw a chart into a chart card. legend: [{name, color, kind:'line'|'box'|'band'|'dot'}]; table: {cols:[{label, r}], rows:[[...]]}. */
   function plot(id, type, spec, { legend = null, table = null } = {}) {
     const cardEl = document.getElementById(id);
@@ -40,20 +42,21 @@ AB.ui = (() => {
     const hasLegend = !!(legend && legend.length);
     legEl.innerHTML = hasLegend ? legendHTML(legend) : "";
     const btn = cardEl.querySelector("[data-table-toggle]");
-    const showTable = btn && btn.getAttribute("aria-pressed") === "true";
-    legEl.hidden = !hasLegend || showTable;
     const c = AB.charts[type](chartEl, spec);
     live.set(id, c);
     if (table) tableEl.innerHTML = tableHTML(table);
-    if (btn) {
-      btn.hidden = !table;
-      btn.onclick = () => {
-        const on = btn.getAttribute("aria-pressed") !== "true";
-        btn.setAttribute("aria-pressed", String(on));
-        btn.title = on ? "Show the chart" : "Show the numbers as a table";
-        tableEl.hidden = !on; chartEl.hidden = on; legEl.hidden = on || !hasLegend;
-      };
-      tableEl.hidden = !showTable; chartEl.hidden = !!showTable;
+    const show = (on) => {
+      btn.setAttribute("aria-pressed", String(on));
+      btn.title = on ? "Show the chart" : "Show the numbers as a table";
+      tableEl.hidden = !on; chartEl.hidden = on; legEl.hidden = on || !hasLegend;
+    };
+    if (btn && table) {
+      btn.hidden = false;
+      btn.onclick = () => { const on = !tables.has(id); if (on) tables.add(id); else tables.delete(id); show(on); };
+      show(tables.has(id));
+    } else {
+      if (btn) btn.hidden = true;
+      tableEl.hidden = true; chartEl.hidden = false; legEl.hidden = !hasLegend;
     }
     return c;
   }

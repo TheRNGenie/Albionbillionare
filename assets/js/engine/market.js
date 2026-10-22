@@ -92,6 +92,27 @@ AB.market = (() => {
     return pending;
   }
 
+  /* The automatic reload: fresh current orders for the same universe, on a live model only. Histories already
+     loaded are kept (an item that newly matters fetches its own), so one reload is the price requests alone. Unlike
+     load(), it never switches to the snapshot: when the server fails it throws, and the model on screen stays. */
+  async function update() {
+    if (pending) return pending;
+    if (!M?.live || api.mode !== "live") throw new Error("Live prices are off.");
+    pending = (async () => {
+      try {
+        const U = universe();
+        const rows = await api.prices(U.all, cat.MARKETS, 1, { maxAge: 0 });
+        const P = api.index(rows);
+        const hist = await api.daily(candidates(P, U), cat.MARKETS, 28);
+        if (api.mode !== "live") throw new Error("Live prices are off.");
+        M = build(P, hist, U, rows);
+        ev.emit("ready", M);
+        return M;
+      } finally { pending = null; }
+    })();
+    return pending;
+  }
+
   function build(P, hist, U, rows) {
     const live = api.mode === "live";
     const now = Date.now();
@@ -144,12 +165,13 @@ AB.market = (() => {
     };
   }
 
-  /* Freshness of order data by market (for the Trust page): median age of listings per city. */
-  function freshnessByCity() {
-    if (!M) return [];
+  /* Freshness of order data by market (for the Trust page): median age of listings per city, for the model on
+     screen (a newer one may be waiting for its moment; see app.js). */
+  function freshnessByCity(m = AB.state ? AB.state.M : M) {
+    if (!m) return [];
     return cat.MARKETS.map((c) => {
       const ages = [];
-      for (const id of Object.keys(M.P)) { const r = M.P[id][c]; if (!r) continue; const a = M.ageH(c === cat.BM ? r.buyDate : r.sellDate); if (a != null) ages.push(a); }
+      for (const id of Object.keys(m.P)) { const r = m.P[id][c]; if (!r) continue; const a = m.ageH(c === cat.BM ? r.buyDate : r.sellDate); if (a != null) ages.push(a); }
       ages.sort((a, b) => a - b);
       const q = (p) => (ages.length ? ages[Math.min(ages.length - 1, Math.floor(p * ages.length))] : null);
       return { city: c, n: ages.length, p25: q(0.25), p50: q(0.5), p75: q(0.75), share6h: ages.length ? ages.filter((a) => a <= 6).length / ages.length : 0 };
@@ -157,7 +179,7 @@ AB.market = (() => {
   }
 
   return {
-    load, universe, freshnessByCity,
+    load, update, universe, freshnessByCity,
     get data() { return M; },
     on: (e, fn) => ev.on(e, fn),
     reset() { M = null; },

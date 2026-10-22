@@ -79,7 +79,11 @@ AB.app = (() => {
     const q = Object.fromEntries(new URLSearchParams(query));
     return { id: AB.pages[parts[0]] ? parts[0] : "command", args: parts.slice(1), q };
   }
-  function route() {
+  /* A visit starts when the address changes (or the app opens). Pages act on one-time requests in the address
+     (open a play, scroll to a section) once per visit, not again on every redraw. */
+  let visit = 0;
+  function route() { visit++; draw(); }
+  function draw() {
     const { id, args, q } = parseHash();
     const page = AB.pages[id];
     if (cleanup) { try { cleanup(); } catch (e) { console.error(e); } cleanup = null; }
@@ -96,14 +100,14 @@ AB.app = (() => {
     const root = old.cloneNode(false);
     old.replaceWith(root);
     root.dataset.page = id;
-    try { cleanup = page.render(root, { args, q }) || null; }
+    try { cleanup = page.render(root, { args, q, visit }) || null; }
     catch (e) { console.error(e); root.innerHTML = `<div class="banner warn">${icon("alert")}<div class="b-body"><div class="b-title">This page hit a problem</div><div class="small">${esc(e.message)}</div></div></div>`; }
     if (changed) window.scrollTo(0, 0);
   }
   /* Re-render the current page in place (new data or settings), keeping the scroll position. */
   function rerender() {
     const y = window.scrollY;
-    route();
+    draw();
     window.scrollTo(0, y);
   }
 
@@ -112,7 +116,15 @@ AB.app = (() => {
     const pill = $("#statusPill");
     pill.dataset.mode = mode;
     pill.querySelector(".sp-text").textContent = text;
-    pill.title = mode === "live" ? "Live prices from the Albion Online Data Project. Tap for data details." : mode === "snapshot" ? "Saved snapshot of daily sales. Tap for why and what it means." : text;
+    pill.title = mode === "live" ? `Live prices from the Albion Online Data Project, ${checked()}. Tap for data details.`
+      : mode === "retry" ? `${autoErr?.message || "The last automatic reload failed."} Showing prices ${checked().replace(/^checked/, "checked at")}. Tap for data details.`
+      : mode === "snapshot" ? "Saved snapshot of daily sales. Tap for why and what it means." : text;
+  }
+  /* "checked 2:05 PM; reloading every minute" */
+  function checked() {
+    const M = AB.state.M, s = every() / 1000;
+    if (!M?.live) return "";
+    return `checked ${AB.clock.local(M.now)}${s ? `; reloading ${s === 60 ? "every minute" : `every ${s / 60} minutes`} while the app is open` : ""}`;
   }
   function statusText(M) {
     if (!M) return "Loading";
@@ -124,7 +136,7 @@ AB.app = (() => {
     const srv = AB.cat.SERVERS.find((s) => s.id === store.get("server"))?.label || "Americas";
     const r = AB.clock.nextReset(store.get("server"));
     const maint = r.down ? `Maintenance now, back about ${AB.clock.utc(r.back)}` : `Maintenance in ${AB.clock.until(r.at - Date.now())}`;
-    $("#sideFoot").innerHTML = `${esc(srv)} server · ${store.get("premium") ? "premium" : "no premium"}<br>${esc(maint)}<br>${M ? (M.live ? "Live prices" : "Saved snapshot to " + esc(dateFull(M.asOf))) : "Loading prices"}<br><span class="muted">Not affiliated with Sandbox Interactive.</span>`;
+    $("#sideFoot").innerHTML = `${esc(srv)} server · ${store.get("premium") ? "premium" : "no premium"}<br>${esc(maint)}<br>${M ? (M.live ? `Live prices, checked ${esc(AB.clock.local(M.now))}` : "Saved snapshot to " + esc(dateFull(M.asOf))) : "Loading prices"}<br><span class="muted">Not affiliated with Sandbox Interactive.</span>`;
   }
 
   /* ---------- reminders and alert checks ---------- */
@@ -136,7 +148,9 @@ AB.app = (() => {
     const list = AB.clock.reminders(store.get("timers"), { server: store.get("server"), perDay: store.get("focus"), days: AB.notify.native ? 7 : 1 });
     AB.notify.schedule(list).catch(() => {});
   }
-  const checkAlerts = () => { AB.alerts.check().catch(() => {}); };
+  /* With a model just loaded, every alert is checked now against its prices (see engine/alerts.js); otherwise at
+     most every 10 minutes. */
+  const checkAlerts = (M) => { AB.alerts.check(M ? { force: true, M } : {}).catch(() => {}); };
   function tick() {
     sideFoot();
     badges(); // a "met" from over 48 hours ago stops counting
@@ -148,14 +162,16 @@ AB.app = (() => {
   /* ---------- data ---------- */
   /* One load at a time. A reload asked for during a load runs right after it; a change of server or data source
      during a load (see `invalidate`) also throws away what that load was gathering, since it may mix the two. */
-  let again = null, wanted = 0;
+  let again = null, wanted = 0, scoredFor = 0;
   function invalidate() { wanted++; AB.market.reset(); }
   async function refresh({ quiet = false } = {}) {
     if (AB.state.loading) { again = { quiet: quiet && (again ? again.quiet : true) }; return; }
     AB.state.loading = true;
     AB.state.error = null;
+    newer = null; // a full load replaces an automatic reload still waiting to be shown
+    askedAt = Date.now();
     const gen = wanted;
-    let applied = false;
+    let applied = false, loaded = null;
     const btn = $("#refreshBtn");
     btn.classList.add("spin");
     setStatus("loading", "Loading");
@@ -163,7 +179,7 @@ AB.app = (() => {
     try {
       const M = await AB.market.load({ onStep: (msg, f) => { progress(f); setStatus("loading", msg); } });
       if (gen !== wanted) { again = again || { quiet: true }; return; }
-      AB.state.M = M;
+      AB.state.M = loaded = M;
       AB.state.R = AB.scan.run(M);
       applied = true;
       progress(1);
@@ -184,20 +200,136 @@ AB.app = (() => {
         sideFoot();
         AB.util.bus.emit("data");
         rerender();
-        if (AB.state.M?.live) checkAlerts();
+        if (loaded?.live) checkAlerts(loaded);
       }
       const next = again;
       again = null;
       if (next) refresh(next);
+      else { autoFails = 0; autoErr = null; planReload(); }
     }
   }
   /* Settings that change the numbers (premium, capital, focus) re-score without reloading prices. */
   const rescore = debounce(() => {
     if (!AB.state.M) return;
+    scoredFor++;
     AB.state.R = AB.scan.run(AB.state.M);
     AB.util.bus.emit("data");
     rerender();
   }, 250);
+
+  /* ---------- automatic price reloads ---------- */
+  /* With live prices on screen, current prices reload by themselves every `autoReload` seconds (Settings: every
+     minute, every 5 minutes, or only with the reload button). A reload asks only for current orders, about 7
+     requests (histories are kept), which keeps the app far inside the price server's limits (see api.js). Reloads stop while
+     the app is hidden and catch up when it's back. A reload that fails keeps the prices on screen and tries again
+     later, waiting longer each time, and never before the server allows. When the app is on the snapshot only
+     because the server said slow down, or the device was offline, it goes back to live prices by itself once it can.
+     New prices reach the screen at a calm moment, so the page never changes under the player: not while they type
+     in a field, have a play, menu or chart tooltip open, or have text selected, and not within two seconds of a tap,
+     key or scroll. Only pages that show current prices (`live: true`) are redrawn, keeping scroll position and
+     keyboard focus; the others show the new prices the next time they open. */
+  const CALM_MS = 2000, RETRY_MAX = 10 * 60e3;
+  let autoTimer = null, autoFails = 0, autoErr = null, askedAt = 0, background = false;
+  let newer = null, calmTimer = null, lastInput = 0, pressing = false;
+  const every = () => (store.get("autoReload") || 0) * 1000;
+  function planReload(delay) {
+    clearTimeout(autoTimer);
+    autoTimer = null;
+    if (!every() || document.visibilityState !== "visible" || !AB.state.M) return;
+    const paused = AB.api.pausedUntil - Date.now();
+    if (AB.state.M.live && AB.api.mode === "live") autoTimer = setTimeout(autoReload, Math.max(0, delay ?? askedAt + every() - Date.now()));
+    else if (paused > 0 && store.get("dataMode") !== "snapshot") autoTimer = setTimeout(() => autoReload({ full: true }), paused);
+  }
+  /* One automatic reload: current prices on the live model, or (full) a whole load to get back to live prices. */
+  async function autoReload({ full = false } = {}) {
+    clearTimeout(autoTimer); // run early (back online), it replaces the planned one rather than adding a second
+    autoTimer = null;
+    if (AB.state.loading || document.visibilityState !== "visible") return; // a running load plans the next one when it ends
+    AB.state.loading = true;
+    background = true;
+    const gen = wanted, btn = $("#refreshBtn");
+    btn.classList.add("spin");
+    askedAt = Date.now();
+    let delay;
+    try {
+      const M = await (full ? AB.market.load() : AB.market.update());
+      if (!M.live) throw new Error(M.why || "The price server can't be reached from here.");
+      checkAlerts(M); // alerts don't wait for a calm moment: a notification doesn't move the page
+      const scored = scoredFor; // settings changed during the scan make it stale too
+      const R = await AB.scan.runSoon(M);
+      if (gen === wanted) offer({ M, R, gen, scored });
+      autoFails = 0;
+      autoErr = null;
+    } catch (e) {
+      autoErr = e;
+      autoFails++;
+      delay = Math.max(Math.min(every() * 2 ** autoFails, RETRY_MAX), AB.api.pausedUntil - Date.now());
+      if (AB.state.M?.live && gen === wanted) setStatus("retry", "Live · retrying");
+    } finally {
+      AB.state.loading = false;
+      background = false;
+      btn.classList.remove("spin");
+      const next = again;
+      again = null;
+      if (next) refresh(next);
+      else planReload(delay);
+    }
+  }
+  /* A reload's prices wait here for a calm moment; a newer reload replaces them. */
+  function offer(n) {
+    newer = n;
+    clearInterval(calmTimer);
+    calmTimer = setInterval(showNewer, 500);
+    showNewer();
+  }
+  function showNewer() {
+    const n = newer;
+    if (n && n.gen === wanted && !calm()) return;
+    clearInterval(calmTimer);
+    calmTimer = null;
+    newer = null;
+    if (!n || n.gen !== wanted) return;
+    AB.state.M = n.M;
+    AB.state.R = n.scored === scoredFor ? n.R : AB.scan.run(n.M); // the settings changed while it waited
+    AB.state.error = null;
+    setStatus(n.M.mode, statusText(n.M));
+    sideFoot();
+    AB.util.bus.emit("data");
+    if (AB.pages[current]?.live) redraw();
+    planReload();
+  }
+  /* Is the player between actions? (see above) Choices in a select are committed as they're made, so only fields
+     that hold half-typed text count as busy. */
+  const TYPING = "input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=reset]):not([type=range]):not([type=color]):not([type=file]), textarea";
+  function calm() {
+    if (document.visibilityState !== "visible" || Date.now() - lastInput < CALM_MS) return false;
+    if (pressing && Date.now() - lastInput < 60e3) return false; // mid-drag (a lost pointerup stops counting after a minute)
+    if (AB.ui.drawer.isOpen || !$("#moreSheet").hidden || document.querySelector(".tooltip.on")) return false;
+    if (document.activeElement?.matches?.(TYPING)) return false;
+    const sel = window.getSelection?.();
+    return !(sel && !sel.isCollapsed && String(sel).trim());
+  }
+  /* Redraw the page with new prices, keeping the reader's place: the scroll position (rerender) and keyboard focus,
+     found again by id, by the play it opens, or else by its place among the page's controls. */
+  const FOCUSABLE = "a[href], button, input, select, textarea, [tabindex]";
+  function redraw() {
+    const controls = () => [...$("#page").querySelectorAll(FOCUSABLE)];
+    const a = document.activeElement, page = $("#page");
+    const i = a && a !== page && page.contains(a) ? controls().indexOf(a) : -1;
+    const same = i < 0 ? null : a.id ? `#${CSS.escape(a.id)}` : a.dataset.opp ? `[data-opp="${CSS.escape(a.dataset.opp)}"]` : null;
+    rerender();
+    if (i < 0) return;
+    const el = (same ? $("#page").querySelector(same) : controls()[i]) || $("#page");
+    el.focus({ preventScroll: true });
+  }
+  function watchInput() {
+    const touched = () => (lastInput = Date.now());
+    const opts = { capture: true, passive: true };
+    for (const t of ["pointerdown", "keydown", "wheel", "touchstart"]) window.addEventListener(t, touched, opts);
+    document.addEventListener("scroll", touched, opts); // the page or any scrolling box in it
+    window.addEventListener("pointerdown", () => (pressing = true), opts);
+    for (const t of ["pointerup", "pointercancel"]) window.addEventListener(t, () => (pressing = false), opts);
+  }
 
   /* ---------- search ---------- */
   function wireSearch() {
@@ -220,18 +352,36 @@ AB.app = (() => {
     matchMedia("(prefers-color-scheme: light)").addEventListener?.("change", () => { applyTheme(); if (store.get("theme") === "auto") rerender(); });
     store.on("change", (k) => {
       if (["premium", "capital", "focus", "refineSpec", "mountKg"].includes(k)) rescore();
+      if (k === "autoReload") {
+        autoFails = 0;
+        planReload();
+        if (AB.state.M && !AB.state.loading) setStatus(AB.state.M.mode, statusText(AB.state.M));
+      }
       if (["server", "dataMode"].includes(k)) { invalidate(); AB.api.clear().then(() => refresh()); }
       if (["timers", "server", "focus"].includes(k)) scheduleReminders();
       if (k === "alerts") badges();
       sideFoot();
     });
-    window.addEventListener("hashchange", route);
+    window.addEventListener("hashchange", () => route());
     sideFoot();
     badges();
     scheduleReminders();
     setInterval(tick, 30e3);
-    /* back on screen (a phone app resumed, a tab shown): catch up on alerts and top the reminders back up */
-    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") { scheduleReminders(); checkAlerts(); } });
+    /* back on screen (a phone app resumed, a tab shown): catch up on alerts and prices and top the reminders back
+       up; hidden: no price reloads */
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") { scheduleReminders(); checkAlerts(); }
+      planReload();
+    });
+    /* the device is back online: reload now rather than at the end of a failed reload's wait */
+    window.addEventListener("online", () => {
+      autoFails = 0;
+      if (AB.state.M?.live) planReload(0);
+      else if (AB.state.M && every() && store.get("dataMode") !== "snapshot") autoReload({ full: true });
+    });
+    /* a load waiting for the price server's limit says so */
+    AB.api.on("wait", (until) => { if (AB.state.loading && !background) setStatus("loading", `Waiting ${Math.ceil((until - Date.now()) / 1000)} s for the price server`); });
+    watchInput();
     try { route(); } catch (e) { console.error(e); } // a page that fails to draw must not stop the data loading
     try { await Promise.all([AB.cat.ready(), AB.conf.ready()]); }
     catch (e) {
@@ -242,7 +392,7 @@ AB.app = (() => {
     refresh({ quiet: true });
   }
 
-  return { boot, refresh, rerender, route, reschedule: scheduleReminders, NAV, get page() { return current; } };
+  return { boot, refresh, rerender, route, reschedule: scheduleReminders, reloadPrices: () => autoReload(), NAV, get page() { return current; } };
 })();
 
 AB.pages = AB.pages || {};

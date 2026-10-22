@@ -28,12 +28,27 @@ const series = (id, city) => {
 /* A client-captured price newer and lower than the server's, as the Windows app's own data client would report it. */
 const CLIENT = { id: "T6_LEATHER", city: "Martlock" };
 
-const urls = [];
+const urls = [], sentAt = [];
 const historyIds = new Set();
-let rateLimitOnce = true;
+let rateLimitOnce = true, limited = null, down = false;
 function respond(status, body) { return { ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body) }; }
+const headers = (h) => ({ get: (k) => h[Object.keys(h).find((x) => x.toLowerCase() === k.toLowerCase())] ?? null });
+/* The server's rate-limit answer: HTTP 429, its RateLimit headers and its message, with the window ending `inS`
+   seconds from now. */
+function throttled(inS) {
+  /* it arrives a moment after the requests sent alongside it, so those are told apart from what the app sent after */
+  return sleep(30).then(() => {
+    const reset = Math.ceil(Date.now() / 1000) + inS;
+    limited = { at: Date.now(), reset: reset * 1000 };
+    return { ok: false, status: 429, headers: headers({ "RateLimit-Limit": "100", "RateLimit-Remaining": "0", "RateLimit-Reset": String(reset) }),
+      text: async () => `Throttled, slow down! You exceeded the throttle apiv2/1m that limits requests to 100 per 60 seconds! Throttle resets at ${new Date(reset * 1000).toISOString()}!\n` };
+  });
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function fakeADP(url) {
   urls.push(url);
+  sentAt.push(Date.now());
+  if (down) throw new TypeError("connection reset");
   const u = new URL(url);
   const m = /^\/api\/v2\/stats\/(gold|prices|history)(?:\/(.+))?\.json$/.exec(u.pathname);
   if (!m) return respond(404, {});
@@ -41,8 +56,9 @@ function fakeADP(url) {
   const ids = m[2].split(",").map(decodeURIComponent);
   const cities = u.searchParams.get("locations").split(",");
   if (m[1] === "prices") {
-    /* the first price request is rate-limited, to exercise the one retry */
-    if (rateLimitOnce) { rateLimitOnce = false; return respond(429, {}); }
+    /* the first price request is rate-limited as the real server does it (a reset a few seconds away), to exercise the
+       wait and the one retry */
+    if (rateLimitOnce) { rateLimitOnce = false; return throttled(3); }
     const rows = [];
     for (const id of ids) for (const city of cities) {
       const s = series(id, city);
@@ -82,11 +98,14 @@ test("with the price server reachable the app goes live", () => {
   assert.equal(M.asOf, today0 - DAY, "the last completed day is yesterday");
 });
 
-test("requests stay under the URL limit and a rate-limited one is retried", () => {
+test("requests stay under the URL limit, and after a rate limit nothing goes out until the server's window resets", () => {
   const api = urls.filter((u) => /\/stats\/(prices|history)\//.test(u));
   assert.ok(api.length > 3);
   for (const u of api) assert.ok(u.length < 3000, `${u.length} characters`);
-  assert.ok(!rateLimitOnce, "the server did rate-limit once");
+  assert.ok(limited, "the server did rate-limit once");
+  const after = sentAt.filter((t) => t >= limited.at);
+  assert.ok(after.length > 0, "the load went on afterwards");
+  for (const t of after) assert.ok(t >= limited.reset + 1000 - 15, `a request went out ${limited.reset + 1000 - t} ms before the window reset`);
   assert.ok(M.rows.length > 1000, "and the prices still arrived");
 });
 
@@ -123,4 +142,56 @@ test("prices the Windows app captured itself win when they're newer", () => {
   assert.equal(r.sell, 1234);
   assert.equal(r.src, "client");
   assert.ok(M.listing(CLIENT.id, CLIENT.city, "sell").ageH < 0.1);
+});
+
+/* ---------- the automatic reload ---------- */
+test("the automatic reload asks only for current prices, keeps the histories, and gives the same model", async () => {
+  const before = urls.length;
+  const M2 = await AB.market.update();
+  const asked = urls.slice(before);
+  const pricesFirst = urls.slice(0, before).filter((u) => u.includes("/stats/prices/"));
+  assert.ok(asked.length > 0 && asked.every((u) => u.includes("/stats/prices/")), `asked: ${asked.map((u) => new URL(u).pathname.split("/")[4]).join(", ")}`);
+  assert.equal(asked.length, new Set(pricesFirst).size, "one request per price chunk, as many as a full load");
+  assert.equal(M2.live, true);
+  assert.equal(M2.counts.hist, M.counts.hist, "the same items have histories");
+  assert.equal(M2.counts.rows, M.counts.rows);
+  assert.ok(M2.now >= M.now);
+  assert.deepEqual(AB.scan.run(M2).opps.map((o) => o.key).sort(), R.opps.map((o) => o.key).sort(), "same prices, same plays");
+});
+
+test("an automatic reload that fails keeps the model on screen and stays on live prices", async () => {
+  const before = AB.market.data;
+  down = true;
+  try { await assert.rejects(AB.market.update(), /can't be reached/); }
+  finally { down = false; }
+  assert.equal(AB.api.mode, "live", "no switch to the snapshot");
+  assert.equal(AB.market.data, before, "the model is untouched");
+});
+
+test("scoring one strategy at a time finds exactly what scoring in one go finds", async () => {
+  const a = AB.scan.run(M), b = await AB.scan.runSoon(M);
+  assert.deepEqual(b.opps.map((o) => [o.key, o.n, o.rank]), a.opps.map((o) => [o.key, o.n, o.rank]));
+  assert.deepEqual(b.alerts.map((x) => x.id + x.city), a.alerts.map((x) => x.id + x.city));
+  assert.ok(b.ms > 0);
+});
+
+test("an alert check after a load reads that load's prices for scanned items and asks the server only about the rest", async (t) => {
+  t.after(() => AB.store.set("alerts", []));
+  const scanned = M.U.res.find((id) => M.listing(id, "Lymhurst", "sell")?.ageH < 30), outside = "T6_POTION_HEAL";
+  assert.ok(scanned && !M.U.all.includes(outside));
+  const listed = M.P[scanned].Lymhurst.sell;
+  const A = (id, price) => ({ id, city: "Lymhurst", kind: "below", price, t: 0, firedAt: 0, last: null, seen: null, checked: null, hit: false });
+  AB.store.set("alerts", [A(scanned, listed), A(outside, 1000)]);
+  let before = urls.length;
+  const res = await AB.alerts.check({ force: true, M });
+  assert.deepEqual(urls.slice(before).map((u) => new URL(u).pathname.split("/").pop()), [`${outside}.json`], "one request, for the item outside the scan");
+  const [a, b] = AB.store.get("alerts");
+  assert.deepEqual([a.last, a.hit, b.last, b.hit], [listed, true, null, false]);
+  assert.ok(b.checked > 0, "the other alert was checked too");
+  assert.equal(res.fired, 1);
+  AB.store.set("alerts", [A(scanned, listed - 1)]);
+  before = urls.length;
+  await AB.alerts.check({ force: true, M });
+  assert.equal(urls.length, before, "nothing to ask when the load covered every alert");
+  assert.equal(AB.store.get("alerts")[0].hit, false);
 });

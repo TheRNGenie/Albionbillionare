@@ -3,7 +3,7 @@ window.AB = window.AB || {};
 AB.pages = AB.pages || {};
 
 AB.pages.opps = (() => {
-  const st = { kinds: new Set(), min: 0, sort: "best", safe: null, shown: 40 };
+  const st = { kinds: new Set(), min: 0, sort: "best", safe: null, shown: 40, visit: 0 };
   const SORTS = {
     best: [(o) => o.rank, "Best bet"],
     hour: [(o) => o.perHour, "Per hour"],
@@ -13,14 +13,19 @@ AB.pages.opps = (() => {
   };
   return {
     title: "Opportunities",
-    render(root, { q }) {
+    live: true, // redrawn in place when prices reload by themselves (see app.js)
+    render(root, { q, visit }) {
       const { esc, silver, int } = AB.util;
       const ui = AB.ui, kit = AB.kit, scan = AB.scan;
       const H = { eyebrow: "Opportunities", title: "Every play, scored twice", sub: "Once for what it could earn (an 80% range from simulation), once for how much to believe it (the confidence score)." };
       if (kit.waiting(root, H, [12, 12])) return;
       const M = AB.state.M, R = AB.state.R;
       if (st.safe == null) st.safe = !!AB.store.get("safeOnly");
-      if (q.kind && scan.KINDS[q.kind]) { st.kinds = new Set([q.kind]); }
+      /* a link can pick a strategy (?kind=) and open a play (?open=): once per visit, so a redraw keeps the
+         player's own filters and doesn't reopen a play they closed */
+      const fromLink = st.visit !== visit;
+      st.visit = visit;
+      if (fromLink && q.kind && scan.KINDS[q.kind]) { st.kinds = new Set([q.kind]); }
 
       root.innerHTML = `
         ${kit.head({ ...H, sub: `${int(R.opps.length)} plays from ${int(M.counts.items)} items across 8 markets, scored in ${int(R.ms)} ms. ${H.sub}` })}
@@ -102,7 +107,7 @@ AB.pages.opps = (() => {
       drawChips();
       drawList();
       kit.wireOpps(root);
-      if (q.open) { const o = R.opps.find((x) => x.key === q.open); if (o) setTimeout(() => kit.openOpp(o), 50); }
+      if (fromLink && q.open) { const o = R.opps.find((x) => x.key === q.open); if (o) setTimeout(() => kit.openOpp(o), 50); }
     },
   };
 })();

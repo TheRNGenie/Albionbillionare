@@ -1,5 +1,5 @@
 /* Albion Billionaire v2 — market data.
-   Live: the Albion Online Data Project (free, no key, called from the player's own device; about 180 calls a minute).
+   Live: the Albion Online Data Project (free, no key, called from the player's own device; see the request budget below).
    Snapshot: the last 28 days of the saved history that ships with the app, used when the live server can't be reached
    (a blocked network, an offline phone, a preview page). Every row says which one it came from and how old it is. */
 window.AB = window.AB || {};
@@ -44,7 +44,45 @@ AB.api = (() => {
   const KEEP = 24 * 36e5;
   let pruned = false;
 
-  /* ---------- request queue: 6 at a time, identical requests shared, one retry on rate limit ---------- */
+  /* ---------- request queue: 6 at a time, identical requests shared, inside the server's limits ---------- */
+  /* The price server allows 100 requests a minute and 300 every 5 minutes from one internet connection, answers
+     HTTP 429 past that, and blocks a connection for 5 minutes if it keeps going after a 429 (its API docs). The app
+     holds itself to about two thirds of each limit (BUDGET), counted over any minute and any 5 minutes, so the
+     player's other devices and tools on the same connection keep room. A request that would go over waits. After a
+     429 nothing is sent until the server's window resets: a load waits out a reset up to about a minute away and
+     tries that request once more; a later reset ends the load with an error that says when. */
+  const BUDGET = [[60, 60e3], [200, 300e3]]; // [requests, per milliseconds]
+  const WAIT_MAX = 65e3;
+  const sent = []; // when recent requests went out, oldest first
+  let pausedUntil = 0; // set by a 429: nothing goes out before this
+  function waitFor(now) {
+    let t = pausedUntil - now;
+    for (const [n, ms] of BUDGET) if (sent.length >= n) t = Math.max(t, sent[sent.length - n] + ms - now);
+    return Math.max(0, t);
+  }
+  /* When the server's window ends. Its RateLimit-Reset header (epoch seconds) says, but a page on another origin
+     usually can't read it; its message names the period ("…100 per 60 seconds…"), and its windows are whole periods
+     counted from 1970, so the next one starts at the next multiple. A second of margin covers a clock running a
+     little ahead of the server's. */
+  async function resetOf(res) {
+    const now = Date.now();
+    const head = +(res.headers?.get?.("RateLimit-Reset") || 0) * 1000;
+    let t;
+    if (head > 0) t = head;
+    else {
+      const m = /per (\d+) seconds/.exec(await res.text().catch(() => ""));
+      const p = (m ? +m[1] : 300) * 1000;
+      t = (Math.floor(now / p) + 1) * p;
+    }
+    return Math.min(Math.max(t + 1000, now + 1000), now + 301e3);
+  }
+  const at = (t) => (AB.clock ? AB.clock.local(t) : new Date(t).toLocaleTimeString());
+  function rateError(until) {
+    const e = new Error(`The price server asked the app to slow down. Prices can load again at ${at(until)}.`);
+    e.code = "rate";
+    e.until = until;
+    return e;
+  }
   let active = 0;
   const waiting = [];
   const inflight = new Map();
@@ -55,17 +93,29 @@ AB.api = (() => {
     await slot();
     let res;
     try {
+      for (let w = waitFor(Date.now()); w > 0; w = waitFor(Date.now())) {
+        if (w > WAIT_MAX) throw rateError(Date.now() + w);
+        ev.emit("wait", Date.now() + w);
+        await sleep(w);
+      }
+      sent.push(Date.now());
+      if (sent.length > BUDGET[BUDGET.length - 1][0]) sent.shift();
       calls++;
       const ctl = new AbortController();
       const to = setTimeout(() => ctl.abort(), 20000);
-      try { res = await fetch(url, { cache: "no-store", signal: ctl.signal }); } finally { clearTimeout(to); }
-    } catch (e) {
-      const err = new Error("The price server can't be reached from here.");
-      err.code = "blocked";
-      throw err;
+      try { res = await fetch(url, { cache: "no-store", signal: ctl.signal }); }
+      catch (e) {
+        const err = new Error("The price server can't be reached from here.");
+        err.code = "blocked";
+        throw err;
+      } finally { clearTimeout(to); }
+      /* before the slot frees, so no request waiting for it goes out in the meantime */
+      if (res.status === 429) pausedUntil = Math.max(pausedUntil, await resetOf(res));
     } finally { release(); }
-    if (res.status === 429 && retry) { await sleep(2500); return fetchJSON(url, false); }
-    if (res.status === 429) { const e = new Error("The price server is limiting requests. Wait a minute and refresh."); e.code = "rate"; throw e; }
+    if (res.status === 429) {
+      if (retry && pausedUntil - Date.now() <= WAIT_MAX) return fetchJSON(url, false);
+      throw rateError(pausedUntil);
+    }
     if (!res.ok) throw new Error("The price server answered " + res.status + ".");
     return res.json();
   }
@@ -135,8 +185,9 @@ AB.api = (() => {
   async function fallback(w) { await loadSnap(); setMode("snapshot", w); }
 
   /* ---------- the calls the app uses ---------- */
-  /* Current orders: [{id, city, quality, sell, sellDate, buy, buyDate, src}] */
-  async function prices(ids, cities = AB.cat.MARKETS, quality = 1) {
+  /* Current orders: [{id, city, quality, sell, sellDate, buy, buyDate, src}]. A copy up to maxAge old is reused
+     (the automatic reload asks with maxAge 0). */
+  async function prices(ids, cities = AB.cat.MARKETS, quality = 1, { maxAge = 5 * 60e3 } = {}) {
     ids = [...new Set(ids)];
     if (mode !== "live") {
       await loadSnap();
@@ -152,7 +203,7 @@ AB.api = (() => {
     }
     const loc = encodeURIComponent(cities.join(","));
     const parts = chunk(ids);
-    const res = await Promise.all(parts.map((p) => getJSON(`${host()}/api/v2/stats/prices/${p.map(encodeURIComponent).join(",")}.json?locations=${loc}&qualities=${quality}`, 5 * 60e3)));
+    const res = await Promise.all(parts.map((p) => getJSON(`${host()}/api/v2/stats/prices/${p.map(encodeURIComponent).join(",")}.json?locations=${loc}&qualities=${quality}`, maxAge)));
     const rows = res.flat().map((r) => ({
       id: r.item_id, city: r.city, quality: r.quality,
       sell: r.sell_price_min || 0, sellDate: realDate(r.sell_price_min_date),
@@ -178,7 +229,11 @@ AB.api = (() => {
   }
   const index = (rows) => { const m = {}; for (const r of rows) (m[r.id] = m[r.id] || {})[r.city] = r; return m; };
 
-  /* Daily sales history: map[id][city] = [{t, price, count}] oldest first, completed days only. */
+  /* Daily sales history: map[id][city] = [{t, price, count}] oldest first, completed days only. Kept per item and
+     market (dayMem), so a reload whose scan adds a few items fetches only those, and requests list items in a fixed
+     order so the same items always make the same request. */
+  const DAY_TTL = 3 * 36e5;
+  const dayMem = new Map();
   async function daily(ids, cities = AB.cat.MARKETS, days = 28) {
     ids = [...new Set(ids)];
     const out = {};
@@ -189,14 +244,26 @@ AB.api = (() => {
     }
     const today = Date.parse(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
     const from = new Date(today - days * 864e5).toISOString().slice(0, 10);
-    const loc = encodeURIComponent(cities.join(","));
-    const parts = chunk(ids, 2000);
-    const res = await Promise.all(parts.map((p) => getJSON(`${host()}/api/v2/stats/history/${p.map(encodeURIComponent).join(",")}.json?locations=${loc}&qualities=1&time-scale=24&date=${from}`, 3 * 36e5)));
-    for (const r of res.flat()) {
-      const pts = (r.data || []).map((p) => ({ t: parseUTC(p.timestamp), price: p.avg_price, count: p.item_count }))
-        .filter((p) => p.count > 0 && p.price > 0 && p.t < today).sort((a, b) => a.t - b.t);
-      const m = (out[r.item_id] = out[r.item_id] || {});
-      if (!m[r.location] || pts.length > m[r.location].length) m[r.location] = pts;
+    const key = (id, c) => `${host()}|${from}|${id}|${c}`;
+    const now = Date.now();
+    const fresh = (id, c) => now - (dayMem.get(key(id, c))?.t ?? 0) < DAY_TTL;
+    const need = ids.filter((id) => !cities.every((c) => fresh(id, c))).sort();
+    if (need.length) {
+      const loc = encodeURIComponent(cities.join(","));
+      const res = await Promise.all(chunk(need, 2000).map((p) => getJSON(`${host()}/api/v2/stats/history/${p.map(encodeURIComponent).join(",")}.json?locations=${loc}&qualities=1&time-scale=24&date=${from}`, DAY_TTL)));
+      const got = {};
+      for (const r of res.flat()) {
+        const pts = (r.data || []).map((p) => ({ t: parseUTC(p.timestamp), price: p.avg_price, count: p.item_count }))
+          .filter((p) => p.count > 0 && p.price > 0 && p.t < today).sort((a, b) => a.t - b.t);
+        const m = (got[r.item_id] = got[r.item_id] || {});
+        if (!m[r.location] || pts.length > m[r.location].length) m[r.location] = pts;
+      }
+      const t = Date.now();
+      for (const id of need) for (const c of cities) dayMem.set(key(id, c), { t, pts: got[id]?.[c] || [] });
+    }
+    for (const id of ids) for (const c of cities) {
+      const pts = dayMem.get(key(id, c))?.pts;
+      if (pts?.length) (out[id] = out[id] || {})[c] = pts;
     }
     return out;
   }
@@ -214,11 +281,14 @@ AB.api = (() => {
     return rows.map((r) => ({ t: parseUTC(r.timestamp), price: r.price })).sort((a, b) => a.t - b.t);
   }
 
-  async function clear() { mem.clear(); await idb.clear(); }
+  /* Forget every saved copy (the rate limits still apply: clearing doesn't let the app ask again any sooner). */
+  async function clear() { mem.clear(); dayMem.clear(); await idb.clear(); }
 
   return {
-    probe, fallback, prices, index, daily, hourly, gold, clear, loadSnap, snapshotInfo, host,
+    probe, fallback, prices, index, daily, hourly, gold, clear, loadSnap, snapshotInfo, host, BUDGET,
     on: (e, fn) => ev.on(e, fn),
     get mode() { return mode; }, get why() { return why; }, get calls() { return calls; },
+    /* when the server's rate limit lets requests go out again (0 or a past time: now) */
+    get pausedUntil() { return pausedUntil; },
   };
 })();

@@ -444,23 +444,34 @@ AB.scan = (() => {
   }
 
   let last = null;
-  function run(M) {
-    const t0 = performance.now();
-    const out = [], alerts = [];
-    scanBM(M, out);
-    scanForge(M, out);
-    scanHauls(M, out);
-    scanDips(M, out, alerts);
-    scanRefine(M, out);
-    scanCraft(M, out);
-    scanFlips(M, out);
+  const STEPS = [scanBM, scanForge, scanHauls, scanDips, scanRefine, scanCraft, scanFlips];
+  function done(M, out, alerts, ms) {
     const opps = out.filter((o) => o && o.mc.mean > 0).sort((a, b) => b.rank - a.rank);
     opps.forEach((o, i) => (o.n = i + 1));
     alerts.sort((a, b) => b.dev * Math.log(1 + b.v14) - a.dev * Math.log(1 + a.v14));
     const byKind = Object.fromEntries(ORDER.map((k) => [k, opps.filter((o) => o.kind === k)]));
-    last = { opps, alerts: alerts.slice(0, 40), byKind, pulse: pulse(M), at: Date.now(), ms: Math.round(performance.now() - t0), mode: M.mode };
+    last = { opps, alerts: alerts.slice(0, 40), byKind, pulse: pulse(M), at: Date.now(), ms: Math.round(ms), mode: M.mode };
     return last;
   }
+  function run(M) {
+    const t0 = performance.now();
+    const out = [], alerts = [];
+    for (const step of STEPS) step(M, out, alerts);
+    return done(M, out, alerts, performance.now() - t0);
+  }
+  /* The same scan one strategy at a time, letting the page answer taps and scrolls in between. The automatic
+     reload uses it, since it runs while the player is using the app. `ms` counts the scanning, not the pauses. */
+  async function runSoon(M) {
+    const out = [], alerts = [];
+    let ms = 0;
+    for (const step of STEPS) {
+      const t = performance.now();
+      step(M, out, alerts);
+      ms += performance.now() - t;
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    return done(M, out, alerts, ms);
+  }
 
-  return { KINDS, ORDER, NO_TEST, NO_TEST_FLIP, run, finish, legDraw, samples, get last() { return last; } };
+  return { KINDS, ORDER, NO_TEST, NO_TEST_FLIP, run, runSoon, finish, legDraw, samples, get last() { return last; } };
 })();
