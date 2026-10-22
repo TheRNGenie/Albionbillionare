@@ -153,11 +153,15 @@ AB.pages.alerts = {
     });
 
     /* ---------- the list ---------- */
+    /* Redrawn after every alert check (in the Windows app, as often as the Data Client captures prices), so a link or
+       button in the list that has keyboard focus keeps it. */
     function drawList() {
       const list = store.get("alerts"), now = Date.now();
       $("#al-check").disabled = !live || !list.length;
       $("#al-check").title = live ? "" : "Alerts need live prices";
-      $("#al-list").innerHTML = list.length ? `<div class="table-wrap"><table class="t al-table"><thead><tr><th>Alert</th><th>Status</th><th><span class="sr-only">Delete</span></th></tr></thead><tbody>${list.map((a, i) => {
+      const box = $("#al-list"), controls = () => [...box.querySelectorAll("a, button")];
+      const had = box.contains(document.activeElement) ? controls().indexOf(document.activeElement) : -1;
+      box.innerHTML = list.length ? `<div class="table-wrap"><table class="t al-table"><thead><tr><th>Alert</th><th>Status</th><th><span class="sr-only">Delete</span></th></tr></thead><tbody>${list.map((a, i) => {
         const above = a.kind === "above", hit = alerts.met(a, now);
         const stale = a.seen != null && now - a.seen > alerts.FRESH_H * 36e5;
         const seen = a.checked == null ? "not checked yet"
@@ -168,6 +172,7 @@ AB.pages.alerts = {
           <td>${hit ? `<span class="pill-hit">${icon("check")}Met</span>` : `<span class="al-wait">Waiting</span>`}<div class="small muted num">${esc(seen)}</div></td>
           <td class="r"><button class="icon-btn sm" type="button" data-del-alert="${i}" aria-label="Delete the alert on ${esc(cat.label(a.id))} in ${esc(a.city)}">${icon("trash")}</button></td></tr>`;
       }).join("")}</tbody></table></div>` : ui.empty("No price alerts yet. Pick an item above, or press Alert on any item in Markets.", "bell");
+      if (had >= 0) controls()[Math.min(had, controls().length - 1)]?.focus({ preventScroll: true });
     }
     async function runCheck(say) {
       const b = $("#al-check");

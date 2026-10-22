@@ -47,6 +47,30 @@ let saveTimer = null;
 function saveLocal() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => { try { fs.writeFileSync(storeFile(), JSON.stringify([...local.prices])); } catch (e) { /* disk full or locked */ } }, 5000);
+  saveTimer.unref?.(); /* before-quit saves too, so a pending save never needs to hold the app open */
+}
+/* New prices reach the window within a second instead of waiting for its next price reload: opening one market in game
+   makes several uploads, so the markets they change are gathered for a moment and sent together. The page merges them
+   into what it shows without asking the price server anything (see AB.market.capture). */
+const PUSH_MS = 800;
+const changed = new Set();
+let pushTimer = null;
+function pushSoon(keys) {
+  for (const k of keys) changed.add(k);
+  if (pushTimer) return;
+  pushTimer = setTimeout(pushNow, PUSH_MS);
+  pushTimer.unref?.();
+}
+function pushNow() {
+  pushTimer = null;
+  const rows = [];
+  for (const key of changed) {
+    const v = local.prices.get(key);
+    const [id, city, q] = key.split("|");
+    if (v) rows.push({ id, city, quality: +q, ...v });
+  }
+  changed.clear();
+  if (rows.length) for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send("dc:orders", rows);
 }
 function cityOf(loc) {
   const id = String(loc ?? "").split("-")[0].padStart(4, "0");
@@ -76,7 +100,7 @@ function takeOrders(body) {
     if (b.buy != null) { cur.buy = b.buy; cur.buyAt = now; }
     local.prices.set(key, cur);
   }
-  if (batch.size) { local.received += batch.size; local.lastAt = now; saveLocal(); }
+  if (batch.size) { local.received += batch.size; local.lastAt = now; saveLocal(); pushSoon(batch.keys()); }
 }
 function startIngest() {
   const server = http.createServer((req, res) => {
@@ -96,6 +120,7 @@ function startIngest() {
   });
   server.on("error", (e) => { local.error = e.code === "EADDRINUSE" ? `Port ${PORT} is already in use. Close other copies of the app.` : e.message; local.listening = false; });
   server.listen(PORT, "127.0.0.1", () => { local.listening = true; local.error = null; });
+  server.unref(); /* the window keeps the app running, not the listener */
 }
 const CLIENT_PATHS = () => [
   path.join(process.env.ProgramFiles || "C:\\Program Files", "Albion Data Client", "albiondata-client.exe"),

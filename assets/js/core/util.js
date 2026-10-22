@@ -43,6 +43,8 @@ AB.util = (() => {
     return Math.round(a / D) + " days ago";
   }
   const ageText = (ms) => (ms == null || !isFinite(ms) ? "unknown" : ms < H ? Math.max(1, Math.round(ms / 60e3)) + " min" : ms < 48 * H ? Math.round(ms / H) + " h" : Math.round(ms / D) + " d");
+  /* How old a listing is, as a phrase: "just now" under a minute (a price the Data Client just captured), else "3 h old". */
+  const aged = (ms) => (ms == null || !isFinite(ms) ? "age unknown" : ms < 60e3 ? "just now" : ageText(ms) + " old");
   /* Dates print in UTC, the game's server time. Daily sales are stamped 00:00 UTC, so local time would show them a
      day early west of Greenwich (and a month start as the month before). */
   const fmt = (o) => { const f = new Intl.DateTimeFormat("en-US", { ...o, timeZone: "UTC" }); return (t) => f.format(new Date(t)); };
@@ -162,5 +164,5 @@ AB.util = (() => {
     return "downloaded";
   }
 
-  return { $, esc, clamp, sleep, debounce, raf, int, silver, pct, spct, H, D, parseUTC, ago, ageText, date, dateFull, month, monthYear, emitter, bus, icon, toast, progress, loadJSON, saveFile, isItem, nativePlugin: plugin };
+  return { $, esc, clamp, sleep, debounce, raf, int, silver, pct, spct, H, D, parseUTC, ago, ageText, aged, date, dateFull, month, monthYear, emitter, bus, icon, toast, progress, loadJSON, saveFile, isItem, nativePlugin: plugin };
 })();

@@ -195,3 +195,63 @@ test("an alert check after a load reads that load's prices for scanned items and
   assert.equal(urls.length, before, "nothing to ask when the load covered every alert");
   assert.equal(AB.store.get("alerts")[0].hit, false);
 });
+
+/* ---------- prices the Windows app's Data Client captures, pushed as they arrive ---------- */
+test("a captured price replaces an older one only, and merging the same capture again changes nothing", () => {
+  const t = Date.parse("2026-10-22T05:00:00.123Z");
+  const rows = [{ id: "X", city: "Lymhurst", quality: 1, sell: 100, sellDate: "2026-10-22T04:00:00", buy: 90, buyDate: "2026-10-22T05:30:00", src: "live" }];
+  const mine = [{ id: "X", city: "Lymhurst", sell: 95, sellAt: t, buy: 80, buyAt: t }, { id: "Y", city: "Martlock", sell: 7, sellAt: t, buy: 0, buyAt: 0 }];
+  assert.equal(AB.api.mergeClient(rows, mine), 2, "X's listing, and Y's, which the server didn't have; X's buy order is newer on the server");
+  assert.deepEqual(rows.map((r) => [r.id, r.sell, r.sellDate, r.buy, r.buyDate, r.src]), [
+    ["X", 95, "2026-10-22T05:00:00.123", 90, "2026-10-22T05:30:00", "client"],
+    ["Y", 7, "2026-10-22T05:00:00.123", 0, null, "client"],
+  ]);
+  assert.equal(AB.api.mergeClient(rows, mine), 0);
+});
+
+test("a captured price goes into the model at once with no request, and a reload keeps it while it's the newer one", async () => {
+  const M0 = AB.market.data;
+  const id = M0.U.res.find((x) => M0.P[x]?.Lymhurst?.sell && M0.P[x]?.Martlock?.sell);
+  const was = M0.P[id].Lymhurst.sell, t = Date.now(), before = urls.length;
+  const row = (o) => ({ id, city: "Lymhurst", quality: 1, sell: 0, sellAt: 0, buy: 0, buyAt: 0, ...o });
+  assert.equal(AB.market.capture([row({ sell: was - 1, sellAt: t })]), true);
+  const M1 = AB.market.withCaptures();
+  assert.ok(M1 && M1.seq > M0.seq);
+  assert.equal(AB.market.data, M1);
+  assert.deepEqual([M1.P[id].Lymhurst.sell, M1.P[id].Lymhurst.src], [was - 1, "client"]);
+  assert.ok(M1.listing(id, "Lymhurst", "sell").ageH < 0.01, "seen just now");
+  assert.equal(M0.P[id].Lymhurst.sell, was, "the model before keeps its own prices");
+  assert.equal(M1.hist, M0.hist, "the histories are kept");
+  assert.equal(M1.checkedAt, M0.checkedAt, "and so is when prices were checked with the server");
+  assert.equal(urls.length, before, "no request");
+  assert.equal(AB.market.withCaptures(), null, "nothing new since");
+  /* the same push again, other qualities and markets: nothing kept */
+  assert.equal(AB.market.capture([row({ sell: was - 1, sellAt: t })]), false);
+  assert.equal(AB.market.capture([row({ quality: 2, sell: 5, sellAt: t + 1 }), row({ city: "Brecilien Portal", sell: 5, sellAt: t + 1 }), null, { city: "Lymhurst" }]), false);
+  /* a price older than the server's, and an item the scan doesn't cover: kept, but nothing to rebuild */
+  assert.equal(AB.market.capture([row({ city: "Martlock", sell: 1, sellAt: t - 100 * HOUR }), row({ id: "T6_POTION_HEAL", sell: 1, sellAt: t })]), true);
+  assert.equal(AB.market.withCaptures(), null);
+  assert.equal(AB.market.data, M1);
+  /* a reload's prices from the server are older than the capture, so it stays */
+  const M2 = await AB.market.update();
+  assert.deepEqual([M2.P[id].Lymhurst.sell, M2.P[id].Lymhurst.src], [was - 1, "client"]);
+  assert.equal(M2.P[id].Martlock.sell, M0.P[id].Martlock.sell);
+  assert.ok(M2.checkedAt > M1.checkedAt && M2.seq > M1.seq);
+  assert.equal(AB.market.withCaptures(), null);
+});
+
+test("an alert check on captured prices reads only the model and asks the server nothing", async (t) => {
+  t.after(() => AB.store.set("alerts", []));
+  const M = AB.market.data;
+  const id = M.U.res.find((x) => M.P[x]?.Thetford?.sell);
+  const A = (item, price) => ({ id: item, city: "Thetford", kind: "below", price, t: 0, firedAt: 0, last: null, seen: null, checked: null, hit: false });
+  AB.store.set("alerts", [A("T6_POTION_HEAL", 1000)]);
+  assert.equal(await AB.alerts.check({ force: true, M, local: true }), null, "no alert the model covers: nothing to do");
+  AB.store.set("alerts", [A(id, M.P[id].Thetford.sell), A("T6_POTION_HEAL", 1000)]);
+  const before = urls.length;
+  const res = await AB.alerts.check({ force: true, M, local: true });
+  assert.equal(urls.length, before);
+  assert.equal(res.fired, 1);
+  const [a, b] = AB.store.get("alerts");
+  assert.deepEqual([a.hit, a.last, b.checked], [true, M.P[id].Thetford.sell, null], "the other alert is left for a check that asks the server");
+});

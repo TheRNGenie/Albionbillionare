@@ -1,8 +1,9 @@
 /* Albion Billionaire v2 — price alerts. An alert is an item, a market, a rule and a price: tell me when the cheapest
    listing is at or under the price (time to buy), or when the best buy order is at or over it (time to sell). Alerts
    are checked against live prices whenever they load, so with every automatic reload, and every 10 minutes while the
-   app is open. One fires when a price seen in the last 48 hours meets it, then at most once every 6 hours while it
-   stays met, so an old listing or a price that sits at the line can't fire it over and over. */
+   app is open; in the Windows app also as its Data Client captures prices. One fires when a price seen in the last 48
+   hours meets it, then at most once every 6 hours while it stays met, so an old listing or a price that sits at the
+   line can't fire it over and over. */
 window.AB = window.AB || {};
 
 AB.alerts = (() => {
@@ -46,32 +47,38 @@ AB.alerts = (() => {
      prices, to null when there's nothing to do or the last check was under 10 minutes ago (unless forced), and to
      { checked, met, fired } otherwise. A forced check asked for during another one runs right after it, so an alert
      added meanwhile is checked too. Given M, a live model just loaded, alerts on items it scanned read its prices
-     and only the others ask the server (fresh, not from the cache), so a reload's check usually costs no request. */
-  function check({ force = false, M = null } = {}) {
-    if (busy) return force ? busy.catch(() => {}).then(() => check({ force, M })) : busy;
+     and only the others ask the server (fresh, not from the cache), so a reload's check usually costs no request.
+     `local` (a model just rebuilt with Data Client captures) checks only the alerts M covers and asks nothing, and
+     leaves the 10-minute check of the others as it was. */
+  function check({ force = false, M = null, local = false } = {}) {
+    if (busy) return force ? busy.catch(() => {}).then(() => check({ force, M, local })) : busy;
     const list = AB.store.get("alerts");
     if (!list.length) return Promise.resolve(null);
     if (AB.api.mode !== "live") return Promise.resolve({ live: false });
     if (!force && Date.now() - lastRun < EVERY - 5000) return Promise.resolve(null);
-    busy = (async () => {
-      try {
-        const scanned = M?.live ? new Set(M.U.all) : null;
-        const inM = (a) => !!scanned && scanned.has(a.id) && AB.cat.MARKETS.includes(a.city);
-        const ask = list.filter((a) => !inM(a));
-        const ids = new Set(ask.map((a) => a.id)), cities = new Set(ask.map((a) => a.city));
-        const got = AB.api.index(ask.length ? await AB.api.prices([...ids], [...cities], 1, M ? { maxAge: 0 } : {}) : []);
-        /* the list again: the player may have added or removed an alert while the prices loaded */
-        const cur = AB.store.get("alerts"), idx = {};
-        for (const a of cur) { const r = (inM(a) ? M.P : got)[a.id]?.[a.city]; if (r) (idx[a.id] ||= {})[a.city] = r; }
-        const res = evaluate(cur, idx, Date.now(), (a) => inM(a) || (ids.has(a.id) && cities.has(a.city)));
-        AB.store.set("alerts", res.list);
-        lastRun = Date.now();
-        for (const a of res.fired) await AB.notify.send(title(a), body(a), { id: AB.notify.ALERT_ID + res.list.indexOf(a) });
-        AB.util.bus.emit("alerts");
-        return { checked: res.list.length, met: res.list.filter((a) => a.hit).length, fired: res.fired.length };
-      } finally { busy = null; }
-    })();
-    return busy;
+    const scanned = M?.live ? new Set(M.U.all) : null;
+    const inM = (a) => !!scanned && scanned.has(a.id) && AB.cat.MARKETS.includes(a.city);
+    if (local && !list.some(inM)) return Promise.resolve(null);
+    const run = async () => {
+      const ask = local ? [] : list.filter((a) => !inM(a));
+      const ids = new Set(ask.map((a) => a.id)), cities = new Set(ask.map((a) => a.city));
+      const got = AB.api.index(ask.length ? await AB.api.prices([...ids], [...cities], 1, M ? { maxAge: 0 } : {}) : []);
+      /* the list again: the player may have added or removed an alert while the prices loaded */
+      const cur = AB.store.get("alerts"), idx = {};
+      for (const a of cur) { const r = (inM(a) ? M.P : got)[a.id]?.[a.city]; if (r) (idx[a.id] ||= {})[a.city] = r; }
+      const res = evaluate(cur, idx, Date.now(), (a) => inM(a) || (ids.has(a.id) && cities.has(a.city)));
+      AB.store.set("alerts", res.list);
+      if (!local) lastRun = Date.now();
+      for (const a of res.fired) await AB.notify.send(title(a), body(a), { id: AB.notify.ALERT_ID + res.list.indexOf(a) });
+      AB.util.bus.emit("alerts");
+      return { checked: res.list.length, met: res.list.filter((a) => a.hit).length, fired: res.fired.length };
+    };
+    /* Cleared once the check has settled, never inside it: a check that asks nothing and fires nothing finishes
+       before it could be stored, and clearing from inside would leave it in `busy` for good, so every later forced
+       check would wait on it again and again without end. */
+    const p = run().finally(() => { if (busy === p) busy = null; });
+    busy = p;
+    return p;
   }
 
   /* The usual 80% range for an item in a market today, from four weeks of its daily sales: a starting point for an

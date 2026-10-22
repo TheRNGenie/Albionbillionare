@@ -124,7 +124,7 @@ AB.app = (() => {
   function checked() {
     const M = AB.state.M, s = every() / 1000;
     if (!M?.live) return "";
-    return `checked ${AB.clock.local(M.now)}${s ? `; reloading ${s === 60 ? "every minute" : `every ${s / 60} minutes`} while the app is open` : ""}`;
+    return `checked ${AB.clock.local(M.checkedAt)}${s ? `; reloading ${s === 60 ? "every minute" : `every ${s / 60} minutes`} while the app is open` : ""}`;
   }
   function statusText(M) {
     if (!M) return "Loading";
@@ -136,7 +136,7 @@ AB.app = (() => {
     const srv = AB.cat.SERVERS.find((s) => s.id === store.get("server"))?.label || "Americas";
     const r = AB.clock.nextReset(store.get("server"));
     const maint = r.down ? `Maintenance now, back about ${AB.clock.utc(r.back)}` : `Maintenance in ${AB.clock.until(r.at - Date.now())}`;
-    $("#sideFoot").innerHTML = `${esc(srv)} server · ${store.get("premium") ? "premium" : "no premium"}<br>${esc(maint)}<br>${M ? (M.live ? `Live prices, checked ${esc(AB.clock.local(M.now))}` : "Saved snapshot to " + esc(dateFull(M.asOf))) : "Loading prices"}<br><span class="muted">Not affiliated with Sandbox Interactive.</span>`;
+    $("#sideFoot").innerHTML = `${esc(srv)} server · ${store.get("premium") ? "premium" : "no premium"}<br>${esc(maint)}<br>${M ? (M.live ? `Live prices, checked ${esc(AB.clock.local(M.checkedAt))}` : "Saved snapshot to " + esc(dateFull(M.asOf))) : "Loading prices"}<br><span class="muted">Not affiliated with Sandbox Interactive.</span>`;
   }
 
   /* ---------- reminders and alert checks ---------- */
@@ -148,9 +148,10 @@ AB.app = (() => {
     const list = AB.clock.reminders(store.get("timers"), { server: store.get("server"), perDay: store.get("focus"), days: AB.notify.native ? 7 : 1 });
     AB.notify.schedule(list).catch(() => {});
   }
-  /* With a model just loaded, every alert is checked now against its prices (see engine/alerts.js); otherwise at
-     most every 10 minutes. */
-  const checkAlerts = (M) => { AB.alerts.check(M ? { force: true, M } : {}).catch(() => {}); };
+  /* With a model just loaded, every alert is checked now against its prices (see engine/alerts.js); with one rebuilt
+     from Data Client captures (`local`), the alerts it covers, asking the server nothing; otherwise at most every 10
+     minutes. */
+  const checkAlerts = (M, local = false) => { AB.alerts.check(M ? { force: true, M, local } : {}).catch(() => {}); };
   function tick() {
     sideFoot();
     badges(); // a "met" from over 48 hours ago stops counting
@@ -205,7 +206,7 @@ AB.app = (() => {
       const next = again;
       again = null;
       if (next) refresh(next);
-      else { autoFails = 0; autoErr = null; planReload(); }
+      else { autoFails = 0; autoErr = null; retryAt = 0; planReload(); applyCaptures(); }
     }
   }
   /* Settings that change the numbers (premium, capital, focus) re-score without reloading prices. */
@@ -229,15 +230,17 @@ AB.app = (() => {
      key or scroll. Only pages that show current prices (`live: true`) are redrawn, keeping scroll position and
      keyboard focus; the others show the new prices the next time they open. */
   const CALM_MS = 2000, RETRY_MAX = 10 * 60e3;
-  let autoTimer = null, autoFails = 0, autoErr = null, askedAt = 0, background = false;
+  let autoTimer = null, autoFails = 0, autoErr = null, askedAt = 0, retryAt = 0, background = false;
   let newer = null, calmTimer = null, lastInput = 0, pressing = false;
   const every = () => (store.get("autoReload") || 0) * 1000;
+  /* Plan the next reload: `every` after the last one began, or after a failed one's wait (retryAt), and never before
+     the price server's limit allows (a model shown or the setting changed meanwhile doesn't cut a wait short). */
   function planReload(delay) {
     clearTimeout(autoTimer);
     autoTimer = null;
     if (!every() || document.visibilityState !== "visible" || !AB.state.M) return;
     const paused = AB.api.pausedUntil - Date.now();
-    if (AB.state.M.live && AB.api.mode === "live") autoTimer = setTimeout(autoReload, Math.max(0, delay ?? askedAt + every() - Date.now()));
+    if (AB.state.M.live && AB.api.mode === "live") autoTimer = setTimeout(autoReload, Math.max(0, paused, delay ?? Math.max(askedAt + every(), retryAt) - Date.now()));
     else if (paused > 0 && store.get("dataMode") !== "snapshot") autoTimer = setTimeout(() => autoReload({ full: true }), paused);
   }
   /* One automatic reload: current prices on the live model, or (full) a whole load to get back to live prices. */
@@ -250,20 +253,20 @@ AB.app = (() => {
     const gen = wanted, btn = $("#refreshBtn");
     btn.classList.add("spin");
     askedAt = Date.now();
-    let delay;
     try {
       const M = await (full ? AB.market.load() : AB.market.update());
       if (!M.live) throw new Error(M.why || "The price server can't be reached from here.");
       checkAlerts(M); // alerts don't wait for a calm moment: a notification doesn't move the page
       const scored = scoredFor; // settings changed during the scan make it stale too
       const R = await AB.scan.runSoon(M);
-      if (gen === wanted) offer({ M, R, gen, scored });
       autoFails = 0;
       autoErr = null;
+      retryAt = 0;
+      if (gen === wanted) offer({ M, R, gen, scored });
     } catch (e) {
       autoErr = e;
       autoFails++;
-      delay = Math.max(Math.min(every() * 2 ** autoFails, RETRY_MAX), AB.api.pausedUntil - Date.now());
+      retryAt = Date.now() + Math.min(every() * 2 ** autoFails, RETRY_MAX);
       if (AB.state.M?.live && gen === wanted) setStatus("retry", "Live · retrying");
     } finally {
       AB.state.loading = false;
@@ -272,11 +275,13 @@ AB.app = (() => {
       const next = again;
       again = null;
       if (next) refresh(next);
-      else planReload(delay);
+      else { planReload(); applyCaptures(); }
     }
   }
-  /* A reload's prices wait here for a calm moment; a newer reload replaces them. */
+  /* A reload's prices wait here for a calm moment; a newer reload replaces them. A model older than the one shown or
+     waiting (a capture scoring that ended after a reload's) is dropped: the newer one has its prices too. */
   function offer(n) {
+    if (n.M.seq < Math.max(AB.state.M?.seq ?? 0, newer?.M.seq ?? 0)) return;
     newer = n;
     clearInterval(calmTimer);
     calmTimer = setInterval(showNewer, 500);
@@ -292,7 +297,9 @@ AB.app = (() => {
     AB.state.M = n.M;
     AB.state.R = n.scored === scoredFor ? n.R : AB.scan.run(n.M); // the settings changed while it waited
     AB.state.error = null;
-    setStatus(n.M.mode, statusText(n.M));
+    /* captures shown while reloads are failing: the server still isn't answering, so the pill keeps saying so */
+    if (autoErr && n.M.live) setStatus("retry", "Live · retrying");
+    else setStatus(n.M.mode, statusText(n.M));
     sideFoot();
     AB.util.bus.emit("data");
     if (AB.pages[current]?.live) redraw();
@@ -331,6 +338,37 @@ AB.app = (() => {
     for (const t of ["pointerup", "pointercancel"]) window.addEventListener(t, () => (pressing = false), opts);
   }
 
+  /* ---------- prices from the player's own Data Client (Windows app) ----------
+     The Windows app sends what its Albion Data Client captures within a second of the player opening a market in game
+     (desktop/main.js). Those prices go straight into the model (AB.market.withCaptures: no request to the price
+     server), the alerts they cover are checked, and the plays are scored again; the result reaches the page at a calm
+     moment, like a reload's. One at a time, and at most one every 2 seconds (scoring every play takes about a third
+     of a second, and clicking through a market in game sends a capture every moment): captures that arrive meanwhile,
+     or during a load or reload, are taken together after it. A reload never waits for this (whichever model is newer
+     wins, see `offer`). While the app is hidden the captures are only kept, so scoring doesn't take processor time
+     from the game, and are taken when it's shown. */
+  const CAPTURE_GAP = 2000;
+  let capturing = false, capTimer = null, capDone = 0;
+  async function applyCaptures() {
+    if (capturing || capTimer || AB.state.loading || document.visibilityState !== "visible" || !AB.market.hasCaptures()) return;
+    const wait = capDone + CAPTURE_GAP - Date.now();
+    if (wait > 0) { capTimer = setTimeout(() => { capTimer = null; applyCaptures(); }, wait); return; }
+    const M = AB.market.withCaptures();
+    if (!M) return;
+    capturing = true;
+    const gen = wanted, scored = scoredFor;
+    try {
+      checkAlerts(M, true);
+      const R = await AB.scan.runSoon(M);
+      if (gen === wanted) offer({ M, R, gen, scored });
+    } catch (e) { console.error(e); }
+    finally {
+      capturing = false;
+      capDone = Date.now();
+      applyCaptures();
+    }
+  }
+
   /* ---------- search ---------- */
   function wireSearch() {
     const input = $("#search");
@@ -354,6 +392,7 @@ AB.app = (() => {
       if (["premium", "capital", "focus", "refineSpec", "mountKg"].includes(k)) rescore();
       if (k === "autoReload") {
         autoFails = 0;
+        retryAt = 0;
         planReload();
         if (AB.state.M && !AB.state.loading) setStatus(AB.state.M.mode, statusText(AB.state.M));
       }
@@ -370,12 +409,15 @@ AB.app = (() => {
     /* back on screen (a phone app resumed, a tab shown): catch up on alerts and prices and top the reminders back
        up; hidden: no price reloads */
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") { scheduleReminders(); checkAlerts(); }
+      if (document.visibilityState === "visible") { scheduleReminders(); checkAlerts(); applyCaptures(); }
       planReload();
     });
+    /* Windows app: prices the Data Client captures, within a second (see applyCaptures) */
+    window.albionDesktop?.onPrices?.((rows) => { if (AB.market.capture(rows)) applyCaptures(); });
     /* the device is back online: reload now rather than at the end of a failed reload's wait */
     window.addEventListener("online", () => {
       autoFails = 0;
+      retryAt = 0;
       if (AB.state.M?.live) planReload(0);
       else if (AB.state.M && every() && store.get("dataMode") !== "snapshot") autoReload({ full: true });
     });

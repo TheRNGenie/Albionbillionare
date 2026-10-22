@@ -1,13 +1,56 @@
 /* Albion Billionaire v2 — the market model the scanners read. One load gathers current prices for the scanning
    universe, 28 days of daily sales for every item that could matter, and the per-market statistics the confidence
-   engine needs. Everything keeps track of where it came from and how old it is. */
+   engine needs. Everything keeps track of where it came from and how old it is. In the Windows app, prices the
+   player's own Albion Data Client captures come in between loads too (see `capture`). */
 window.AB = window.AB || {};
 
 AB.market = (() => {
   const { D, H, parseUTC } = AB.util;
   const cat = AB.cat, api = AB.api, conf = AB.conf;
   const ev = AB.util.emitter();
-  let M = null, pending = null;
+  let M = null, pending = null, builds = 0;
+
+  /* ---------- prices the player's own Data Client captured (Windows app) ----------
+     The Windows app sends what its Albion Data Client captures within a second of the player opening a market in game
+     (desktop/main.js). The newest price per item and market is kept here, normal quality and the markets the app reads,
+     and every live model built from now on merges them in, the newer price winning (api.mergeClient), so a reload
+     never undoes a newer capture. `capSeq` counts the pushes that brought something new, and a model records the
+     count it merged. */
+  const captured = new Map();
+  let capSeq = 0;
+  /* Keep a push's prices; true when one is newer than what was kept. */
+  function capture(rows) {
+    let got = false;
+    for (const r of Array.isArray(rows) ? rows : []) {
+      if (!r || typeof r.id !== "string" || +(r.quality ?? 1) !== 1 || !cat.MARKETS.includes(r.city)) continue;
+      const k = r.id + "|" + r.city, c = captured.get(k) || { id: r.id, city: r.city, sell: 0, sellAt: 0, buy: 0, buyAt: 0 };
+      const sell = r.sell > 0 && r.sellAt > c.sellAt, buy = r.buy > 0 && r.buyAt > c.buyAt;
+      if (!sell && !buy) continue;
+      captured.set(k, { ...c, ...(sell && { sell: r.sell, sellAt: r.sellAt }), ...(buy && { buy: r.buy, buyAt: r.buyAt }) });
+      got = true;
+    }
+    if (got) capSeq++;
+    return got;
+  }
+  /* Merge the kept captures into fresh price rows, for the items the scan covers. */
+  function mergeCaptured(rows, U) {
+    if (!captured.size) return 0;
+    const ids = new Set(U.all);
+    return api.mergeClient(rows, [...captured.values()].filter((c) => ids.has(c.id)), 1);
+  }
+  /* Are there captures the live model doesn't have yet? */
+  const hasCaptures = () => !!M?.live && M.capSeq !== capSeq;
+  /* The model with the captures it doesn't have yet, or null when it has them all (or isn't live, or a load is
+     running: that one merges them as it ends). Prices only, so no request: the histories stay as they are (an item a
+     capture makes worth a look gets its history at the next reload), and so does the time prices were checked. */
+  function withCaptures() {
+    if (pending || !hasCaptures() || api.mode !== "live") return null;
+    const rows = M.rows.map((r) => ({ ...r })); // the model on screen keeps its own prices until the new one is shown
+    if (!mergeCaptured(rows, M.U)) { M.capSeq = capSeq; return null; }
+    M = build(rows, M.hist, M.U, M.checkedAt, M);
+    ev.emit("ready", M);
+    return M;
+  }
 
   /* The scanning universe: the 160 gear families with the most silver changing hands at the Black Market and the
      royal cities over the last four weeks (measured, not hand-picked), each at .0 to .3; every refined and raw
@@ -70,11 +113,10 @@ AB.market = (() => {
         const gather = async () => {
           onStep(api.mode === "live" ? "Loading current prices" : "Opening the saved snapshot", 0.2);
           const rows = await api.prices(U.all, cat.MARKETS);
-          const P = api.index(rows);
           onStep(api.mode === "live" ? "Loading four weeks of sales" : "Reading four weeks of sales", 0.5);
-          const histIds = api.mode === "live" ? candidates(P, U) : U.all;
+          const histIds = api.mode === "live" ? candidates(api.index(rows), U) : U.all;
           const hist = await api.daily(histIds, cat.MARKETS, 28);
-          return { rows, P, hist };
+          return { rows, hist };
         };
         let got;
         try { got = await gather(); }
@@ -84,7 +126,7 @@ AB.market = (() => {
           got = await gather();
         }
         onStep("Scoring every play", 0.8);
-        M = build(got.P, got.hist, U, got.rows);
+        M = build(got.rows, got.hist, U);
         ev.emit("ready", M);
         return M;
       } finally { pending = null; }
@@ -102,10 +144,9 @@ AB.market = (() => {
       try {
         const U = universe();
         const rows = await api.prices(U.all, cat.MARKETS, 1, { maxAge: 0 });
-        const P = api.index(rows);
-        const hist = await api.daily(candidates(P, U), cat.MARKETS, 28);
+        const hist = await api.daily(candidates(api.index(rows), U), cat.MARKETS, 28);
         if (api.mode !== "live") throw new Error("Live prices are off.");
-        M = build(P, hist, U, rows);
+        M = build(rows, hist, U);
         ev.emit("ready", M);
         return M;
       } finally { pending = null; }
@@ -113,14 +154,21 @@ AB.market = (() => {
     return pending;
   }
 
-  function build(P, hist, U, rows) {
+  /* `now` is when the model was built, which listing ages count from; `checkedAt` is when its prices last came from
+     the price server (a model rebuilt with captures keeps the one before it); `seq` counts builds, newest highest.
+     The per-market statistics depend on the histories and the day only, so a model rebuilt from `prev` with the same
+     ones shares them (they're computed as the scan asks for them, which is most of a rebuild's work otherwise). */
+  const statMemos = new WeakMap();
+  function build(rows, hist, U, checkedAt = Date.now(), prev = null) {
     const live = api.mode === "live";
+    if (live) mergeCaptured(rows, U);
+    const P = api.index(rows);
     const now = Date.now();
     const today0 = Date.parse(new Date(now).toISOString().slice(0, 10) + "T00:00:00Z");
     const info = api.snapshotInfo();
     const asOf = live ? today0 - D : Date.parse(info.end + "T00:00:00Z");
     const h0 = Math.max(1, Math.floor((now - asOf) / D));
-    const memo = new Map();
+    const memo = (prev?.hist === hist && prev.asOf === asOf && statMemos.get(prev)) || new Map();
     const stat = (id, city) => {
       const k = id + "|" + city;
       if (!memo.has(k)) memo.set(k, conf.seriesStats(hist[id]?.[city] || [], asOf));
@@ -159,10 +207,12 @@ AB.market = (() => {
     const counts = { items: Object.keys(P).length, rows: rows.length, hist: Object.keys(hist).length };
     const ages = rows.map((r) => ageH(r.sellDate || r.buyDate)).filter((x) => x != null).sort((a, b) => a - b);
     const medianAgeH = ages.length ? ages[Math.floor(ages.length / 2)] : null;
-    return {
-      mode: api.mode, why: api.why, live, now, asOf, h0, U, P, hist, counts, medianAgeH,
+    const model = {
+      mode: api.mode, why: api.why, live, seq: ++builds, now, checkedAt, capSeq, asOf, h0, U, P, hist, counts, medianAgeH,
       snapshot: info, stat, listing, cheapest, typical, series, fresh, ageH, rows,
     };
+    statMemos.set(model, memo);
+    return model;
   }
 
   /* Freshness of order data by market (for the Trust page): median age of listings per city, for the model on
@@ -179,9 +229,10 @@ AB.market = (() => {
   }
 
   return {
-    load, update, universe, freshnessByCity,
+    load, update, capture, hasCaptures, withCaptures, universe, freshnessByCity,
     get data() { return M; },
     on: (e, fn) => ev.on(e, fn),
-    reset() { M = null; },
+    /* a new server or data source: its next load starts over (the Windows app hands the captures over again then) */
+    reset() { M = null; captured.clear(); },
   };
 })();

@@ -216,16 +216,28 @@ AB.api = (() => {
     if (!window.albionDesktop?.prices) return rows;
     let mine = [];
     try { mine = await window.albionDesktop.prices(ids, cities, [quality]); } catch (e) { return rows; }
+    mergeClient(rows, mine, quality);
+    return rows;
+  }
+  /* Merge the Data Client's prices ([{ id, city, sell, sellAt, buy, buyAt }], times in ms) into price rows, in
+     place: a captured price replaces the row's when it was seen later, and a market with no row gets one. Its time
+     keeps the milliseconds, so merging the same capture again changes nothing. Returns how many prices changed. */
+  function mergeClient(rows, mine, quality = 1) {
     const key = (r) => `${r.id}|${r.city}`;
     const by = new Map(rows.map((r) => [key(r), r]));
-    const newer = (t, d) => t && (!d || t > parseUTC(d));
+    const newer = (t, d) => t > 0 && (!d || t > parseUTC(d));
+    const iso = (t) => new Date(t).toISOString().slice(0, 23);
+    let n = 0;
     for (const m of mine) {
       let r = by.get(key(m));
+      const sell = m.sell > 0 && newer(m.sellAt, r?.sellDate), buy = m.buy > 0 && newer(m.buyAt, r?.buyDate);
+      if (!sell && !buy) continue;
       if (!r) { r = { id: m.id, city: m.city, quality, sell: 0, sellDate: null, buy: 0, buyDate: null, src: "client" }; rows.push(r); by.set(key(r), r); }
-      if (m.sell && newer(m.sellAt, r.sellDate)) { r.sell = Math.round(m.sell); r.sellDate = new Date(m.sellAt).toISOString().slice(0, 19); r.src = "client"; }
-      if (m.buy && newer(m.buyAt, r.buyDate)) { r.buy = Math.round(m.buy); r.buyDate = new Date(m.buyAt).toISOString().slice(0, 19); r.src = "client"; }
+      if (sell) { r.sell = Math.round(m.sell); r.sellDate = iso(m.sellAt); n++; }
+      if (buy) { r.buy = Math.round(m.buy); r.buyDate = iso(m.buyAt); n++; }
+      r.src = "client";
     }
-    return rows;
+    return n;
   }
   const index = (rows) => { const m = {}; for (const r of rows) (m[r.id] = m[r.id] || {})[r.city] = r; return m; };
 
@@ -285,7 +297,7 @@ AB.api = (() => {
   async function clear() { mem.clear(); dayMem.clear(); await idb.clear(); }
 
   return {
-    probe, fallback, prices, index, daily, hourly, gold, clear, loadSnap, snapshotInfo, host, BUDGET,
+    probe, fallback, prices, mergeClient, index, daily, hourly, gold, clear, loadSnap, snapshotInfo, host, BUDGET,
     on: (e, fn) => ev.on(e, fn),
     get mode() { return mode; }, get why() { return why; }, get calls() { return calls; },
     /* when the server's rate limit lets requests go out again (0 or a past time: now) */

@@ -502,3 +502,168 @@ test("alerts are checked with every automatic reload, and one on a scanned item 
   assert.deepEqual(app.errors, []);
   app.close();
 });
+
+test("an alert the reloads keep checking without it firing never stops the app", async () => {
+  /* a check that asks the server nothing and fires nothing finishes at once; the next one must not wait on it forever */
+  const { s, app } = await liveApp();
+  const { AB } = app;
+  AB.store.set("alerts", [{ id: "T6_BAG", city: "Lymhurst", kind: "below", price: 1, t: 0, firedAt: 0, last: null, seen: null, checked: null, hit: false }]);
+  for (const sell of [8000, 7000, 6000]) {
+    s.prices = bag(sell);
+    await AB.app.reloadPrices();
+    await until(() => shownSell(app) === sell, 5000);
+    await until(() => AB.store.get("alerts")[0].last === sell, 5000);
+  }
+  assert.equal(AB.store.get("alerts")[0].hit, false);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+/* ---------- prices from the Windows app's Data Client ---------- */
+/* The Windows app's bridge as far as these tests need it: the push of what the Data Client captures, and the prices a
+   load asks it for. `extra(w)` adds to the window's setup. */
+function desktop(extra = null) {
+  const d = { push: null, rows: [] };
+  d.setup = (w) => {
+    w.albionDesktop = {
+      prices: async (ids, cities) => d.rows.filter((r) => ids.includes(r.id) && cities.includes(r.city)),
+      onPrices: (cb) => { d.push = cb; return () => {}; },
+    };
+    extra?.(w);
+  };
+  return d;
+}
+const captured = (o) => ({ id: "T6_BAG", city: "Lymhurst", quality: 1, sell: 0, sellAt: 0, buy: 0, buyAt: 0, ...o });
+const bagNow = (app) => app.$('#m-grid tr[data-city="Lymhurst"] td.r.num')?.textContent || "";
+
+test("prices the Data Client captures reach the page within seconds, scored, with no request to the price server", async () => {
+  const d = desktop();
+  const { app, asked } = await liveApp({ setup: d.setup });
+  const { AB } = app;
+  await app.go("#/markets/T6_BAG");
+  await until(() => /9,000/.test(bagNow(app)));
+  const M0 = AB.state.M, R0 = AB.state.R, title = app.$("#statusPill").title, requests = asked.length;
+  const t0 = Date.now();
+  d.push([captured({ sell: 8100, sellAt: Date.now() })]);
+  await until(() => /8,100/.test(bagNow(app)), 3000);
+  assert.ok(Date.now() - t0 < 1000, `${Date.now() - t0} ms`);
+  assert.equal(shownSell(app), 8100);
+  assert.notEqual(AB.state.R, R0, "the plays were scored again");
+  assert.equal(asked.length, requests, "no request");
+  assert.equal(AB.state.M.checkedAt, M0.checkedAt);
+  assert.equal(app.$("#statusPill").title, title, "still says when prices were last checked with the server");
+  /* pushes with nothing new for the scan (another quality, a price older than the one shown) change nothing */
+  const M1 = AB.state.M;
+  d.push([captured({ quality: 3, sell: 1, sellAt: Date.now() })]);
+  d.push([captured({ sell: 1, sellAt: Date.now() - 36e5 })]);
+  await sleep(300);
+  assert.equal(AB.state.M, M1);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("a capture that lands during a reload is kept, and alerts it meets fire at once without a request", async () => {
+  const d = desktop();
+  const { s, app, asked } = await liveApp({ setup: d.setup });
+  const { AB } = app;
+  s.delay = 200;
+  s.prices = bag(8800);
+  const reload = AB.app.reloadPrices();
+  await sleep(50);
+  d.push([captured({ city: "Martlock", sell: 9999, sellAt: Date.now() })]); // a market the server has no price for
+  await reload;
+  await until(() => shownSell(app) === 8800 && AB.state.M.P.T6_BAG?.Martlock?.sell === 9999, 5000);
+  s.delay = 0;
+  AB.store.set("alerts", [{ id: "T6_BAG", city: "Lymhurst", kind: "below", price: 8500, t: 0, firedAt: 0, last: null, seen: null, checked: null, hit: false }]);
+  const requests = asked.length;
+  d.push([captured({ sell: 8400, sellAt: Date.now() })]);
+  await until(() => AB.store.get("alerts")[0].hit, 3000);
+  assert.equal(AB.store.get("alerts")[0].last, 8400);
+  assert.equal(asked.length, requests, "no request");
+  assert.equal(app.$("[data-badge]").hidden, false);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("captures wait while the app is hidden, so scoring never takes time from the game, and arrive when it's shown", async () => {
+  const d = desktop();
+  const { app } = await liveApp({ setup: d.setup });
+  const { w } = app;
+  Object.defineProperty(w.document, "visibilityState", { value: "hidden", configurable: true });
+  d.push([captured({ sell: 8200, sellAt: Date.now() })]);
+  await sleep(300);
+  assert.equal(shownSell(app), 9000);
+  delete w.document.visibilityState;
+  w.document.dispatchEvent(new w.Event("visibilitychange"));
+  await until(() => shownSell(app) === 8200, 3000);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("captures shown while a failed reload waits to try again don't cut the wait short", async () => {
+  const planned = new Map(); // reload timers: id -> when they fire
+  const d = desktop((w) => {
+    const set = w.setTimeout.bind(w), clear = w.clearTimeout.bind(w);
+    w.setTimeout = (fn, ms, ...a) => {
+      if (!(ms > 30e3)) return set(fn, ms, ...a);
+      const id = set(() => { planned.delete(id); fn(...a); }, ms);
+      planned.set(id, Date.now() + ms);
+      return id;
+    };
+    w.clearTimeout = (id) => { planned.delete(id); clear(id); };
+  });
+  const { s, app } = await liveApp({ setup: d.setup });
+  const due = () => [...planned.values()].map((t) => Math.round((t - Date.now()) / 1000));
+  s.failPrices = true;
+  await app.AB.app.reloadPrices();
+  assert.equal(app.$("#statusPill").dataset.mode, "retry");
+  const [wait] = due();
+  assert.ok(wait > 110 && wait <= 120, `the retry waits two minutes (${wait} s)`);
+  d.push([captured({ sell: 8300, sellAt: Date.now() })]);
+  await until(() => shownSell(app) === 8300, 3000);
+  assert.equal(planned.size, 1);
+  assert.ok(Math.abs(due()[0] - wait) <= 2, `still ${wait} s, not ${due()[0]} s`);
+  assert.equal(app.$("#statusPill").dataset.mode, "retry", "and the pill still says the server isn't answering");
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("a capture still being scored when a reload ends doesn't put the older prices back", async () => {
+  const d = desktop();
+  const { s, app } = await liveApp({ setup: d.setup });
+  const { AB } = app;
+  /* the capture's scoring takes a while; the reload's doesn't */
+  const runSoon = AB.scan.runSoon;
+  let slow = true;
+  AB.scan.runSoon = async (M) => { if (slow) { slow = false; await sleep(400); } return runSoon(M); };
+  d.push([captured({ city: "Martlock", sell: 9999, sellAt: Date.now() })]);
+  await sleep(50);
+  s.prices = bag(8700);
+  await AB.app.reloadPrices();
+  await until(() => shownSell(app) === 8700);
+  assert.equal(AB.state.M.P.T6_BAG.Martlock.sell, 9999, "the reload has the capture too");
+  await sleep(600);
+  assert.equal(shownSell(app), 8700, "the reload's prices stay");
+  assert.equal(AB.state.M.P.T6_BAG.Martlock.sell, 9999);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("a burst of captures is scored together, at most once every 2 seconds, and every price in it arrives", async () => {
+  const d = desktop();
+  const { app } = await liveApp({ setup: d.setup });
+  const { AB } = app;
+  let builds = 0;
+  AB.market.on("ready", () => builds++);
+  const cities = ["Lymhurst", "Martlock", "Thetford", "Bridgewatch", "Fort Sterling", "Caerleon"];
+  const t0 = Date.now();
+  for (const [i, city] of cities.entries()) {
+    d.push([captured({ city, sell: 7000 + i, sellAt: Date.now() })]);
+    await sleep(100);
+  }
+  await until(() => cities.every((c, i) => AB.state.M.P.T6_BAG?.[c]?.sell === 7000 + i), 6000);
+  assert.ok(Date.now() - t0 >= 2000, "the rest waited for the 2-second spacing");
+  assert.equal(builds, 2, "the first push at once, the rest together");
+  assert.deepEqual(app.errors, []);
+  app.close();
+});

@@ -4,7 +4,7 @@ window.AB = window.AB || {};
 AB.pages = AB.pages || {};
 
 AB.kit = (() => {
-  const { esc, icon, silver, pct, int, ageText, dateFull, D } = AB.util;
+  const { esc, icon, silver, pct, int, aged, dateFull, D } = AB.util;
   const ui = AB.ui, cat = AB.cat, conf = AB.conf;
 
   function head({ eyebrow = "", title, sub = "", right = "" }) {
@@ -137,7 +137,7 @@ AB.kit = (() => {
     const legRows = o.legs.map((lg) => {
       const st = lg.st;
       const r80 = st?.pred ? conf.range(st, lg.h || M.h0) : null;
-      const now = lg.fixed != null ? `${silver(lg.fixed)} (your order)` : lg.l ? `${silver(lg.l.price)} · ${M.live ? ageText((lg.l.ageH || 0) * 36e5) + " old" : "last snapshot day"}` : lg.custom ? `${silver(lg.point)} expected` : "no listing";
+      const now = lg.fixed != null ? `${silver(lg.fixed)} (your order)` : lg.l ? `${silver(lg.l.price)} · ${M.live ? aged(lg.l.ageH == null ? null : lg.l.ageH * 36e5) : "last snapshot day"}` : lg.custom ? `${silver(lg.point)} expected` : "no listing";
       return `<div class="leg"><div class="l-what"><b>${esc(lg.label || "")}</b>${lg.id ? ` · ${esc(cat.label(lg.id))}` : ""}${lg.city ? ` · ${esc(lg.city)}` : ""}${lg.n ? ` · ×${int(lg.n)}` : ""}</div><div class="l-val">${esc(now)}<small>${r80 ? `80% range when you act: ${esc(silver(r80.lo))} – ${esc(silver(r80.hi))}` : lg.custom ? "drawn from the backtested rebound" : "no sales history to calibrate"}</small></div></div>`;
     }).join("");
     const html = `

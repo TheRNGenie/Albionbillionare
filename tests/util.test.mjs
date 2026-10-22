@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { loadAB } from "./load.mjs";
 
-const { silver, pct, spct, esc, ageText, emitter, isItem } = loadAB().util;
+const { silver, pct, spct, esc, ageText, aged, emitter, isItem } = loadAB().util;
 
 test("silver reads like the game: thousands, k, M and B with sensible precision", () => {
   const cases = [
@@ -24,6 +24,9 @@ test("percentages, signed percentages and ages", () => {
   assert.equal(ageText(30 * 60e3), "30 min");
   assert.equal(ageText(5 * 36e5), "5 h");
   assert.equal(ageText(5 * 864e5), "5 d");
+  assert.equal(aged(20e3), "just now", "a price the Data Client just captured");
+  assert.equal(aged(90e3), "2 min old");
+  assert.equal(aged(null), "age unknown");
 });
 
 test("esc makes any text safe to put in HTML", () => {

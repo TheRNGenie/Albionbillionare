@@ -76,7 +76,7 @@ AB.pages.settings = {
       const draw = async () => {
         let s;
         try { s = await window.albionDesktop.status(); } catch (e) { box.innerHTML = `<p class="small">The Data Client link isn't available: ${esc(e.message)}</p>`; return; }
-        box.innerHTML = `<p class="small">Run the official Albion Data Client through this app and its market scans reach you first: prices you see in game become the freshest prices here.</p>
+        box.innerHTML = `<p class="small">Run the official Albion Data Client through this app and the prices of every market you open in game reach the plays and your alerts here within seconds, without a request to the price server. The Data Client still shares them with the Albion Online Data Project as usual.</p>
           <dl class="kv"><dt>Listening</dt><dd>${s.listening ? "yes" : "no"}${s.error ? ` (${esc(s.error)})` : ""}</dd><dt>Data Client</dt><dd>${s.running ? "running" : s.clientPath ? "found, not running" : "not found"}</dd><dt>Prices captured</dt><dd>${int(s.count)}${s.lastAt ? `, last ${esc(ago(Date.now() - s.lastAt))}` : ""}</dd></dl>
           <div class="row"><button class="btn" type="button" id="s-dc">${icon("bolt")}${s.running ? "Running" : "Start the Data Client"}</button><button class="btn ghost" type="button" id="s-upd">${icon("download")}Check for updates</button></div>`;
         box.querySelector("#s-dc").addEventListener("click", async () => { try { const r = await window.albionDesktop.startClient(!s.clientPath); if (r && r.error) toast(r.error); } catch (e) { toast(e.message); } setTimeout(draw, 1200); });
