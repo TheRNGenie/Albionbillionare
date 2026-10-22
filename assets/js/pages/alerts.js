@@ -115,12 +115,13 @@ AB.pages.alerts = {
       drawUsual();
     }
     function drawUsual() {
-      const el = $("#al-usual"), city = citySel.value;
+      const el = $("#al-usual"), city = citySel.value, bm = city === cat.BM;
       if (!picked) { el.textContent = ""; return; }
-      if (!usual) { el.textContent = AB.state.M ? `No recent sales of this item in ${city} to suggest a price from.` : ""; return; }
+      if (!usual) { el.textContent = AB.state.M ? `No recent sales of this item ${bm ? "at the Black Market" : `in ${city}`} to suggest a price from.` : ""; return; }
       const above = kind() === "above";
       const v = Math.round(above ? usual.mid : usual.lo);
-      el.innerHTML = `Usually sells for ${esc(silver(usual.lo))}–${esc(silver(usual.hi))} in ${esc(city)} (the 80% range for today, from four weeks of sales). <button class="link-btn" type="button" data-use="${v}">Use ${esc(int(v))}</button>, ${above ? "the middle, to hear when a buy order pays the going rate." : "the low end, to hear of a bargain."}`;
+      const range = `${esc(silver(usual.lo))}–${esc(silver(usual.hi))}`;
+      el.innerHTML = `${bm ? `The Black Market usually pays ${range}` : `Usually sells for ${range} in ${esc(city)}`} (the 80% range for today, from four weeks of sales). <button class="link-btn" type="button" data-use="${v}">Use ${esc(int(v))}</button>, ${above ? "the middle, to hear when a buy order pays the going rate." : "the low end, to hear of a bargain."}`;
     }
     const picker = ui.picker(itemIn, $("#al-results"), (id) => {
       picked = id;
