@@ -927,3 +927,112 @@ test("Royal cities only keeps the route and its loops on the ring; the sell limi
   assert.deepEqual(app.errors, []);
   app.close();
 });
+
+/* ---------- Cost to Max for refining ---------- */
+const stageRows = (app) => app.$$(".cm-steps .cm-stage").map((r) => /^(.+?) · /.exec(r.textContent.replace(/\s+/g, " ").trim())[1]);
+
+test("Cost to Max switches to refining and back, each to its last route, and a refining route draws in full", async () => {
+  const app = await boot({ hash: "#/costmax" });
+  await cmReady(app);
+  const { $, $$, AB } = app;
+  assert.equal($('[data-seg="cm-mode"] button[aria-pressed="true"]').dataset.v, "craft");
+  app.click($('[data-seg="cm-mode"] button[data-v="refine"]'));
+  await until(() => $("#cm-line")?.value === "CRAFT_REFINE_ORE");
+  await cmReady(app);
+  assert.equal(app.w.location.hash, "#/costmax/CRAFT_REFINE_ORE", "Ore Smelter opens first");
+  assert.equal($('[data-seg="cm-mode"] button[aria-pressed="true"]').dataset.v, "refine");
+  assert.deepEqual($$("#cm-line option").map((o) => o.textContent).sort(), ["Fiber Weaver (cloth)", "Hide Tanner (leather)", "Ore Smelter (metal bars)", "Stone Cutter (stone blocks)", "Wood Planer (planks)"]);
+  assert.equal($("#cm-target").value, "CRAFT_REFINE_ORE", "all five tiers");
+  assert.deepEqual($$("#cm-form input[data-node]").map((i) => i.dataset.node), [4, 5, 6, 7, 8].map((t) => `CRAFT_REFINE_ORE_T${t}`));
+  assert.equal($('#cm-form input[data-k="journals"]'), null, "refines earn no journals");
+  assert.equal(AB.store.get("costMax").mode, "refine");
+  assert.equal(AB.store.get("costMax").refine, "CRAFT_REFINE_ORE");
+  /* the snapshot has no T2 or T3 ore or bars, so Adept's first level goes unpriced, and the page says so */
+  assert.equal(stageRows(app)[0], "Adept Ore Smelter 0 → 1");
+  assert.match($("#page .banner.info").textContent, /Nothing in the snapshot is priced for Adept Ore Smelter's first level.*With live prices in the app, the whole route is priced/);
+  /* back to crafting, on the route it left */
+  app.click($('[data-seg="cm-mode"] button[data-v="craft"]'));
+  await until(() => $("#cm-target")?.value === "CRAFT_SWORDS_CLAYMORE");
+  await cmReady(app);
+  assert.equal(AB.store.get("costMax").mode, "craft");
+  assert.equal(AB.store.get("costMax").refine, "CRAFT_REFINE_ORE", "the refining route is kept for next time");
+  assert.ok($('#cm-form input[data-k="journals"]'));
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("a refining route lays its stages out by tier: first levels unlock tiers, and a level typed in moves the route", async () => {
+  const app = await boot({ hash: "#/costmax/CRAFT_REFINE_HIDE" });
+  await cmReady(app);
+  const { $, $$, AB } = app;
+  assert.deepEqual(stageRows(app), ["Adept Hide Tanner 0 → 1", "Adept Hide Tanner 1 → 100", "Expert Hide Tanner 1 → 100", "Master Hide Tanner 1 → 100", "Grandmaster Hide Tanner 1 → 100", "Elder Hide Tanner 1 → 100"], "maxing Adept unlocks the rest on the way");
+  for (const id of ["cm-curve", "cm-heat", "cm-pace", "cm-specs", "cm-flow"]) assert.ok($(`#${id} svg`), `${id} drew`);
+  assert.match($$(".cm-steps .cm-stage")[4].textContent, /not priced/, "the snapshot has no T7 hide");
+  assert.match($("#page .banner.info").textContent, /Grandmaster Hide Tanner's levels/);
+  assert.ok($$(".cm-steps tbody tr:not(.cm-stage)").some((r) => /Refine in Martlock/.test(r.textContent)), "refined in hide's bonus city");
+  assert.match($("#page .know").textContent, /maxing Adept unlocks Expert, Master and Grandmaster/);
+  /* Adept at 100: Expert's first level is a stage of its own, from refines up to T4 */
+  const n = await app.renders("costmax", async () => { app.change($('input[data-node="CRAFT_REFINE_HIDE_T4"]'), 100); await cmReady(app); });
+  assert.equal(n, 1, "one edit, one redraw");
+  assert.equal(AB.store.get("specLevels").CRAFT_REFINE_HIDE_T4, 100);
+  assert.deepEqual(stageRows(app).slice(0, 2), ["Expert Hide Tanner 0 → 1", "Expert Hide Tanner 1 → 100"]);
+  assert.match($$(".cm-steps .cm-stage")[0].textContent, /unlocks T5 · any refine up to T4/);
+  assert.equal($('input[data-node="CRAFT_REFINE_HIDE_T4"]').value, "100");
+  app.change($('input[data-node="CRAFT_REFINE_HIDE_T5"]'), 101);
+  assert.equal($('input[data-node="CRAFT_REFINE_HIDE_T5"]').value, "0", "101 isn't a level");
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("a link to one refining tier opens it, another line keeps the tier, and a tier at 100 says so", async () => {
+  const app = await boot({ hash: "#/costmax/CRAFT_REFINE_HIDE_T6" });
+  await cmReady(app);
+  const { $, AB } = app;
+  assert.equal($("#cm-target").value, "CRAFT_REFINE_HIDE_T6");
+  assert.equal($("#cm-line").value, "CRAFT_REFINE_HIDE");
+  assert.equal(AB.store.get("costMax").refine, "CRAFT_REFINE_HIDE_T6");
+  assert.deepEqual(stageRows(app), ["Adept Hide Tanner 0 → 1", "Expert Hide Tanner 0 → 1", "Master Hide Tanner 0 → 1", "Master Hide Tanner 1 → 100"]);
+  const line = $("#cm-line");
+  line.value = "CRAFT_REFINE_WOOD";
+  line.dispatchEvent(new app.w.Event("change", { bubbles: true }));
+  await until(() => $("#cm-target")?.value === "CRAFT_REFINE_WOOD_T6");
+  await cmReady(app);
+  assert.equal(app.w.location.hash, "#/costmax/CRAFT_REFINE_WOOD_T6");
+  /* the whole line, then a tier already maxed */
+  const target = $("#cm-target");
+  target.value = "CRAFT_REFINE_WOOD";
+  target.dispatchEvent(new app.w.Event("change", { bubbles: true }));
+  await until(() => app.w.location.hash === "#/costmax/CRAFT_REFINE_WOOD");
+  await cmReady(app);
+  AB.store.set("specLevels", { CRAFT_REFINE_WOOD_T6: 100 });
+  await app.go("#/costmax/CRAFT_REFINE_WOOD_T6");
+  await cmReady(app);
+  assert.match($("#page .card .empty").textContent, /Master Wood Planer is already at 100/);
+  /* a link to no refining line falls back to the last one */
+  await app.go("#/costmax/CRAFT_REFINE_GOLD");
+  await cmReady(app);
+  assert.equal($("#cm-target").value, "CRAFT_REFINE_WOOD_T6");
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("a refining stage's day is a loop from the bonus city, with a stage for each first level and each tier", async () => {
+  const app = await boot({ hash: "#/costmax/CRAFT_REFINE_HIDE" });
+  await cmReady(app);
+  const { $, $$ } = app;
+  assert.deepEqual($$('[data-seg="cm-stage"] button').map((b) => `${b.dataset.v} ${b.textContent}`), ["u4 Open T4", "l4 T4", "l5 T5", "l6 T6", "l7 T7", "l8 T8"]);
+  assert.equal($('[data-seg="cm-stage"] button[aria-pressed="true"]').dataset.v, "u4", "the first stage the snapshot prices");
+  assert.match(loopText(app), /Adept Hide Tanner 0 → 1, any refine up to T3/);
+  const n = await app.renders("costmax", async () => { app.click($('[data-seg="cm-stage"] button[data-v="l5"]')); });
+  assert.equal(n, 0, "the stage redraws only the loop");
+  assert.match(loopText(app), /Expert Hide Tanner 1 → 100/);
+  assert.ok($$("#cm-loop-body .cm-loop td").some((td) => /^Refine /.test(td.textContent)), "a refine stop");
+  assert.ok($$("#cm-loop-body tr.cm-stop th").some((th) => /Martlock/.test(th.textContent)), "hide is refined in Martlock");
+  assert.doesNotMatch(loopText(app), /\bcraft/i, "nothing is crafted");
+  /* the stage on screen survives a redraw of the page */
+  app.click($('[data-seg="pace"] button[data-v="30"]'));
+  await cmReady(app);
+  assert.equal($('[data-seg="cm-stage"] button[aria-pressed="true"]').dataset.v, "l5");
+  assert.deepEqual(app.errors, []);
+  app.close();
+});

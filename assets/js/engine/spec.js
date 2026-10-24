@@ -23,7 +23,10 @@
    one may (nested choices), so no swap can lower it. Focus goes where it saves most silver per point, at the levels
    the route has reached by then, the day's focus spread evenly over the route. Focus changes which crafts are
    cheapest, so the crafts are chosen at a few prices for a point of focus (and without it), and the route that costs
-   least in full wins. A Monte Carlo over the calibrated price ranges gives the cost an 80% range. */
+   least in full wins. A Monte Carlo over the calibrated price ranges gives the cost an 80% range.
+
+   That pricing and filling is solve(), shared with refining (engine/refine.js): plan() sets up a crafting route's
+   stages and options and hands them to it, and refine.plan() does the same for a refining line's. */
 window.AB = window.AB || {};
 
 AB.spec = (() => {
@@ -96,16 +99,17 @@ AB.spec = (() => {
     for (const f of L.need) { if (fame < f) return lvl + (f > 0 ? fame / f : 0); fame -= f; lvl++; }
     return 100;
   }
-  /* Spend learning points with Quick Learn where they save the most fame per point. That's mostly the top levels (a
-     level's fame grows faster than its point cost), but the point cost steps up unevenly, so the levels are sorted. A
-     last partial level takes what's left, saving that share of its 80%. */
-  function quickLearn(L, lp) {
+  /* Spend learning points with Quick Learn where they save the most fame per point, over one ladder or several (a
+     refining line's nodes). That's mostly the top levels (a level's fame grows faster than its point cost), but the
+     point cost steps up unevenly, so the levels are sorted. A last partial level takes what's left, saving that share
+     of its 80%. */
+  function quickLearn(Ls, lp) {
+    if (!Array.isArray(Ls)) Ls = [Ls];
     let left = Math.max(0, lp), used = 0, saved = 0;
     const order = [];
-    for (let i = L.from; i < 100; i++) order.push(i);
-    const perPoint = (i) => L.full[i - L.from] / lpOf(L.n, i);
-    order.sort((a, b) => perPoint(b) - perPoint(a) || b - a);
-    for (const i of order) {
+    Ls.forEach((L, j) => { for (let i = L.from; i < 100; i++) order.push({ L, i, j, per: L.full[i - L.from] / lpOf(L.n, i) }); });
+    order.sort((a, b) => b.per - a.per || b.i - a.i || a.j - b.j);
+    for (const { L, i } of order) {
       if (left <= 1e-9) break;
       const k = i - L.from, cost = lpOf(L.n, i), part = Math.min(1, left / cost);
       const s = L.full[k] * (1 - QUICK) * part;
@@ -113,7 +117,8 @@ AB.spec = (() => {
       L.ql.set(i, part);
       left -= cost * part; used += cost * part; saved += s;
     }
-    return { used, saved, from: L.ql.size ? Math.min(...L.ql.keys()) : null };
+    const firsts = Ls.filter((L) => L.ql.size).map((L) => Math.min(...L.ql.keys()));
+    return { used, saved, from: firsts.length ? Math.min(...firsts) : null };
   }
 
   /* ---------- items ---------- */
@@ -207,7 +212,8 @@ AB.spec = (() => {
     return out;
   }
 
-  /* One craftable item, priced: what a craft costs before selling it, the fame it gives, where it can sell. */
+  /* One craftable item, priced: what a craft costs before selling it, the fame it gives, where it can sell. A refine
+     (o.refine: {city, rr}) happens in its resource's refining bonus city, at refining's return rates. */
   function option(B, legs, id, o) {
     const r = cat.recipe(id), f = fame(id);
     if (!r || !f) return null;
@@ -217,7 +223,8 @@ AB.spec = (() => {
       if (!leg) return { id, tier: p.tier, ench: p.ench, missing: m.id };
       mats.push({ leg, n: m.n, ret: !m.noReturn });
     }
-    const RR = cat.craftCity(id) ? cat.RETURN.craftBonus : cat.RETURN.city;
+    const city = o.refine ? o.refine.city : cat.craftCity(id);
+    const RR = o.refine ? o.refine.rr : city ? cat.RETURN.craftBonus : cat.RETURN.city;
     let journal = null;
     const j = FAMJ.get(p.fam);
     if (o.journals && j && p.tier >= 4) {
@@ -227,7 +234,7 @@ AB.spec = (() => {
       if (full) journal = { key: `${j}|${p.tier}`, j, full, empty: empty && empty.price < npc ? empty : null, npc, per: f / D.jr.fame[p.tier - 4], tier: p.tier };
     }
     return {
-      id, tier: p.tier, ench: p.ench, fame: f * o.pf, mats, rr0: RR.none, rrF: RR.focus, city: cat.craftCity(id),
+      id, tier: p.tier, ench: p.ench, fame: f * o.pf, mats, rr0: RR.none, rrF: RR.focus, city,
       fee: stationFee(id, o.fee), focus: r.focus, sells: sellLegs(B, legs, id, o.share, o.markets), journal,
     };
   }
@@ -245,16 +252,19 @@ AB.spec = (() => {
   /* ---------- the allocation ----------
      stages: [{tier, fame}] in route order; offers: [{tier, fame (per craft), cost (per craft), cap (crafts)}].
      costOf(offer, stage index) may stand in for an offer's cost (the route prices focus that way, by stage).
-     Each stage takes the cheapest silver per fame among the offers it may use (tier at most its own), whole crafts,
-     until its fame is covered; a last craft's extra fame counts toward the next stage. Returns per-stage picks and the
-     fame left uncovered (0 unless a stage has nothing it may craft). */
+     Each stage takes the cheapest silver per fame among the offers it may use (tier at most its own, or the tiers it
+     lists), whole crafts, until its fame is covered; a last craft's extra fame counts toward the next stage (unless
+     that one is `fresh`: a refining stage fills another node). Returns per-stage picks and the fame left uncovered,
+     in all and by stage (0 unless a stage has nothing it may craft). */
+  const allows = (st, tier) => (st.tiers ? st.tiers.includes(tier) : tier <= st.tier);
   function allocate(stages, offers, costOf = (x) => x.cost) {
     const left = offers.map((x) => x.cap);
     let carry = 0, short = 0;
+    const shortBy = [];
     const picks = stages.map((st, k) => {
       const per = offers.map((x) => costOf(x, k) / x.fame);
-      const order = offers.map((x, i) => i).filter((i) => offers[i].tier <= st.tier).sort((a, b) => per[a] - per[b] || a - b);
-      let need = st.fame - carry;
+      const order = offers.map((x, i) => i).filter((i) => allows(st, offers[i].tier)).sort((a, b) => per[a] - per[b] || a - b);
+      let need = st.fame - (st.fresh ? 0 : carry);
       const got = [];
       for (const i of order) {
         if (need <= 1e-9) break;
@@ -266,54 +276,26 @@ AB.spec = (() => {
         got.push({ i, n });
       }
       carry = need < 0 ? -need : 0;
+      shortBy.push(need > 1e-9 ? need : 0);
       if (need > 1e-9) short += need;
       return got;
     });
-    return { picks, short };
+    return { picks, short, shortBy };
   }
 
-  /* ---------- a route ----------
-     B: a market model with the line's items (AB.market.extend(needs(line))).
-     o: { node, levels: {nodeId: level}, premium, days, focusPerDay, journals, fee, lp, share, royal, seed, draws } */
-  function plan(B, o) {
-    const T = node(o.node);
-    if (!T || !D) throw new Error("Unknown crafting node.");
-    const Lm = node(T.line), isSpec = T.kind === "spec";
-    const tax = o.premium ? 0.04 : 0.08, setup = store.setupFee, pf = o.premium ? 1.5 : 1;
-    const days = Math.max(1, Math.min(MAX_DAYS, Math.round(o.days) || 30));
-    const lv = (id) => Math.max(0, Math.min(100, Math.floor(o.levels?.[id] || 0)));
-    const m0 = lv(Lm.id), s0 = isSpec ? lv(T.id) : null;
-    const levels0 = {};
-    for (const n of [Lm, ...specsOf(Lm.id)]) levels0[n.id] = lv(n.id);
-    const legs = new Map();
-    const share = o.share > 0 ? Math.min(1, o.share) : SHARE;
-    /* royal cities only: no red zones (Caerleon and its Black Market) and no mists (Brecilien) */
-    const royal = !!o.royal;
-    const opts = { pf, fee: o.fee ?? 0, journals: o.journals !== false, share, cities: royal ? cat.ROYAL : cat.CITIES, markets: royal ? cat.ROYAL : cat.MARKETS };
+  /* ---------- solving a route (crafting here, refining in engine/refine.js) ----------
+     c: { stages: [{tier or tiers, x0, x1, fame, fresh}] in route order (x: the route's fame so far), options (priced
+     crafts), opts (the route's settings), tax, setup, days, focusTotal, eff(op, stage index) (focus cost efficiency
+     at that stage's levels), span(stage) (the levels it goes from and to), pre (a first step outside the stages, or
+     null), curve: [{level, x}] (where each level is reached), seed, draws }.
+     Offers: each option sold at each market that buys it (up to its share of that market's sales over the days) or
+     kept, its journal's value times jf(the journal's kind) included. Journals beyond what their markets take earn
+     nothing, so later passes scale each kind's value down by the share of them that sells. */
+  function solve(B, c) {
+    const { stages, options, opts, tax, setup, days, focusTotal, pre } = c;
+    const X = stages.reduce((a, st) => a + st.fame, 0);
     const pr0 = (leg) => leg.price;
     const sale0 = (s) => saleNet(s, pr0, tax, setup);
-
-    /* the ladders: the target's, and the mastery's for the tier unlocks (its first level comes from tier-3 crafts) */
-    const mStart = Math.max(m0, 1);
-    const tL = ladder(T, isSpec ? s0 : mStart), mL = isSpec ? ladder(Lm, mStart) : tL;
-    const ql = o.lp > 0 ? quickLearn(tL, o.lp) : { used: 0, saved: 0, from: null };
-    const X = total(tL);
-    const unlock = D.tpl.base.unlock;
-    const gate = (t) => (mStart >= unlock[t] ? 0 : fameTo(mL, unlock[t]));
-    const bounds = [0, gate(5), gate(6), gate(7), gate(8), Infinity].map((g) => Math.min(Math.max(g, 0), X));
-    const stages = [];
-    for (let k = 0; k < 5; k++) if (bounds[k + 1] > bounds[k]) stages.push({ tier: k + 4, x0: bounds[k], x1: bounds[k + 1], fame: bounds[k + 1] - bounds[k] });
-    const unlocks = [];
-    for (let t = 5; t <= 8; t++) { const g = gate(t); if (g > 0 && g < X) unlocks.push({ tier: t, at: levelAt(tL, g) }); }
-
-    /* priced options for the target's items, T4 to T8 */
-    const all = familyIds(isSpec ? T.fam : Lm.fam, [4, 5, 6, 7, 8]).map((id) => option(B, legs, id, opts)).filter(Boolean);
-    const options = all.filter((x) => !x.missing);
-    const missing = [...new Set(all.filter((x) => x.missing).map((x) => x.missing))];
-
-    /* offers: each option sold at each market that buys it (up to its share of that market's sales over the days) or
-       kept, its journal's value times jf(the journal's kind) included. Journals beyond what their markets take earn
-       nothing, so later passes scale each kind's value down by the share of them that sells. */
     const build = (jf) => {
       const offers = [];
       for (const op of options) {
@@ -331,34 +313,13 @@ AB.spec = (() => {
       picks.forEach((ps) => ps.forEach(({ i, n }) => { const j = offers[i].op.journal; if (j) made.set(j.key, (made.get(j.key) || 0) + n * j.per); }));
       return new Map([...made].map(([k, m]) => [k, Math.min(1, (jcap.get(k) || 0) / m)]));
     };
-    /* the prelude: a mastery at 0 takes its first level from tier-3 crafts, the cheapest one sold where it pays most
-       (or kept) */
-    let pre = null;
-    if (m0 === 0) {
-      const fame1 = fameBetween(Lm, 0, 1);
-      for (const id of familyIds(Lm.fam, [3], [0])) {
-        const op = option(B, legs, id, { ...opts, journals: false });
-        if (!op || op.missing) continue;
-        const top = op.sells.slice().sort((a, b) => sale0(b) - sale0(a))[0] || null;
-        const n = Math.ceil(fame1 / op.fame - 1e-9), sold = top ? Math.min(n, Math.floor(top.rate * days)) : 0;
-        const cost = n * baseCost(op, pr0) - sold * sale0(top);
-        if (!pre || cost < pre.cost) pre = { op, n, sold, top, cost, fame: fame1 };
-      }
-      if (!pre) pre = { op: null, n: 0, sold: 0, top: null, cost: null, fame: fame1, missing: true };
-    }
 
     /* focus: the day's focus spread evenly over the route's fame. Each stage spends its share where it saves most silver
-       per point, at the stage's middle levels (the line's other nodes at the player's levels). */
-    const focusTotal = Math.max(0, o.focusPerDay || 0) * days;
-    const mid = stages.map((st) => {
-      const xm = (st.x0 + st.x1) / 2, levels = { ...levels0, [T.id]: levelAt(tL, xm) };
-      if (isSpec) levels[Lm.id] = levelAt(mL, xm);
-      return levels;
-    });
+       per point, at the stage's levels (c.eff). */
     const fcMemo = new Map();
     const fcOf = (op, k) => {
       const key = op.id + "|" + k;
-      if (!fcMemo.has(key)) fcMemo.set(key, cat.focusCost(op.focus, efficiency(op.id, mid[k])));
+      if (!fcMemo.has(key)) fcMemo.set(key, cat.focusCost(op.focus, c.eff(op, k)));
       return fcMemo.get(key);
     };
     const savingOf = (op) => matCost(op, pr0, true) * (op.rrF - op.rr0);
@@ -376,10 +337,7 @@ AB.spec = (() => {
           p.nF = Math.min(p.n, Math.floor(left / p.fc));
           left -= p.nF * p.fc;
         }
-        return {
-          tier: st.tier, x0: st.x0, x1: st.x1, fame: st.fame, picks, focusBudget: budget, focusUsed: budget - left,
-          from: { t: levelAt(tL, st.x0), m: levelAt(mL, st.x0) }, to: { t: levelAt(tL, st.x1), m: levelAt(mL, st.x1) },
-        };
+        return { ...st, picks, focusBudget: budget, focusUsed: budget - left, short: res.shortBy[k], ...c.span(st) };
       });
       return { short: res.short, segs, js: (op) => (op.journal ? jsold.get(op.journal.key) ?? 1 : 0) };
     }
@@ -430,42 +388,39 @@ AB.spec = (() => {
     const prices = [null];
     if (focusTotal > 0) {
       const perPoint = [];
-      stages.forEach((st, k) => { for (const op of options) { const f = fcOf(op, k), v = savingOf(op); if (op.tier <= st.tier && f > 0 && v > 0) perPoint.push(v / f); } });
+      stages.forEach((st, k) => { for (const op of options) { const f = fcOf(op, k), v = savingOf(op); if (allows(st, op.tier) && f > 0 && v > 0) perPoint.push(v / f); } });
       if (perPoint.length) prices.push(...new Set([0, ...FOCUS_Q.map((q) => S.quantile(perPoint, q))]));
     }
     let A = null, point = null;
     for (const price of prices) for (const a of routesAt(price)) {
-      const c = costs(pr0, a);
-      if (!point || c.net < point.net - 1e-6) { A = a; point = c; }
+      const cc = costs(pr0, a);
+      if (!point || cc.net < point.net - 1e-6) { A = a; point = cc; }
     }
     const segs = A.segs;
 
     /* the Monte Carlo: every price drawn once per outcome from its calibrated range (a listing-only price from the
        app's wide uncalibrated one), at the horizon a route's average price varies like */
-    const L = [...legs.values()];
+    const L = [...c.legs.values()];
     const h = Math.min(HORIZON, Math.max(1, days / 3));
     const samplers = L.map((lg) => conf.sampler(lg.model ? lg.st : { pred: lg.price, calibrated: false }, h));
-    const r = S.rng(o.seed ?? 7);
-    const draws = Math.max(0, o.draws ?? 400);
-    const levelsOut = [];
-    for (let lvl = tL.from; lvl <= 100; lvl++) levelsOut.push(lvl);
-    const curveAt = (c) => levelsOut.map((lvl) => {
-      const x = fameTo(tL, lvl);
-      let v = c.preCost;
-      segs.forEach((g, k) => { if (g.fame > 0) v += c.stageCost[k].net * Math.max(0, Math.min(1, (x - g.x0) / g.fame)); });
+    const r = S.rng(c.seed ?? 7);
+    const draws = Math.max(0, c.draws ?? 400);
+    const curveAt = (cc) => c.curve.map(({ x }) => {
+      let v = cc.preCost;
+      segs.forEach((g, k) => { if (g.fame > 0) v += cc.stageCost[k].net * Math.max(0, Math.min(1, (x - g.x0) / g.fame)); });
       return v;
     });
     const nets = [], curves = [];
     for (let d = 0; d < draws; d++) {
-      const prices = L.map((lg, i) => (samplers[i] ? samplers[i](r) : lg.price));
-      const c = costs((leg) => prices[leg.i], A);
-      nets.push(c.net);
-      curves.push(curveAt(c));
+      const drawn = L.map((lg, i) => (samplers[i] ? samplers[i](r) : lg.price));
+      const cc = costs((leg) => drawn[leg.i], A);
+      nets.push(cc.net);
+      curves.push(curveAt(cc));
     }
     const qs = (xs) => { const s = xs.slice().sort((a, b) => a - b); return { p10: S.quantile(s, 0.1), p50: S.quantile(s, 0.5), p90: S.quantile(s, 0.9) }; };
     const range = draws ? qs(nets) : null;
     const pointCurve = curveAt(point);
-    const curve = levelsOut.map((lvl, i) => ({ level: lvl, point: pointCurve[i], ...(draws ? qs(curves.map((c) => c[i])) : {}) }));
+    const curve = c.curve.map(({ level }, i) => ({ level, point: pointCurve[i], ...(draws ? qs(curves.map((cv) => cv[i])) : {}) }));
 
     /* the steps the page lists: per stage, each item's crafts, where they sell, and their net */
     let crafts = pre?.n || 0, kept = pre ? pre.n - pre.sold : 0, fameEarned = 0;
@@ -485,26 +440,104 @@ AB.spec = (() => {
       return { ...g, items: [...byItem.values()].sort((a, b) => b.n - a.n), cost: point.stageCost[k] };
     });
 
-    /* every option's silver per fame at its best outlet (the page's tier-by-enchantment map) */
-    const table = options.map((op) => {
+    const sum = (key) => point.stageCost.reduce((a, s) => a + s[key], 0);
+    return {
+      short: A.short, steps, fameEarned, range, curve, legs: L, draws,
+      totals: { crafts, kept, buy: sum("buy"), back: sum("back"), fee: sum("fee"), sale: sum("sale"), journals: sum("jr"), pre: point.preCost, net: point.net, focus: segs.reduce((a, g) => a + g.focusUsed, 0), focusTotal },
+    };
+  }
+  /* every option's silver per fame at its best outlet, journals in (the page's tier-by-enchantment map) */
+  function perFame(options, tax, setup, share) {
+    const pr0 = (leg) => leg.price, sale0 = (s) => saleNet(s, pr0, tax, setup);
+    return options.map((op) => {
       const keep = baseCost(op, pr0) - journalNet(op, pr0, tax, setup);
       const best = op.sells.slice().sort((a, b) => sale0(b) - sale0(a))[0] || null;
       const perCraft = keep - (best ? Math.max(0, sale0(best)) : 0);
-      const unlockAt = op.tier === 4 ? 1 : unlock[op.tier];
-      return {
-        id: op.id, tier: op.tier, ench: op.ench, fame: op.fame, perCraft, perFame: perCraft / op.fame, best: best?.leg.city || null,
-        sells: op.sells.reduce((a, s) => a + s.rate / share, 0), unlockAt, locked: mStart < unlockAt,
-      };
+      return { id: op.id, tier: op.tier, ench: op.ench, fame: op.fame, perCraft, perFame: perCraft / op.fame, best: best?.leg.city || null, sells: op.sells.reduce((a, s) => a + s.rate / share, 0) };
+    });
+  }
+
+  /* ---------- a route ----------
+     B: a market model with the line's items (AB.market.extend(needs(line))).
+     o: { node, levels: {nodeId: level}, premium, days, focusPerDay, journals, fee, lp, share, royal, seed, draws } */
+  function plan(B, o) {
+    const T = node(o.node);
+    if (!T || !D) throw new Error("Unknown crafting node.");
+    const Lm = node(T.line), isSpec = T.kind === "spec";
+    const tax = o.premium ? 0.04 : 0.08, setup = store.setupFee, pf = o.premium ? 1.5 : 1;
+    const days = Math.max(1, Math.min(MAX_DAYS, Math.round(o.days) || 30));
+    const lv = (id) => Math.max(0, Math.min(100, Math.floor(o.levels?.[id] || 0)));
+    const m0 = lv(Lm.id), s0 = isSpec ? lv(T.id) : null;
+    const levels0 = {};
+    for (const n of [Lm, ...specsOf(Lm.id)]) levels0[n.id] = lv(n.id);
+    const legs = new Map();
+    const share = o.share > 0 ? Math.min(1, o.share) : SHARE;
+    /* royal cities only: no red zones (Caerleon and its Black Market) and no mists (Brecilien) */
+    const royal = !!o.royal;
+    const opts = { pf, fee: o.fee ?? 0, journals: o.journals !== false, share, cities: royal ? cat.ROYAL : cat.CITIES, markets: royal ? cat.ROYAL : cat.MARKETS };
+    const pr0 = (leg) => leg.price;
+    const sale0 = (s) => saleNet(s, pr0, tax, setup);
+
+    /* the ladders: the target's, and the mastery's for the tier unlocks (its first level comes from tier-3 crafts) */
+    const mStart = Math.max(m0, 1);
+    const tL = ladder(T, isSpec ? s0 : mStart), mL = isSpec ? ladder(Lm, mStart) : tL;
+    const ql = o.lp > 0 ? quickLearn(tL, o.lp) : { used: 0, saved: 0, from: null };
+    const X = total(tL);
+    const unlock = D.tpl.base.unlock;
+    const gate = (t) => (mStart >= unlock[t] ? 0 : fameTo(mL, unlock[t]));
+    const bounds = [0, gate(5), gate(6), gate(7), gate(8), Infinity].map((g) => Math.min(Math.max(g, 0), X));
+    const stages = [];
+    for (let k = 0; k < 5; k++) if (bounds[k + 1] > bounds[k]) stages.push({ tier: k + 4, x0: bounds[k], x1: bounds[k + 1], fame: bounds[k + 1] - bounds[k] });
+    const unlocks = [];
+    for (let t = 5; t <= 8; t++) { const g = gate(t); if (g > 0 && g < X) unlocks.push({ tier: t, at: levelAt(tL, g) }); }
+
+    /* priced options for the target's items, T4 to T8 */
+    const all = familyIds(isSpec ? T.fam : Lm.fam, [4, 5, 6, 7, 8]).map((id) => option(B, legs, id, opts)).filter(Boolean);
+    const options = all.filter((x) => !x.missing);
+    const missing = [...new Set(all.filter((x) => x.missing).map((x) => x.missing))];
+
+    /* the prelude: a mastery at 0 takes its first level from tier-3 crafts, the cheapest one sold where it pays most
+       (or kept) */
+    let pre = null;
+    if (m0 === 0) {
+      const fame1 = fameBetween(Lm, 0, 1);
+      for (const id of familyIds(Lm.fam, [3], [0])) {
+        const op = option(B, legs, id, { ...opts, journals: false });
+        if (!op || op.missing) continue;
+        const top = op.sells.slice().sort((a, b) => sale0(b) - sale0(a))[0] || null;
+        const n = Math.ceil(fame1 / op.fame - 1e-9), sold = top ? Math.min(n, Math.floor(top.rate * days)) : 0;
+        const cost = n * baseCost(op, pr0) - sold * sale0(top);
+        if (!pre || cost < pre.cost) pre = { op, n, sold, top, cost, fame: fame1 };
+      }
+      if (!pre) pre = { op: null, n: 0, sold: 0, top: null, cost: null, fame: fame1, missing: true };
+    }
+
+    /* focus is priced at each stage's middle levels (the line's other nodes at the player's levels) */
+    const mid = stages.map((st) => {
+      const xm = (st.x0 + st.x1) / 2, levels = { ...levels0, [T.id]: levelAt(tL, xm) };
+      if (isSpec) levels[Lm.id] = levelAt(mL, xm);
+      return levels;
+    });
+    const levelsOut = [];
+    for (let lvl = tL.from; lvl <= 100; lvl++) levelsOut.push(lvl);
+    const R = solve(B, {
+      stages, options, legs, opts, tax, setup, days, pre, seed: o.seed, draws: o.draws,
+      focusTotal: Math.max(0, o.focusPerDay || 0) * days,
+      eff: (op, k) => efficiency(op.id, mid[k]),
+      span: (st) => ({ from: { t: levelAt(tL, st.x0), m: levelAt(mL, st.x0) }, to: { t: levelAt(tL, st.x1), m: levelAt(mL, st.x1) } }),
+      curve: levelsOut.map((level) => ({ level, x: fameTo(tL, level) })),
     });
 
-    const sum = (key) => point.stageCost.reduce((a, s) => a + s[key], 0);
+    const table = perFame(options, tax, setup, share).map((r) => {
+      const unlockAt = r.tier === 4 ? 1 : unlock[r.tier];
+      return { ...r, unlockAt, locked: mStart < unlockAt };
+    });
     return {
-      node: T, line: Lm, isSpec, s0, m0, premium: !!o.premium, days, short: A.short, share, royal, cities: opts.cities, tax, setup, fee: opts.fee, ops: options,
-      fame: { target: X, saved: ql.saved, full: X + ql.saved, earned: fameEarned, mastery: isSpec ? total(mL) : X },
-      ql, prelude: pre, steps, table, missing, options: options.length, unlocks, journals: { on: opts.journals, priced: options.some((op) => op.journal) },
-      end: { t: levelAt(tL, fameEarned), m: levelAt(mL, fameEarned) },
-      totals: { crafts, kept, buy: sum("buy"), back: sum("back"), fee: sum("fee"), sale: sum("sale"), journals: sum("jr"), pre: point.preCost, net: point.net, focus: segs.reduce((a, g) => a + g.focusUsed, 0), focusTotal },
-      range, curve, legs: L, draws,
+      node: T, line: Lm, isSpec, s0, m0, premium: !!o.premium, days, short: R.short, share, royal, cities: opts.cities, tax, setup, fee: opts.fee, ops: options,
+      fame: { target: X, saved: ql.saved, full: X + ql.saved, earned: R.fameEarned, mastery: isSpec ? total(mL) : X },
+      ql, prelude: pre, steps: R.steps, table, missing, options: options.length, unlocks, journals: { on: opts.journals, priced: options.some((op) => op.journal) },
+      end: { t: levelAt(tL, R.fameEarned), m: levelAt(mL, R.fameEarned) },
+      totals: R.totals, range: R.range, curve: R.curve, legs: R.legs, draws: R.draws,
     };
   }
 
@@ -538,7 +571,7 @@ AB.spec = (() => {
   return {
     ready, get data() { return D; }, SHARE, QUICK, MAX_FEE, MAX_DAYS, PACES, HORIZON,
     node, lineOf, lines, specsOf, short, special, cum, fameBetween, ladder, levelAt, fameTo, quickLearn, total, lpOf,
-    fame, value, stationFee, efficiency, familyIds, craftable, needs, journalIds, allocate, plan, confidence,
-    typical, buyAt, cheapest, matCost, baseCost, saleNet, journalNet,
+    fame, value, stationFee, efficiency, familyIds, craftable, needs, journalIds, allows, allocate, solve, perFame, plan, confidence,
+    typical, buyAt, cheapest, option, matCost, baseCost, saleNet, journalNet, toRx,
   };
 })();

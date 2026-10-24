@@ -224,6 +224,7 @@ tr.al-mine td { background: var(--gold-wash); }
 /* ---------- cost to max ---------- */
 .cm-form-card { margin-bottom: 16px; }
 .cm-form { display: flex; flex-direction: column; gap: 16px; }
+.cm-mode { display: flex; }
 .cm-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.3fr) auto minmax(0, 1fr); gap: 14px; align-items: start; }
 .cm-row .select, .cm-row .input { width: 100%; }
 .cm-levels { border: 0; padding: 0; margin: 0; min-width: 0; }
@@ -242,6 +243,9 @@ tr.al-mine td { background: var(--gold-wash); }
 /* the daily loop: its controls, the stops in order (a header per city, its errands, the silver there) and the extras */
 .cm-loop-ctrl { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 20px; margin-bottom: 14px; }
 .cm-loop-ctrl .select { max-width: 100%; }
+/* a refining route can have six stages (five tiers to open, then one to level): they wrap rather than scroll */
+.cm-loop-ctrl > .field { min-width: 0; max-width: 100%; }
+.cm-loop-ctrl .seg { flex-wrap: wrap; }
 .cm-loop-ctrl .check { min-height: 36px; }
 .cm-loop-intro, .cm-risk { margin: 0 0 12px; line-height: 1.5; }
 .cm-risk .tag { vertical-align: 1px; }

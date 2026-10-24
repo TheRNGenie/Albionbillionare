@@ -21,6 +21,12 @@ Everything here is read from Albion's own files; nothing is typed in by hand:
   "lines" the 39 crafter masteries, each with its item families, focus bonuses and specializations.
           "fc": [[bonus per level, index into "pat"], ...]. Focus cost efficiency = 100 x level x bonus, summed over
           every node with a pattern matching the item; focus cost = base cost x 0.5 ^ (efficiency / 10,000).
+  "ref"   the refining half: the five level tables (REFINE_T4 to REFINE_T8; per level its fame, learning points and the
+          lowest and highest tier of refine that counts: 2 to 8 for a node's first level, which unlocks its tier, and
+          only its own tier after that), and the five resources (Ore Smelter ...), each with its five tier nodes (fame
+          and LP multipliers, and focus bonuses as [bonus, index into "pat", lowest tier, highest tier]). "jm" is the
+          Journeyman Refiner node before them: its name and the fame of tier-2 refining it takes (it unlocks tier 3).
+          Raw resources (ore, logs ...) join "res", since a refine's fame is the fame of its inputs.
 """
 import datetime
 import json
@@ -32,6 +38,8 @@ CATS = {"WARRIOR": "warrior", "HUNTER": "hunter", "MAGE": "mage", "TOOL": "toolm
 # crafting journals by type (T4_JOURNAL_WARRIOR ...); the market sells them as ..._EMPTY and ..._FULL
 JOURNALS = ["WARRIOR", "HUNTER", "MAGE", "TOOLMAKER"]
 TIERS = range(4, 9)
+# refining: the board's resource names and the refined resource each makes
+REFINES = {"FIBER": "CLOTH", "HIDE": "LEATHER", "ORE": "METALBAR", "ROCK": "STONEBLOCK", "WOOD": "PLANKS"}
 
 
 def as_list(x):
@@ -63,11 +71,14 @@ def english(loc):
     return en
 
 
-def template(t):
-    """A level table: Fame;LP;MissionTargetMinTier;MissionTargetMaxTier;MissionItemMinTier;MissionItemMaxTier;UnlockTier;..."""
+def template(t, top=False):
+    """A level table: Fame;LP;MissionTargetMinTier;MissionTargetMaxTier;MissionItemMinTier;MissionItemMaxTier;UnlockTier;...
+    `top` keeps the highest item tier per level too (refining levels count one tier only)."""
     cols = t["baselevels"]["@structure"].split(";")
     rows = [dict(zip(cols, r.strip().split(";"))) for r in t["baselevels"]["#text"].strip().split("\n") if r.strip()]
     out = {"fame": [int(r["Fame"]) for r in rows], "lp": [int(r["LP"]) for r in rows], "min": [int(r["MissionItemMinTier"]) for r in rows]}
+    if top:
+        out["max"] = [int(r["MissionItemMaxTier"]) for r in rows]
     unlock = {r["UnlockTier"]: i + 1 for i, r in enumerate(rows) if r.get("UnlockTier")}
     if unlock:
         out["unlock"] = unlock
@@ -234,12 +245,51 @@ def main(folder, out="assets/data/v2/destiny.json"):
                 for lvl in levels:
                     craft_fame(f"T{t}_{fam}", lvl)
 
+    # ---------- refining: the five level tables, the five resources' tier nodes, and every refine's inputs ----------
+    rtpl = {str(t): template(T[f"REFINE_T{t}"], top=True) for t in TIERS}
+    for t, tb in rtpl.items():
+        assert len(tb["fame"]) == 100 and tb["min"][0] == 2 and tb["max"][0] == 8 and tb["unlock"] == {t: 1}, t
+        assert all(lo == hi == int(t) for lo, hi in zip(tb["min"][1:], tb["max"][1:])), t
+        del tb["unlock"]  # each node's first level unlocks its own tier
+
+    def refine_focus(node):
+        out = []
+        for b in as_list((node.get("baserewards") or {}).get("bonus")):
+            if b["@type"] != "craftingfocuscostreduction":
+                continue
+            ps = [p["@pattern"] for p in as_list(b.get("itempattern"))]
+            if ps not in pat:
+                pat.append(ps)
+            out.append([float(b["@bonus"]), pat.index(ps), int(b["@mintier"]), int(b["@maxtier"])])
+        return out
+
+    rnodes = {n["@id"]: n for n in A["templateachievement"] if n.get("@usetemplate", "").startswith("REFINE_T")}
+    rlines = []
+    for res_name, refined in REFINES.items():
+        nodes_ = []
+        for t in TIERS:
+            n = rnodes[f"CRAFT_REFINE_{res_name}_T{t}"]
+            assert n["@usetemplate"] == f"REFINE_T{t}" and pats(n) == [f"T?_{refined}*"], n["@id"]
+            nodes_.append({"id": n["@id"], "name": en[n["title"]["@tag"]], "tier": t, "fm": float(n["@famemultiplier"]), "lpm": float(n["@lpmultiplier"]), "fc": refine_focus(n)})
+        rlines.append({"id": f"CRAFT_REFINE_{res_name}", "res": res_name, "refined": refined, "name": nodes_[0]["name"].replace("Adept ", "", 1), "nodes": nodes_})
+        # every refine's inputs, so their fame is known (raw resources at every tier and enchantment)
+        for t in range(2, 9):
+            for lvl in range(5):
+                uid = f"T{t}_{refined}" + (f"_LEVEL{lvl}" if lvl else "")
+                if uid in items:
+                    add_res(uid)
+                    for c in as_list((first(items[uid][1].get("craftingrequirements")) or {}).get("craftresource")):
+                        add_res(c["@uniquename"])
+    jm = next(a for a in A["achievement"] if a["@id"] == "CRAFT_REFINE")
+    jm_fame = int(jm["masterylevels"]["masterylevel"]["missions"]["mission"]["@value"])
+
     cat_names = {CATS[k]: en[f"@ACHIEVEMENT_SUBCATEGORY_CRAFT_{k}"].replace(" Crafter", "") for k in CATS}
     used = {f for line in lines for f in line["fam"]}
     data = {
         "v": datetime.date.today().isoformat(),
         "tpl": tpl, "cats": cat_names, "res": dict(sorted(res.items())), "av": dict(sorted(av.items())),
         "ff": {f: v for f, v in sorted(ff.items()) if f in used}, "jr": jr, "pat": pat, "lines": lines,
+        "ref": {"tpl": rtpl, "jm": [en[jm["title"]["@tag"]], jm_fame], "lines": rlines},
     }
 
     # Checks against a published crafting fame table (albiononlinegrind.com): a two-handed T8.0 weapon gives 44,640
@@ -249,10 +299,19 @@ def main(folder, out="assets/data/v2/destiny.json"):
         got = craft_fame(uid, lvl)
         assert abs(got - want) < 1e-6, (uid, lvl, got, want)
 
+    # Refining checks: the wiki's Adept Ore Smelter takes 2,900,810 fame from 0 to 100, and its fame-per-refine table
+    # (premium, so 1.5x) gives 33 for a T4 bar, 56 for T4.1 and 2,100 for T8: 22.5, 37.5 and 1,395 here. A refine's fame
+    # is its inputs' (2 x 15 + 7.5 for T4.1), not the refined resource's own value (45, which crafting with it uses).
+    assert sum(rtpl["4"]["fame"]) == 2900810
+    refine_checks = [("T4_METALBAR", 22.5), ("T4_METALBAR_LEVEL1", 37.5), ("T8_METALBAR", 1395)]
+    for uid, want in refine_checks:
+        got = sum(int(c["@count"]) * res_fame(c["@uniquename"]) for c in as_list(first(items[uid][1]["craftingrequirements"])["craftresource"]))
+        assert abs(got - want) < 1e-6, (uid, got, want)
+
     with open(out, "w") as f:
         json.dump(data, f, separators=(",", ":"))
     n_specs = sum(len(l["specs"]) for l in lines)
-    print(f"{len(lines)} masteries, {n_specs} specializations, {len(res)} materials, {len(av)} artifacts, {len(data['ff'])} families with extra fame -> {out} ({os.path.getsize(out)} bytes)")
+    print(f"{len(lines)} masteries, {n_specs} specializations, {len(rlines)} refining lines, {len(res)} materials, {len(av)} artifacts, {len(data['ff'])} families with extra fame -> {out} ({os.path.getsize(out)} bytes)")
 
 
 if __name__ == "__main__":

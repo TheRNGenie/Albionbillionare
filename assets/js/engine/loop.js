@@ -66,7 +66,8 @@ AB.loop = (() => {
   }
 
   /* ---------- one loop ----------
-     B: the line's market model (prices for refining inputs and for buying at the bench); p: the route (spec.plan);
+     B: the line's market model (prices for refining inputs and for buying at the bench); p: the route (spec.plan, or
+     refine.plan: then the "crafts" are refines and the bench is the resource's refining bonus city);
      rows: the day's crafts; cap: the mount's kg. `order` fixes the ride (Expand's tries keep the order they start
      from); without it the loop picks the lightest. */
   function build(B, p, rows, cap, order = null) {
@@ -298,13 +299,13 @@ AB.loop = (() => {
     let L = build(B, p, rows.map((r) => ({ ...r })), cap);
     if (!L) return null;
     const base = L;
-    const tier = p.steps[k].tier;
+    const step = p.steps[k];
     const used = new Map();
     for (const r of rows) if (r.s) used.set(r.s, (used.get(r.s) || 0) + r.units);
     const pr = (leg) => leg.price;
     const cand = [];
     for (const op of p.ops) {
-      if (op.tier > tier) continue;
+      if (!S.allows(step, op.tier)) continue;
       const cost = S.baseCost(op, pr);
       const kgEach = kgOf(op.id) + sum(op.mats, (m) => m.n * (m.ret ? 1 - op.rr0 : 1) * kgOf(m.leg.id));
       for (const s of op.sells) {
