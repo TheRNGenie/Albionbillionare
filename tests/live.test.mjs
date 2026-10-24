@@ -36,10 +36,12 @@ const headers = (h) => ({ get: (k) => h[Object.keys(h).find((x) => x.toLowerCase
 /* The server's rate-limit answer: HTTP 429, its RateLimit headers and its message, with the window ending `inS`
    seconds from now. */
 function throttled(inS) {
-  /* it arrives a moment after the requests sent alongside it, so those are told apart from what the app sent after */
+  /* It arrives a moment after the requests sent alongside it. Those are told apart from what the app sent after it by
+     their order (`n`, the requests made before the answer existed), not by the clock: one can go out in the same
+     millisecond, just before the answer. */
   return sleep(30).then(() => {
     const reset = Math.ceil(Date.now() / 1000) + inS;
-    limited = { at: Date.now(), reset: reset * 1000 };
+    limited = { at: Date.now(), n: urls.length, reset: reset * 1000 };
     return { ok: false, status: 429, headers: headers({ "RateLimit-Limit": "100", "RateLimit-Remaining": "0", "RateLimit-Reset": String(reset) }),
       text: async () => `Throttled, slow down! You exceeded the throttle apiv2/1m that limits requests to 100 per 60 seconds! Throttle resets at ${new Date(reset * 1000).toISOString()}!\n` };
   });
@@ -103,7 +105,7 @@ test("requests stay under the URL limit, and after a rate limit nothing goes out
   assert.ok(api.length > 3);
   for (const u of api) assert.ok(u.length < 3000, `${u.length} characters`);
   assert.ok(limited, "the server did rate-limit once");
-  const after = sentAt.filter((t) => t >= limited.at);
+  const after = sentAt.slice(limited.n);
   assert.ok(after.length > 0, "the load went on afterwards");
   for (const t of after) assert.ok(t >= limited.reset + 1000 - 15, `a request went out ${limited.reset + 1000 - t} ms before the window reset`);
   assert.ok(M.rows.length > 1000, "and the prices still arrived");
