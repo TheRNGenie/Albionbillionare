@@ -30,7 +30,8 @@ AB.spec = (() => {
   const cat = AB.cat, conf = AB.conf, S = AB.stats, store = AB.store;
   const BM = cat.BM;
   /* Share of a market's daily sales the route may sell into, every day: a quarter, so it adds to the market rather
-     than swamping it (the Black Market flip uses the same share for one batch). */
+     than swamping it (the Black Market flip uses the same share for one batch). The player can lift it to a whole
+     day's sales (o.share = 1, v1's "Remove the safe daily sell limit"), knowing prices will drop. */
   const SHARE = 0.25;
   const QUICK = 0.2;          // Quick Learn: a level takes this share of its fame (learningpointfamefactor 5)
   const NUTRITION = 0.1125;   // nutrition a craft uses per point of item value (gamedata: ItemValueToNutrition)
@@ -135,8 +136,9 @@ AB.spec = (() => {
     const a = /^T(\d)_(ARTEFACT_.+)$/.exec(mid);
     return a ? D.av[a[2]]?.[a[1] - 4] || 0 : 0;
   }
-  /* item value, which the station's fee is charged on: the sum of its materials' values */
-  const value = (id) => (cat.recipe(id)?.mats || []).reduce((a, m) => a + m.n * matValue(m.id), 0);
+  /* item value, which the station's fee is charged on: a refined resource's own (refining it), else the sum of its
+     materials' values */
+  const value = (id) => D?.res[id]?.[1] ?? (cat.recipe(id)?.mats || []).reduce((a, m) => a + m.n * matValue(m.id), 0);
   const stationFee = (id, per100) => value(id) * NUTRITION * Math.max(0, Math.min(MAX_FEE, per100)) / 100;
   /* focus cost efficiency for an item from the player's levels ({nodeId: level}) */
   function efficiency(id, levels) {
@@ -158,13 +160,16 @@ AB.spec = (() => {
   const craftable = (n) => (n.craftable ??= familyIds(n.fam, [4, 5, 6, 7, 8]).length > 0);
   const journalIds = (j, t) => ({ full: `T${t}_JOURNAL_${j}_FULL`, empty: `T${t}_JOURNAL_${j}_EMPTY` });
   /* Everything a line's routes may price: its items at every tier and enchantment (tier 3 for a mastery's first
-     level), their materials, and its journals. */
+     level), their materials (and what refining those takes, for the daily loop), and its journals. */
   function needs(lineId) {
     const L = node(lineId);
     if (!L) return [];
     const ids = [...familyIds(L.fam, [3], [0]), ...familyIds(L.fam, [4, 5, 6, 7, 8])];
     const out = new Set(ids);
-    for (const id of ids) for (const m of cat.recipe(id).mats) out.add(m.id);
+    for (const id of ids) for (const m of cat.recipe(id).mats) {
+      out.add(m.id);
+      if (cat.parse(m.id).kind === "refined") for (const x of cat.recipe(m.id)?.mats || []) out.add(x.id);
+    }
     for (const j of new Set(L.fam.map((f) => FAMJ.get(f)).filter(Boolean))) for (let t = 4; t <= 8; t++) { const x = journalIds(j, t); out.add(x.full); out.add(x.empty); }
     return [...out];
   }
@@ -178,24 +183,26 @@ AB.spec = (() => {
     if (!legs.has(k)) legs.set(k, { i: legs.size, id, city, st, l, price: typical(st) ? st.pred : l?.price ?? null, model: typical(st) });
     return legs.get(k);
   }
-  /* the cheapest market to buy an item in, from the royal cities, Caerleon and Brecilien */
-  function buyLeg(B, legs, id) {
+  /* what buying an item costs in one market: its typical price, or the listing where sales are thin */
+  const buyAt = (B, id, c) => { const st = B.stat(id, c), l = B.listing(id, c, "sell"); return { c, st, l, p: typical(st) ? st.pred : l?.price ?? null }; };
+  /* the cheapest market to buy an item in, from the royal cities, Caerleon and Brecilien (or the royal cities only) */
+  function cheapest(B, id, cities = cat.CITIES) {
     let best = null;
-    for (const c of cat.CITIES) {
-      const st = B.stat(id, c), l = B.listing(id, c, "sell");
-      const p = typical(st) ? st.pred : l?.price;
-      if (p && (!best || p < best.p)) best = { c, st, l, p };
-    }
+    for (const c of cities) { const x = buyAt(B, id, c); if (x.p && (!best || x.p < best.p)) best = x; }
+    return best;
+  }
+  function buyLeg(B, legs, id, cities) {
+    const best = cheapest(B, id, cities);
     return best ? priceLeg(legs, id, best.c, best.st, best.l) : null;
   }
   /* every market that has bought the item on at least 4 of the last 14 days: the Black Market (into its buy orders,
      tax only) and the cities (a sell order: tax and the listing fee) */
-  function sellLegs(B, legs, id) {
+  function sellLegs(B, legs, id, share, markets = cat.MARKETS) {
     const out = [];
-    for (const c of cat.MARKETS) {
+    for (const c of markets) {
       const st = B.stat(id, c);
       if (!typical(st) || !(st.perDay > 0)) continue;
-      out.push({ leg: priceLeg(legs, id, c, st, B.listing(id, c, c === BM ? "buy" : "sell")), bm: c === BM, rate: SHARE * st.perDay });
+      out.push({ leg: priceLeg(legs, id, c, st, B.listing(id, c, c === BM ? "buy" : "sell")), bm: c === BM, rate: share * st.perDay });
     }
     return out;
   }
@@ -206,7 +213,7 @@ AB.spec = (() => {
     if (!r || !f) return null;
     const p = cat.parse(id), mats = [];
     for (const m of r.mats) {
-      const leg = buyLeg(B, legs, m.id);
+      const leg = buyLeg(B, legs, m.id, o.cities);
       if (!leg) return { id, tier: p.tier, ench: p.ench, missing: m.id };
       mats.push({ leg, n: m.n, ret: !m.noReturn });
     }
@@ -215,13 +222,13 @@ AB.spec = (() => {
     const j = FAMJ.get(p.fam);
     if (o.journals && j && p.tier >= 4) {
       const x = journalIds(j, p.tier), npc = D.jr.silver[p.tier - 4];
-      const full = sellLegs(B, legs, x.full).filter((s) => !s.bm).sort((a, b) => b.leg.price - a.leg.price)[0];
-      const empty = buyLeg(B, legs, x.empty);
+      const full = sellLegs(B, legs, x.full, o.share, o.markets).filter((s) => !s.bm).sort((a, b) => b.leg.price - a.leg.price)[0];
+      const empty = buyLeg(B, legs, x.empty, o.cities);
       if (full) journal = { key: `${j}|${p.tier}`, j, full, empty: empty && empty.price < npc ? empty : null, npc, per: f / D.jr.fame[p.tier - 4], tier: p.tier };
     }
     return {
       id, tier: p.tier, ench: p.ench, fame: f * o.pf, mats, rr0: RR.none, rrF: RR.focus, city: cat.craftCity(id),
-      fee: stationFee(id, o.fee), focus: r.focus, sells: sellLegs(B, legs, id), journal,
+      fee: stationFee(id, o.fee), focus: r.focus, sells: sellLegs(B, legs, id, o.share, o.markets), journal,
     };
   }
   /* silver per craft at a set of prices (pr(leg)): returnable materials or the rest, a sale's net, a journal's share */
@@ -267,7 +274,7 @@ AB.spec = (() => {
 
   /* ---------- a route ----------
      B: a market model with the line's items (AB.market.extend(needs(line))).
-     o: { node, levels: {nodeId: level}, premium, days, focusPerDay, journals, fee, lp, seed, draws } */
+     o: { node, levels: {nodeId: level}, premium, days, focusPerDay, journals, fee, lp, share, royal, seed, draws } */
   function plan(B, o) {
     const T = node(o.node);
     if (!T || !D) throw new Error("Unknown crafting node.");
@@ -279,7 +286,10 @@ AB.spec = (() => {
     const levels0 = {};
     for (const n of [Lm, ...specsOf(Lm.id)]) levels0[n.id] = lv(n.id);
     const legs = new Map();
-    const opts = { pf, fee: o.fee ?? 0, journals: o.journals !== false };
+    const share = o.share > 0 ? Math.min(1, o.share) : SHARE;
+    /* royal cities only: no red zones (Caerleon and its Black Market) and no mists (Brecilien) */
+    const royal = !!o.royal;
+    const opts = { pf, fee: o.fee ?? 0, journals: o.journals !== false, share, cities: royal ? cat.ROYAL : cat.CITIES, markets: royal ? cat.ROYAL : cat.MARKETS };
     const pr0 = (leg) => leg.price;
     const sale0 = (s) => saleNet(s, pr0, tax, setup);
 
@@ -483,13 +493,13 @@ AB.spec = (() => {
       const unlockAt = op.tier === 4 ? 1 : unlock[op.tier];
       return {
         id: op.id, tier: op.tier, ench: op.ench, fame: op.fame, perCraft, perFame: perCraft / op.fame, best: best?.leg.city || null,
-        sells: op.sells.reduce((a, s) => a + s.rate / SHARE, 0), unlockAt, locked: mStart < unlockAt,
+        sells: op.sells.reduce((a, s) => a + s.rate / share, 0), unlockAt, locked: mStart < unlockAt,
       };
     });
 
     const sum = (key) => point.stageCost.reduce((a, s) => a + s[key], 0);
     return {
-      node: T, line: Lm, isSpec, s0, m0, premium: !!o.premium, days, short: A.short,
+      node: T, line: Lm, isSpec, s0, m0, premium: !!o.premium, days, short: A.short, share, royal, cities: opts.cities, tax, setup, fee: opts.fee, ops: options,
       fame: { target: X, saved: ql.saved, full: X + ql.saved, earned: fameEarned, mastery: isSpec ? total(mL) : X },
       ql, prelude: pre, steps, table, missing, options: options.length, unlocks, journals: { on: opts.journals, priced: options.some((op) => op.journal) },
       end: { t: levelAt(tL, fameEarned), m: levelAt(mL, fameEarned) },
@@ -529,5 +539,6 @@ AB.spec = (() => {
     ready, get data() { return D; }, SHARE, QUICK, MAX_FEE, MAX_DAYS, PACES, HORIZON,
     node, lineOf, lines, specsOf, short, special, cum, fameBetween, ladder, levelAt, fameTo, quickLearn, total, lpOf,
     fame, value, stationFee, efficiency, familyIds, craftable, needs, journalIds, allocate, plan, confidence,
+    typical, buyAt, cheapest, matCost, baseCost, saleNet, journalNet,
   };
 })();

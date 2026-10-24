@@ -110,6 +110,7 @@ test("destiny.json: the crafting half of the Destiny Board, with the game's leve
   assert.ok(d.tpl.base.min.slice(1).every((t) => t === 4) && d.tpl.spec.min.every((t) => t === 4));
   assert.deepEqual(d.jr.silver, [2000, 4000, 8000, 16000, 32000]);
   assert.ok(d.jr.fame.length === 5 && d.jr.fame.every((f, i) => f > 0 && (i === 0 || f > d.jr.fame[i - 1])));
+  assert.deepEqual(d.jr.kg, [0.34, 0.51, 0.76, 1.14, 1.71], "a journal's weight by tier, empty or full (the daily loop carries them)");
   assert.deepEqual(Object.keys(d.cats).sort(), ["hunter", "mage", "toolmaker", "warrior"]);
   assert.equal(d.lines.length, 39);
   const ids = new Set();

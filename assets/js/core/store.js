@@ -23,9 +23,10 @@ AB.store = (() => {
     risk: "balanced",
     alerts: [], // price alerts (see engine/alerts.js)
     timers: { planted: null, laborers: null, focus: null, focusAt: null, remind: { harvest: true, laborers: true, focus: true, reset: false } },
-    /* Cost to Max: the target node, days to take, focus and journals on or off, the station's fee per 100 nutrition and
-       the learning points to spend (see engine/spec.js) */
-    costMax: { node: "CRAFT_SWORDS_CLAYMORE", days: 90, focus: true, journals: true, fee: 0, lp: 0 },
+    /* Cost to Max: the target node, days to take, focus and journals on or off, the station's fee per 100 nutrition,
+       the learning points to spend and the safe daily sell limit switched off (see engine/spec.js); the daily loop's
+       pack mount, the Transport Mammoth and Expand this loop (see engine/loop.js) */
+    costMax: { node: "CRAFT_SWORDS_CLAYMORE", days: 90, focus: true, journals: true, fee: 0, lp: 0, noCap: false, mount: "ox8", mammoth: false, expand: false },
     specLevels: {}, // the player's Destiny Board crafting levels, {nodeId: 0-100}
   };
   /* Kept by "Reset settings": they're the player's own lists, not preferences. */
@@ -47,6 +48,8 @@ AB.store = (() => {
   const PLACE = /^[A-Za-z ]{2,30}$/;
   /* A Destiny Board crafting node (CRAFT_SWORDS_CLAYMORE): capitals, digits and underscores only. */
   const NODE = /^CRAFT_[A-Z0-9_]{1,48}$/;
+  /* The daily loop's pack mounts (engine/loop.js MOUNTS). */
+  const MOUNT = oneOf("ox8", "bear8", "ox7", "ox6", "ox5");
   const level = clampTo(0, 100);
   function cleanAlert(a) {
     if (!obj(a) || !isItem(a.id) || typeof a.city !== "string" || !PLACE.test(a.city) || !["below", "above"].includes(a.kind) || !(fin(a.price) > 0)) return null;
@@ -85,6 +88,7 @@ AB.store = (() => {
     costMax: (v) => (obj(v) && NODE.test(v.node) ? {
       node: v.node, days: Math.round(clampTo(1, 3650)(v.days) ?? 90), focus: v.focus !== false, journals: v.journals !== false,
       fee: clampTo(0, 1000)(v.fee) ?? 0, lp: Math.round(clampTo(0, 1e6)(v.lp) ?? 0),
+      noCap: v.noCap === true, mount: MOUNT(v.mount) ?? "ox8", mammoth: v.mammoth === true, expand: v.expand === true,
     } : undefined),
     specLevels: (v) => (obj(v) ? Object.fromEntries(Object.entries(v).filter(([k, x]) => NODE.test(k) && level(x) !== undefined).slice(0, 400).map(([k, x]) => [k, Math.floor(level(x))])) : undefined),
   };

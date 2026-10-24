@@ -111,10 +111,23 @@ test("alerts and timers keep only what they can use, and Reset settings keeps bo
 
 test("Cost to Max keeps a real board node, days and fee in range, and levels from 0 to 100; Reset keeps the levels", (t) => {
   t.after(restore);
+  const loop = { noCap: false, mount: "ox8", mammoth: false, expand: false };
   assert.equal(store.set("costMax", { node: "CRAFT_BAG", days: 10000, focus: "no", journals: false, fee: 5000, lp: -4 }), true);
-  assert.deepEqual(store.get("costMax"), { node: "CRAFT_BAG", days: 3650, focus: true, journals: false, fee: 1000, lp: 0 });
+  assert.deepEqual(store.get("costMax"), { node: "CRAFT_BAG", days: 3650, focus: true, journals: false, fee: 1000, lp: 0, ...loop });
   assert.equal(store.set("costMax", { node: "CRAFT_BAG", days: "30", fee: "cheap", lp: 250.6 }), true);
-  assert.deepEqual(store.get("costMax"), { node: "CRAFT_BAG", days: 90, focus: true, journals: true, fee: 0, lp: 251 });
+  assert.deepEqual(store.get("costMax"), { node: "CRAFT_BAG", days: 90, focus: true, journals: true, fee: 0, lp: 251, ...loop });
+  /* the sell limit and the daily loop's choices: a known pack mount, and switches that are on only when set to true */
+  assert.equal(store.set("costMax", { node: "CRAFT_BAG", days: 30, noCap: true, mount: "bear8", mammoth: true, expand: true }), true);
+  assert.deepEqual(store.get("costMax"), { node: "CRAFT_BAG", days: 30, focus: true, journals: true, fee: 0, lp: 0, noCap: true, mount: "bear8", mammoth: true, expand: true });
+  assert.equal(store.set("costMax", { node: "CRAFT_BAG", days: 30, noCap: "yes", mount: "<img src=x>", mammoth: 1, expand: "true" }), true);
+  assert.deepEqual(store.get("costMax"), { node: "CRAFT_BAG", days: 30, focus: true, journals: true, fee: 0, lp: 0, ...loop });
+  /* the store knows every pack mount the loop offers (store.js loads before engine/loop.js, so it keeps its own list) */
+  const AB = loadAB();
+  assert.equal(AB.loop.MOUNTS[0].id, "ox8", "an unknown mount falls back to the loop's first");
+  for (const m of AB.loop.MOUNTS) {
+    assert.equal(store.set("costMax", { node: "CRAFT_BAG", days: 30, mount: m.id }), true);
+    assert.equal(store.get("costMax").mount, m.id, m.name);
+  }
   for (const node of ["craft_bag", "CRAFT_<b>", "BAG", 7, null]) assert.equal(store.set("costMax", { node, days: 30 }), false, String(node));
   assert.equal(store.set("costMax", "CRAFT_BAG"), false);
   assert.equal(store.set("specLevels", { CRAFT_BAG: 12.9, CRAFT_SWORDS: -1, CRAFT_X: "5", "bad key": 5, CRAFT_MAGE: 101 }), true);

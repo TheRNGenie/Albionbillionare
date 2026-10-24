@@ -15,7 +15,8 @@ Everything here is read from Albion's own files; nothing is typed in by hand:
   "av"    artifacts, which give no fame: item value per unit by family, T4 to T8 (T4_ARTEFACT_2H_CLAYMORE_AVALON is
           family ARTEFACT_2H_CLAYMORE_AVALON at T4). Item values set the crafting station's fee.
   "ff"    item families whose crafts count extra on the board and in journals (artifact weapons: 1.1 to 1.4).
-  "jr"    crafting journals: fame to fill one and the silver an empty one costs, T4 to T8, and their types.
+  "jr"    crafting journals: fame to fill one, the silver an empty one costs and a journal's weight in kg, T4 to T8, and
+          their types.
   "pat"   lists of item patterns ("T?" is any tier, "*" anything), shared by the focus bonuses below.
   "lines" the 39 crafter masteries, each with its item families, focus bonuses and specializations.
           "fc": [[bonus per level, index into "pat"], ...]. Focus cost efficiency = 100 x level x bonus, summed over
@@ -185,7 +186,7 @@ def main(folder, out="assets/data/v2/destiny.json"):
         return out
 
     # ---------- journals ----------
-    jfill, jr = {}, {"fame": [], "silver": [], "types": JOURNALS}
+    jfill, jr = {}, {"fame": [], "silver": [], "kg": [], "types": JOURNALS}
     for j in JOURNALS:
         for t in TIERS:
             _, it = items[f"T{t}_JOURNAL_{j}"]
@@ -194,11 +195,12 @@ def main(folder, out="assets/data/v2/destiny.json"):
                 m = re.match(r"^T\d_(.+)$", v["@id"])
                 if m:
                     jfill.setdefault(m.group(1), set()).add(j)
+            row = [int(it["@maxfame"]), int(it["craftingrequirements"]["@silver"]), float(it["@weight"])]
             if j == JOURNALS[0]:
-                jr["fame"].append(int(it["@maxfame"]))
-                jr["silver"].append(int(it["craftingrequirements"]["@silver"]))
+                for k, v in zip(("fame", "silver", "kg"), row):
+                    jr[k].append(v)
             else:
-                assert [int(it["@maxfame"]), int(it["craftingrequirements"]["@silver"])] == [jr["fame"][t - 4], jr["silver"][t - 4]], j
+                assert row == [jr["fame"][t - 4], jr["silver"][t - 4], jr["kg"][t - 4]], j
 
     # ---------- the crafter masteries and their specializations ----------
     nodes = [t for t in A["templateachievement"] if t.get("@category") == "crafting"]

@@ -230,7 +230,8 @@ tr.al-mine td { background: var(--gold-wash); }
 .cm-levels legend { padding: 0; margin-bottom: 8px; font-size: 12px; color: var(--text-2); font-weight: 560; }
 .cm-lv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px 12px; }
 .cm-lv-grid .field > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
-.cm-opts { grid-template-columns: auto auto minmax(180px, 300px) minmax(0, 1fr); align-items: center; }
+.cm-opts { grid-template-columns: auto minmax(180px, 300px) minmax(0, 1fr); align-items: center; }
+.cm-checks { display: grid; grid-template-columns: repeat(2, max-content); gap: 8px 20px; }
 .cm-prem { justify-self: end; text-align: right; }
 .kpi .k-tier { font-size: 14px; font-weight: 600; color: var(--text-2); letter-spacing: 0; }
 .cm-steps .cm-stage th { background: var(--surface-2); font-size: 12.5px; font-weight: 500; color: var(--text-2); text-transform: none; letter-spacing: 0; position: static; white-space: normal; }
@@ -238,14 +239,45 @@ tr.al-mine td { background: var(--gold-wash); }
 .cm-steps .cm-sell { font-size: 12.5px; color: var(--text-2); }
 .cm-steps .cm-sell-sm { display: none; }
 .cm-nw { white-space: nowrap; }
+/* the daily loop: its controls, the stops in order (a header per city, its errands, the silver there) and the extras */
+.cm-loop-ctrl { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 20px; margin-bottom: 14px; }
+.cm-loop-ctrl .select { max-width: 100%; }
+.cm-loop-ctrl .check { min-height: 36px; }
+.cm-loop-intro, .cm-risk { margin: 0 0 12px; line-height: 1.5; }
+.cm-risk .tag { vertical-align: 1px; }
+.cm-expand { margin-bottom: 14px; }
+.cm-expand.row .small { flex: 1 1 260px; }
+.cm-over { color: var(--bad-ink); font-weight: 600; }
+.cm-over svg { vertical-align: -2px; margin-right: 3px; }
+table.cm-loop tr.cm-stop th { background: var(--surface-2); color: var(--text-1); font-size: 13px; font-weight: 650; text-transform: none; letter-spacing: 0; position: static; white-space: normal; }
+table.cm-loop tr.cm-silver td { font-size: 12.5px; color: var(--text-2); padding-top: 6px; padding-bottom: 12px; }
+table.cm-loop td.r { white-space: nowrap; }
+table.cm-loop td.cm-wide { color: var(--text-2); font-size: 12.5px; }
+table.cm-fold .cm-sm { display: none; }
+.cm-whole { margin: 14px 0 6px; line-height: 1.5; }
+.cm-first { margin: 0 0 4px; line-height: 1.5; }
+details.cm-more { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+details.cm-more > summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--text-1); padding: 4px 0; width: fit-content; }
+details.cm-more > summary:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; border-radius: 4px; }
+details.cm-more[open] > summary { margin-bottom: 8px; }
+details.cm-more .small { margin: 8px 0 0; line-height: 1.5; }
 @media (max-width: 1180px) {
   .cm-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cm-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cm-checks { grid-template-columns: minmax(0, 1fr); }
   .cm-prem { justify-self: start; text-align: left; grid-column: 1 / -1; }
 }
 @media (max-width: 680px) {
   .cm-row, .cm-opts { grid-template-columns: minmax(0, 1fr); }
   .cm-lv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* the loop's tables on a phone fold a column under the first (the loop: each errand's price; every stage: its
+     heaviest leg; refining: where), so they fit without scrolling sideways */
+  .cm-loop-ctrl { flex-direction: column; align-items: stretch; }
+  .cm-loop-ctrl .select { width: 100%; }
+  table.cm-fold .cm-wide { display: none; }
+  table.cm-fold .cm-sm { display: block; margin-top: 2px; font-size: 12px; line-height: 1.35; color: var(--text-3); }
+  table.cm-fold td, table.cm-fold th { padding-left: 6px; padding-right: 6px; }
+  table.cm-fold th { white-space: normal; }
   /* the route on a phone: craft (with where it sells under it), count and cost; the focus and journal counts and the
      Sell column stay on wider screens, and long names wrap instead of widening the table */
   .cm-steps .cm-wide { display: none; }

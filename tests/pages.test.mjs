@@ -832,3 +832,98 @@ test("Cost to Max's pace, focus and journal choices are saved, and focus waits f
   assert.deepEqual(app.errors, []);
   app.close();
 });
+
+/* ---------- Cost to Max: the daily loop ---------- */
+const loopText = (app) => app.$("#cm-loop-body").textContent;
+const tick = (app, el, on) => { el.checked = on; el.dispatchEvent(new app.w.Event("change", { bubbles: true })); };
+
+test("Cost to Max lays each stage's day out as a loop; its stage, mount, Mammoth and Expand redraw only the loop", async () => {
+  const app = await boot({ hash: "#/costmax" });
+  await cmReady(app);
+  const { $, $$, AB } = app;
+  assert.ok($("#cm-loop-body table.cm-loop"), "the stops");
+  assert.match($$("#cm-loop-body tr.cm-stop th")[0].textContent, /^1\. Lymhurst/, "it starts where claymores are crafted");
+  assert.deepEqual($$('[data-seg="cm-stage"] button').map((b) => b.dataset.v), ["4", "5", "6", "7", "8"], "a stage per tier the route crafts");
+  assert.match(loopText(app), /crafts up to T4/);
+  const curve = $("#cm-curve svg");
+  const n = await app.renders("costmax", async () => {
+    app.click($('[data-seg="cm-stage"] button[data-v="7"]'));
+    app.change($("#cm-mount"), "ox5");
+  });
+  assert.equal(n, 0, "the stage and the mount redraw only the loop");
+  assert.equal($("#cm-curve svg"), curve, "the charts stay as they are");
+  assert.match(loopText(app), /crafts up to T7.*Expert's Transport Ox/);
+  assert.equal(AB.store.get("costMax").mount, "ox5", "the mount is saved");
+  assert.equal($('[data-seg="cm-stage"] button[aria-pressed="true"]').dataset.v, "7");
+  /* a Transport Mammoth fills the loop and stands in for the mount */
+  tick(app, $('#cm-loop input[data-k="mammoth"]'), true);
+  assert.equal(AB.store.get("costMax").mammoth, true);
+  assert.equal($("#cm-mount").disabled, true);
+  assert.match(loopText(app), /Elder's Transport Mammoth.*Filled for the Mammoth/);
+  assert.equal($("[data-cm-expand]"), null, "nothing to expand or undo: the Mammoth always fills");
+  tick(app, $('#cm-loop input[data-k="mammoth"]'), false);
+  /* Expand this loop on a stage with room, then back */
+  app.click($('[data-seg="cm-stage"] button[data-v="4"]'));
+  app.change($("#cm-mount"), "ox8");
+  const grow = $('[data-cm-expand="1"]');
+  assert.ok(grow, "the T4 day leaves the ox mostly empty");
+  const e = await app.renders("costmax", async () => {
+    app.click(grow);
+    assert.equal(grow.disabled, true);
+    assert.equal(grow.textContent, "Packing the mount…");
+    await until(() => $(".cm-expand .b-title"));
+  });
+  assert.equal(e, 0);
+  assert.equal(AB.store.get("costMax").expand, true);
+  assert.match(loopText(app), /Expanded.*Added .* Claymore.*\(added\)/);
+  assert.match($$("#cm-loop-body .cm-loop td")[0].textContent, /^Craft /);
+  app.click($('[data-cm-expand="0"]'));
+  await until(() => !$(".cm-expand .b-title"));
+  assert.equal(AB.store.get("costMax").expand, false);
+  /* every stage on the mount, drawn when opened */
+  const all = $("#cm-loop-all");
+  all.open = true;
+  all.dispatchEvent(new app.w.Event("toggle"));
+  await until(() => all.querySelector(".cm-more-body table"));
+  assert.equal(all.querySelectorAll("tbody tr").length, 5);
+  assert.match(all.querySelector("thead").textContent, /Elder's Transport Ox.*Saddled Direbear/, "the ox, and the Direbear to compare");
+  /* the stage on screen survives a redraw of the page; another route opens on its first stage */
+  app.click($('[data-seg="cm-stage"] button[data-v="6"]'));
+  app.click($('[data-seg="pace"] button[data-v="30"]'));
+  await cmReady(app);
+  assert.equal($('[data-seg="cm-stage"] button[aria-pressed="true"]').dataset.v, "6");
+  await app.go("#/costmax/CRAFT_SWORDS_DUAL");
+  await cmReady(app);
+  assert.equal($('[data-seg="cm-stage"] button[aria-pressed="true"]').dataset.v, $$('[data-seg="cm-stage"] button')[0].dataset.v);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("Royal cities only keeps the route and its loops on the ring; the sell limit switched off says what it risks", async () => {
+  const app = await boot({ hash: "#/costmax" });
+  await cmReady(app);
+  const { $, AB } = app;
+  assert.ok($("#cm-loop-body .cm-risk"), "the usual route's loop leaves the ring, and says so");
+  assert.match($("#cm-loop-body .cm-risk").textContent, /Red zone.*Caerleon/);
+  const n = await app.renders("costmax", async () => { tick(app, $('#cm-form input[data-k="royal"]'), true); await cmReady(app); });
+  assert.equal(n, 1, "one switch, one redraw");
+  assert.equal(AB.store.get("safeOnly"), true, "the same setting as the Planner's red-zone switch");
+  assert.equal($('#cm-form input[data-k="royal"]').checked, true);
+  assert.equal($("#cm-loop-body .cm-risk"), null);
+  assert.doesNotMatch($("#cm-loop-body").textContent, /Caerleon|Brecilien|Black Market/);
+  assert.match($("#page .know").textContent, /cheapest royal city \(Royal cities only is on\).*sells in the royal cities only/);
+  /* the sell limit */
+  const capWarn = () => app.$$("#page .banner.warn").find((b) => /sell limit is off/.test(b.textContent));
+  assert.equal(capWarn(), undefined);
+  tick(app, $('#cm-form input[data-k="noCap"]'), true);
+  await cmReady(app);
+  assert.equal(AB.store.get("costMax").noCap, true);
+  assert.match(capWarn().textContent, /The safe daily sell limit is off.*push prices down/);
+  assert.match($("#page .know").textContent, /sells up to a whole day of each market's sales/);
+  assert.equal($('#cm-form input[data-k="noCap"]').checked, true);
+  tick(app, $('#cm-form input[data-k="noCap"]'), false);
+  await cmReady(app);
+  assert.equal(capWarn(), undefined);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});

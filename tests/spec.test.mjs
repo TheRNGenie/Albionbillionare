@@ -205,6 +205,47 @@ test("the settings do what they say: no focus, no journals, a station fee, learn
   assert.equal(np.fame.target, full.fame.target, "premium earns fame faster; the target stays");
 });
 
+test("Royal cities only: the route buys and sells in the five royal cities, and never costs less for it", () => {
+  for (const node of [CLAYMORE.id, SWORDS.id]) for (const days of [14, 90]) {
+    const at = `${S.short(S.node(node))}, ${days} days`;
+    const all = route({ node, days }), p = route({ node, days, royal: true });
+    assert.equal(p.royal, true);
+    assert.deepEqual(p.cities, cat.ROYAL);
+    for (const it of items(p)) {
+      for (const x of it.sold) if (x.city) assert.ok(cat.ROYAL.includes(x.city), `${at}: ${it.id} sold in ${x.city}`);
+      for (const m of it.op.mats) assert.ok(cat.ROYAL.includes(m.leg.city), `${at}: ${m.leg.id} bought in ${m.leg.city}`);
+      if (it.op.journal) assert.ok(cat.ROYAL.includes(it.op.journal.full.leg.city));
+    }
+    assert.ok(p.totals.net >= all.totals.net - 1e-6, `${at}: fewer markets never make it cheaper`);
+    /* the switch changes the route only where it traded outside the ring */
+    if (items(all).every((it) => it.sold.every((x) => !x.city || cat.ROYAL.includes(x.city)) && it.op.mats.every((m) => cat.ROYAL.includes(m.leg.city)))) assert.ok(close(p.totals.net, all.totals.net), at);
+  }
+  assert.ok(items(route()).some((it) => it.sold.some((x) => x.city && !cat.ROYAL.includes(x.city)) || it.op.mats.some((m) => !cat.ROYAL.includes(m.leg.city))), "the usual route does trade outside the ring");
+});
+
+test("the safe daily sell limit switched off: a market takes up to a whole day of its sales, and the route never costs more", () => {
+  for (const node of [CLAYMORE.id, SWORDS.id]) for (const days of [14, 90]) {
+    const at = `${S.short(S.node(node))}, ${days} days`;
+    const safe = route({ node, days }), p = route({ node, days, share: 1 });
+    assert.equal(p.share, 1);
+    assert.equal(safe.share, S.SHARE);
+    const sold = new Map();
+    for (const it of items(p)) for (const x of it.sold) if (x.city) sold.set(it.id + "|" + x.city, (sold.get(it.id + "|" + x.city) || 0) + x.n);
+    let past = 0;
+    for (const [k, n] of sold) {
+      const [id, city] = k.split("|"), perDay = B.stat(id, city).perDay;
+      assert.ok(n <= Math.floor(perDay * p.days), `${at}: ${n} ${id} into ${city}`);
+      if (n > Math.floor(S.SHARE * perDay * p.days)) past++;
+    }
+    assert.ok(past > 0, `${at}: some market takes more than the safe quarter`);
+    assert.ok(p.totals.net <= safe.totals.net + 1e-6, `${at}: more room never costs more`);
+    assert.ok(p.totals.kept <= safe.totals.kept, `${at}: and leaves no more unsold`);
+  }
+  /* a share is a share of a day: above 1 is a whole day, and nothing usable falls back to the safe quarter */
+  assert.equal(route({ share: 7 }).share, 1);
+  for (const share of [0, -1, NaN, "all", undefined]) assert.equal(route({ share }).share, S.SHARE, String(share));
+});
+
 test("the same seed draws the same range, and a different one lands close", () => {
   const a = route({ draws: 200, seed: 3 }), b = route({ draws: 200, seed: 3 }), c = route({ draws: 200, seed: 4 });
   assert.deepEqual(a.range, b.range);

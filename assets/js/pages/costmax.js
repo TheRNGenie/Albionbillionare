@@ -17,6 +17,10 @@ AB.pages.costmax = (() => {
   const models = new Map(), pending = new Map(), failed = new Map();
   /* the charts computed after the page draws (every pace, every specialization), kept while their inputs match */
   let paceMemo = null, specMemo = null, dataErr = null;
+  /* the daily loop's stage on screen, by the node planned (a stage is known by its tier) */
+  const loopAt = new Map();
+  /* the settings that change the route (the others only change the daily loop) */
+  const ROUTE_KEYS = ["node", "days", "focus", "journals", "fee", "lp", "noCap"];
 
   /* the line's model for the prices on screen (or the one before them, of the same kind), loading it if needed */
   function marketFor(lineId, M, onReady) {
@@ -42,7 +46,7 @@ AB.pages.costmax = (() => {
   return {
     title: "Cost to Max",
     render(root, { args }) {
-      const { esc, icon, silver, int, sleep } = AB.util;
+      const { esc, icon, silver, int, pct, sleep } = AB.util;
       const ui = AB.ui, kit = AB.kit, store = AB.store, S = AB.spec, cat = AB.cat, conf = AB.conf;
       const H = {
         eyebrow: "Cost to Max",
@@ -74,7 +78,7 @@ AB.pages.costmax = (() => {
       const T = S.node(nodeId), Lm = S.lineOf(nodeId), isSpec = T.kind === "spec";
       const nodes = [Lm, ...S.specsOf(Lm.id)];
       const lv = (id) => levels[id] ?? 0;
-      const premium = store.get("premium"), focusDay = store.get("focus");
+      const premium = store.get("premium"), focusDay = store.get("focus"), royal = !!store.get("safeOnly");
       const useFocus = premium && cm.focus;
       const nameOf = (n) => (n.kind === "base" ? n.name : S.short(n));
       const tName = nameOf(T);
@@ -101,8 +105,12 @@ AB.pages.costmax = (() => {
           </div>
           <fieldset class="cm-levels"><legend>Your levels in this line (Destiny Board)</legend><div class="cm-lv-grid">${levelInputs}</div></fieldset>
           <div class="cm-row cm-opts">
-            <label class="check"><input type="checkbox" data-k="focus" ${useFocus ? "checked" : ""} ${premium ? "" : "disabled"}> Use focus (${int(focusDay)} a day)</label>
-            <label class="check"><input type="checkbox" data-k="journals" ${cm.journals ? "checked" : ""}> Fill and sell journals</label>
+            <div class="cm-checks">
+              <label class="check"><input type="checkbox" data-k="focus" ${useFocus ? "checked" : ""} ${premium ? "" : "disabled"}> Use focus (${int(focusDay)} a day)</label>
+              <label class="check"><input type="checkbox" data-k="journals" ${cm.journals ? "checked" : ""}> Fill and sell journals</label>
+              <label class="check"><input type="checkbox" data-k="royal" ${royal ? "checked" : ""}> Royal cities only (no red zones or mists)</label>
+              <label class="check"><input type="checkbox" data-k="noCap" ${cm.noCap ? "checked" : ""}> Remove the safe daily sell limit</label>
+            </div>
             <label class="field cm-lp"><span>Learning points to spend</span><input class="input num" type="number" min="0" step="100" data-k="lp" value="${cm.lp}"><span class="hint">Quick Learn: a level then takes a fifth of its fame. All of ${esc(tName)}: ${int(lpAll)} points.</span></label>
             <span class="small muted cm-prem">${premium ? `Premium on (fame ×1.5, 4% sales tax)` : `Premium off (no fame bonus, 8% tax, and focus doesn't refill)`} · <a href="#/settings">Settings</a></span>
           </div>
@@ -121,7 +129,7 @@ AB.pages.costmax = (() => {
       }
 
       /* ---------- the route ---------- */
-      const base = { node: T.id, levels, premium, days: cm.days, focusPerDay: useFocus ? focusDay : 0, journals: cm.journals, fee: cm.fee, lp: cm.lp };
+      const base = { node: T.id, levels, premium, days: cm.days, focusPerDay: useFocus ? focusDay : 0, journals: cm.journals, fee: cm.fee, lp: cm.lp, share: cm.noCap ? 1 : S.SHARE, royal };
       const p = S.plan(B, { ...base, seed: 7, draws: DRAWS });
       const c = S.confidence(B, p);
       const tot = p.totals;
@@ -139,12 +147,14 @@ AB.pages.costmax = (() => {
       if (p.prelude?.missing) gaps.push(`The first ${esc(Lm.name)} level comes from tier-3 crafts, which ${M.live ? "have no prices right now" : "the snapshot doesn't price"}; its ${silver(p.prelude.fame)} fame (a few thousand silver) is left out.`);
       if (p.journals.on && !p.journals.priced) gaps.push(`Journals ${M.live ? "have no recent sales for this line" : "aren't in the snapshot"}, so the route earns nothing from them.`);
       const gapBanner = gaps.length ? `<div class="banner info">${icon("info")}<div class="b-body"><div class="b-title">${M.live ? "Some prices are missing" : "Some of this needs live prices"}</div><div class="small">${gaps.join(" ")}</div></div></div>` : "";
+      /* v1's warning for the sell limit switched off */
+      const capBanner = cm.noCap ? `<div class="banner warn">${icon("alert")}<div class="b-body"><div class="b-title">The safe daily sell limit is off</div><div class="small">Each item can now sell up to a whole normal day's sales in each market, not the quarter that keeps the price steady. Selling that much will push prices down, so treat these numbers as the best case and watch the price after each batch.</div></div></div>` : "";
 
       if (!p.fame.target || !p.options) {
         const why = !p.fame.target
           ? `${esc(tName)} is already at 100. Pick another specialization, or tap one below the levels to plan it.`
           : `None of the ${esc(tName)} items can be priced ${M.live ? "right now" : "from the saved snapshot (its artifacts and special materials aren't in it)"}. ${M.live ? "Try again after the next price reload." : "With live prices on your own device, this route works."}`;
-        root.innerHTML = `${kit.head(H)}${kit.modeBanner(M)}${form}${gapBanner}<div class="card">${ui.empty(why, p.fame.target ? "alert" : "check")}</div>`;
+        root.innerHTML = `${kit.head(H)}${kit.modeBanner(M)}${form}${capBanner}${gapBanner}<div class="card">${ui.empty(why, p.fame.target ? "alert" : "check")}</div>`;
         return wire();
       }
 
@@ -189,11 +199,12 @@ AB.pages.costmax = (() => {
       const notes = [
         `Fame per craft comes from the resources in its recipe, times the item's artifact factor; artifacts themselves give none. A craft counts for ${esc(Lm.name)} and its specialization alike${premium ? ", and premium adds half again" : ""}.`,
         `${esc(Lm.name)} unlocks a tier at levels 1, 10, 30, 60 and 100 (T4 to T8), so the route stays on lower tiers until the mastery gets there. ${isSpec ? "" : "A mastery never reaches T8 before it's maxed. "}The first mastery level only counts tier-3 crafts.`,
-        `Prices are each market's typical price: the median sale of the last 7 days (the listing where sales are thin). Materials are bought in the cheapest royal city, Caerleon or Brecilien; returns are ${Math.round(cat.RETURN.craftBonus.none * 1000) / 10}% in the item's bonus city (${Math.round(cat.RETURN.craftBonus.focus * 1000) / 10}% with focus).`,
-        `The route sells at most a quarter of what each market sells a day, so it adds to a market instead of flooding it. Crafts beyond that are kept, counted as worth nothing: selling them below the usual price would make the route cheaper.`,
+        `Prices are each market's typical price: the median sale of the last 7 days (the listing where sales are thin). Materials are bought in the cheapest ${royal ? "royal city (Royal cities only is on)" : "royal city, Caerleon or Brecilien"}; returns are ${Math.round(cat.RETURN.craftBonus.none * 1000) / 10}% in the item's bonus city (${Math.round(cat.RETURN.craftBonus.focus * 1000) / 10}% with focus).`,
+        `${cm.noCap ? "The safe daily sell limit is off, so the route sells up to a whole day of each market's sales, which will push prices down." : "The route sells at most a quarter of what each market sells a day, so it adds to a market instead of flooding it."} ${royal ? "It sells in the royal cities only." : "It sells in any city or the Black Market."} Crafts beyond that are kept, counted as worth nothing: selling them below the usual price would make the route cheaper.`,
         useFocus ? `Focus: ${int(focusDay)} a day over ${esc(paceName(p.days).toLowerCase())}, spread evenly over the route. The route picks its crafts with focus in mind and spends it where it saves the most silver per point, at the levels it has reached by then.` : premium ? "Focus is off." : "Focus is off: without premium it doesn't refill.",
         cm.journals ? `Journals: a craft fills a journal of its tier with its fame (premium bonus left out); empty ones cost ${silver(S.data.jr.silver[0])} to ${silver(S.data.jr.silver[4])} from the NPC or less on the market, and full ones sell in the city that pays most, up to a quarter of its sales.` : "Journals are left out.",
         cm.lp ? `Learning points: ${int(p.ql.used)} spent with Quick Learn where a point saves the most fame, which is ${esc(tName)}'s top levels${p.ql.from != null ? ` (from level ${p.ql.from})` : ""}, saving ${silver(p.fame.saved)} fame.` : "No learning points spent.",
+        `The daily loop: a stage takes the route's days times its share of the fame (focus is spread the same way), so every day earns the same fame. A market takes at most its ${cm.noCap ? "whole day" : "quarter of a day"} of sales; the day's other crafts are banked to sell on later days. Mounts carry their Excellent-quality load (albiononlinegrind's table, matching the ratios in Albion's spells.json) without your own gear and bag, so keep about 10% spare. The loop refines a material itself, without focus in its refining bonus city (${Math.round(cat.RETURN.refineBonus.none * 1000) / 10}% back), when that saves more than ${Math.round(AB.loop.REFINE_MIN * 100)}%.`,
         "Not counted: your time, travel and its risk, crafting tax beyond the station fee, item quality (crafts are priced as normal quality; better ones sell for more), and the Black Market's demand changing while you sell into it.",
         `Not in the lists: ${esc(S.lines().flatMap((L) => [L, ...S.specsOf(L.id)]).filter((n) => !S.craftable(n)).map(nameOf).join(", "))}. The app's item data has no recipes for their items yet.`,
       ];
@@ -202,6 +213,7 @@ AB.pages.costmax = (() => {
         ${kit.head(H)}
         ${kit.modeBanner(M)}
         ${form}
+        ${capBanner}
         ${gapBanner}
         <section class="card" style="margin-bottom:16px"><div class="kpis">${kpis}</div></section>
         <div class="grid">
@@ -210,6 +222,7 @@ AB.pages.costmax = (() => {
           ${ui.chartCard({ id: "cm-heat", span: 6, title: "Silver per fame, every item it can craft", sub: `Each tier and enchantment sold at its best market, journals in. Red costs silver for each point of fame; blue pays you.${isSpec ? "" : " Each cell shows the line's cheapest item."}`, height: 230 })}
           ${ui.chartCard({ id: "cm-pace", span: 6, title: "What time buys", sub: "The cheapest route at each pace. A shorter time sells less into each market, so more crafts go unsold or pricier items take their place. Below zero, the route pays you.", height: 230 })}
           ${ui.card({ span: 12, title: "The route", sub: `What to craft at each stage, from your levels to ${esc(tName)} 100, and where to sell it. Crafting in the item's bonus city returns more materials.`, body: routeTable })}
+          ${ui.card({ span: 12, id: "cm-loop", title: "The daily loop", sub: "A day of each stage as one ride, city by city, sized to your pack mount: where to buy, refine, craft, sell and bank, in order. Do the stops in this order every day of the stage.", body: `<div id="cm-loop-body"></div>` })}
           ${ui.chartCard({ id: "cm-specs", span: 7, title: `Every specialization in ${Lm.name}`, sub: "Cost to 100 from your levels with the same settings: at typical prices (dot) and the 80% range (bar). Tap one to plan it.", height: 60 + 30 * (specs.length + 1) })}
           ${ui.chartCard({ id: "cm-flow", span: 5, title: "Where the silver goes", sub: `Spent and earned over the whole route: ${esc(costText(tot.net))} net.`, height: 230 })}
           ${ui.card({ span: 12, title: "What this assumes", body: `<ul class="know">${notes.map((n) => `<li>${n}</li>`).join("")}</ul>` })}
@@ -259,9 +272,11 @@ AB.pages.costmax = (() => {
         table: { cols: ["", { label: "Silver", r: true }], rows: [...flow.map(([n, v, spent]) => [n, `${spent ? "−" : "+"}${silver(Math.abs(v))}`]), ["Net", costText(tot.net)]] },
       });
 
+      drawLoop();
+
       /* ---------- after the first paint: every pace, then every specialization ---------- */
       const paces = [...new Set([...S.PACES, p.days])].sort((a, b) => a - b);
-      const keyBase = JSON.stringify([B.seq, Lm.id, nodes.map((n) => lv(n.id)), premium, base.focusPerDay, cm.journals, cm.fee, cm.lp]);
+      const keyBase = JSON.stringify([B.seq, Lm.id, nodes.map((n) => lv(n.id)), premium, base.focusPerDay, cm.journals, cm.fee, cm.lp, base.share, royal]);
       const paceKey = keyBase + T.id + paces.join(",");
       const drawPace = (rows) => {
         const nets = rows.map((r) => (r.d === p.days ? tot.net : r.net));
@@ -317,6 +332,136 @@ AB.pages.costmax = (() => {
 
       return wire();
 
+      /* ---------- the daily loop (v1's crafting loop, engine/loop.js) ----------
+         Drawn on its own, so its stage, mount and Expand change without planning the route again. */
+      function drawLoop() {
+        const box = root.querySelector("#cm-loop-body");
+        if (!box) return;
+        const LP = AB.loop, cmNow = store.get("costMax"), auto = !!cmNow.mammoth;
+        const mount = LP.MOUNTS.find((m) => m.id === cmNow.mount) || LP.MOUNTS[0];
+        const use = auto ? LP.MAMMOTH : mount;
+        const other = LP.MOUNTS.find((m) => m.id === (!auto && mount.id === "ox8" ? "bear8" : "ox8"));
+        let k = p.steps.findIndex((s) => s.tier === loopAt.get(T.id));
+        if (k < 0) k = 0;
+        const R = LP.stage(B, p, k, { mount: use.kg, mammoth: auto, expand: !!cmNow.expand, other: other.kg });
+        const st = p.steps[k];
+        const stageSeg = p.steps.length > 1 ? `<div class="field"><span>Stage</span>${ui.seg("cm-stage", p.steps.map((x) => [x.tier, `T${x.tier}`]), st.tier, "Stage")}</div>` : "";
+        const ctrl = `<div class="cm-loop-ctrl">${stageSeg}
+          <label class="field"><span>Your pack mount</span><select class="select" id="cm-mount" ${auto ? "disabled" : ""}>${LP.MOUNTS.map((m) => `<option value="${m.id}"${m.id === mount.id ? " selected" : ""}>${esc(m.name)} (T${m.tier}), ${int(m.kg)} kg</option>`).join("")}</select></label>
+          <label class="check"><input type="checkbox" data-k="mammoth" ${auto ? "checked" : ""}> I have a T8 Transport Mammoth</label></div>`;
+        const stageLine = `<b>${esc(tName)} ${lvl(st.from.t)} → ${lvl(st.to.t)}</b>${mastery(st)}, crafts up to T${st.tier}`;
+        if (!R) {
+          box.innerHTML = `${ctrl}<p class="small">${stageLine}.</p>${ui.empty("Nothing at this stage can be crafted with these prices, so it has no loop.", "info")}`;
+          return;
+        }
+        box.innerHTML = ctrl + loopHTML(R, use, other, auto, stageLine);
+      }
+      /* the stops, in order, and what the loop comes to */
+      function loopHTML(R, use, other, auto, stageLine) {
+        const LP = AB.loop, L = R.loop, cap = L.cap, O = R.other;
+        const nm = (id) => esc(cat.label(id));
+        /* a journal by tier and kind: "T5 Blacksmith's Journal" (its own name carries the tier word and Empty or Full) */
+        const jn = (id) => esc(`T${cat.parse(id).tier} ${cat.name(id).replace(/^(Beginner|Novice|Journeyman|Adept|Expert|Master|Grandmaster|Elder)\s+/, "").replace(/\s*\((Empty|Full)\)$/, "")}`);
+        /* an amount a day: whole numbers, or how often for something made less than once a day */
+        const qty = (x) => (x >= 0.95 ? int(x) : x > 0 ? `1 every ${int(Math.max(2, Math.round(1 / x)))} days` : "0");
+        const and = (a) => (a.length > 1 ? `${a.slice(0, -1).join(", ")} and ${a[a.length - 1]}` : a[0] || "");
+        const daysText = (d) => (d < 1 ? "less than a day" : `about ${d < 10 ? d.toFixed(1) : int(d)} days`);
+        const pos = (c) => L.order.indexOf(c);
+        const load = L.order.length > 1 ? L.max.kg / cap : 0;
+
+        /* what the day is, and whether it fits */
+        const intro = [`${stageLine}: ${daysText(R.days)} at your pace${R.days < 1 ? ", so it's a single loop" : ""}, ${qty(L.crafts)} crafts${R.days < 1 ? "" : " a day"}.`];
+        if (L.order.length < 2) intro.push(`Everything happens in ${esc(L.main)}, so there's nothing to carry.`);
+        else if (L.fits) intro.push(`It fits your ${esc(use.name)}: the heaviest leg is about ${int(L.max.kg)} kg, ${esc(L.max.from)} to ${esc(L.max.to)}, ${pct(load)} of its ${int(cap)} kg.`);
+        else intro.push(`<strong class="cm-over">${icon("alert")}Even with every cut below, the heaviest leg is about ${int(L.max.kg)} kg (${esc(L.max.from)} to ${esc(L.max.to)}), over your mount's ${int(cap)} kg.</strong> Split that leg into two trips, or give the route more time so each day makes less.`);
+        const partial = L.refinables.filter((f) => f.refined < f.qty - 1e-9);
+        if (partial.length) {
+          const kept = L.refinables.filter((f) => f.refined > 0).map((f) => `${qty(f.refined)} ${nm(f.m)}${f.refined < f.qty - 1e-9 ? ` of ${qty(f.qty)}` : ""}`);
+          intro.push(`A full refining loop doesn't fit, so it refines what saves the most per kilo${kept.length ? `: ${and(kept)}` : " (nothing, here)"}, and buys the rest ready-made.`);
+        }
+        L.moved.forEach((x) => intro.push(`It buys ${nm(x.m)} in ${esc(x.to)} instead of carrying it from ${esc(x.from)}, which costs about ${silver(Math.max(0, x.extra))} more and keeps the legs light.`));
+        if (L.banked > 0.05) intro.push(`Each market takes at most ${cm.noCap ? "a whole day" : "a quarter of a day"} of its sales, so ${qty(L.banked)} of the day's crafts go to the bank (worth about ${silver(L.bankValue)}), to sell on later days.`);
+        if (L.kept > 0.05) intro.push(`${qty(L.kept)} crafts no market here takes stay in the bank, as the route keeps them.`);
+        const offRing = L.off.length ? `<p class="small cm-risk">${L.off.map((x) => ui.riskTag(x.city === "Brecilien" ? "mists" : "red")).join(" ")} This loop goes to ${and(L.off.map((x) => `${esc(x.city)} (${esc(x.why)})`))}, because the route buys or sells there. Tick <b>Royal cities only</b> above for a route that stays in blue and yellow zones.</p>` : "";
+
+        /* Expand this loop, or what it added */
+        let expandHTML = "";
+        if (R.expanded) {
+          const by = new Map();
+          for (const x of R.added) by.set(x.id, (by.get(x.id) || 0) + x.units);
+          const g = [...by].sort((a, b) => b[1] - a[1]);
+          const names = g.slice(0, 5).map(([id, u]) => `${qty(u)} ${nm(id)}`).concat(g.length > 5 ? [`${g.length - 5} more items`] : []);
+          const B0 = R.base, day = R.days < 1 ? "" : " a day", the = R.days < 1 ? "the loop" : "the day";
+          const faster = R.daysBase >= 1 && R.daysBase - R.daysNow >= 0.05 ? `, so this stage takes ${daysText(R.daysNow)} instead of ${daysText(R.daysBase)}` : "";
+          const body = names.length
+            ? `Added ${and(names)}${day}, each sold where the table says. The mount now carries ${pct(load)} of its limit${R.full ? `, leaving about ${pct(1 - LP.FILL)} spare for your gear and bags` : auto ? ". It stops there: anything more would sell past a market's share or add no profit" : "; anything more would sell past a market's share or add no profit"}. That's ${qty(L.crafts - B0.crafts)} more crafts${day}${faster}; ${the} spends about ${silver(L.tot.spend - B0.tot.spend)} more and keeps about ${silver(L.tot.keep - B0.tot.keep)} more.`
+            : "Nothing more pays at a volume the markets can take.";
+          expandHTML = `<div class="banner info cm-expand">${icon("info")}<div class="b-body"><div class="b-title">${auto ? "Filled for the Mammoth" : "Expanded"}</div><div class="small">${body}</div>${auto ? "" : `<div class="row" style="margin-top:8px"><button class="btn ghost" type="button" data-cm-expand="0">Back to the normal loop</button></div>`}</div></div>`;
+        } else if (L.fits && L.order.length > 1 && load < LP.FILL) {
+          expandHTML = `<div class="row cm-expand"><button class="btn" type="button" data-cm-expand="1">Expand this loop</button><span class="small muted">It uses only ${pct(load)} of your mount. Expanding adds more of the crafts this stage can make that pay, best silver per kilo first, until the mount is about ${pct(LP.FILL)} full.</span></div>`;
+        }
+
+        /* the stops: a header per city, its errands, the ride on, and the silver spent or earned there */
+        /* one line per material or item: the day's buys of one material for several benches, or one item's sales in
+           one market (the Black Market and Caerleon's market share a stop), add up */
+        const merge = (arr, key) => { const m = new Map(); for (const b of arr) { const k = key(b), g = m.get(k); if (g) { g.qty += b.qty || 0; g.units += b.units || 0; } else m.set(k, { ...b, qty: b.qty || 0, units: b.units || 0 }); } return [...m.values()]; };
+        const row = (doing, amount, price = "") => `<tr><td>${doing}${price ? `<div class="cm-sm">${price}</div>` : ""}</td><td class="r num">${amount}</td><td class="cm-wide">${price}</td></tr>`;
+        const money = (x) => [x.spend >= 0.5 ? `spend ${silver(x.spend)}` : "", x.earn >= 0.5 ? `earn ${silver(x.earn)}` : "", x.fee >= 0.5 ? `station fee ${silver(x.fee)}` : ""].filter(Boolean).join(" · ") || "nothing to pay or earn";
+        const body = L.order.map((city, n) => {
+          const s = L.stops.get(city), list = [];
+          const later = (b) => n > pos(b.bench);
+          for (const b of merge(s.input, (x) => x.m)) list.push(row(`Buy ${nm(b.m)} for refining`, qty(b.qty), `about ${int(b.price)}`));
+          const raws = merge(s.raw, (x) => x.m).map((b) => row(`Buy ${nm(b.m)} to refine`, qty(b.qty), `about ${int(b.price)}${b.max ? `, at most ${int(b.max)}` : ""}`));
+          if (s.refine.length) list.push(...raws);
+          for (const x of s.refine) list.push(row(`Refine ${nm(x.m)} from what you're carrying, no focus`, qty(x.qty), `costs about ${int(x.own)} each (${int(x.buy)} to buy)`));
+          for (const b of s.ready) list.push(row(`Buy ${nm(b.m)} ready-made${later(b) ? " for tomorrow's crafting" : ""}`, qty(b.qty), `about ${int(b.price)}`));
+          for (const b of s.buy) list.push(row(`Buy ${nm(b.m)}${later(b) ? " for tomorrow's crafting" : ""}`, qty(b.qty), `about ${int(b.price)}`));
+          for (const j of s.jbuy) list.push(row(`Buy empty ${jn(j.id)}s${j.npc ? " from the NPC" : ""}`, qty(j.qty), `about ${int(j.price)}`));
+          for (const c of merge(s.craft, (x) => x.id)) {
+            const extra = s.craft.filter((x) => x.id === c.id && x.added).reduce((a, x) => a + x.units, 0);
+            const focus = s.craft.filter((x) => x.id === c.id).reduce((a, x) => a + x.uF, 0);
+            const note = [focus >= 0.5 ? `${qty(focus)} with focus` : "", extra >= c.units - 1e-9 ? "added" : extra > 0 ? `${qty(extra)} added` : ""].filter(Boolean).join(", ");
+            list.push(row(`Craft ${nm(c.id)}${note ? ` (${note})` : ""}`, qty(c.units)));
+          }
+          for (const b of merge(s.bank, (x) => `${x.id}|${x.kept ? "" : x.market}`)) list.push(row(b.kept ? `Keep ${nm(b.id)} in the bank: no market here takes it` : `Bank ${b.journal ? `full ${jn(b.id)}s` : nm(b.id)} to sell on later days`, qty(b.units), b.kept ? "" : `for ${b.market === cat.BM ? "the Black Market" : esc(b.market)}`));
+          for (const x of merge(s.sell, (v) => `${v.id}|${v.market}|${v.from}`)) list.push(row(`Sell ${nm(x.id)}${x.market === cat.BM ? " to the Black Market" : ""}${n < pos(x.from) ? ", crafted on the last loop" : ""}`, qty(x.units), `about ${int(x.price)} each`));
+          for (const j of s.jsell) list.push(row(`Sell full ${jn(j.id)}s`, qty(j.qty), `about ${int(j.price)} each`));
+          if (!s.refine.length) list.push(...raws);
+          if (L.order.length > 1) {
+            const leg = L.legs[n];
+            list.push(row(`Ride to ${esc(leg.to)}${leg.kg < 0.5 ? "" : " carrying"}`, leg.kg < 0.5 ? "—" : `${int(leg.kg)} kg`, leg.kg > cap + 1e-6 ? `<span class="cm-over">${icon("alert")}over the ${int(cap)} kg limit</span>` : leg.kg < 0.5 ? "nothing on board" : leg.kg < cap * 0.01 ? "under 1% of the mount" : `${pct(leg.kg / cap)} of the mount`));
+          }
+          const tag = LP.OFF_RING[city] ? ` ${ui.riskTag(city === "Brecilien" ? "mists" : "red")}` : "";
+          return `<tr class="cm-stop"><th colspan="3" scope="rowgroup">${n + 1}. ${esc(city)}${tag}</th></tr>${list.join("") || `<tr><td colspan="3" class="muted">Ride through</td></tr>`}<tr class="cm-silver"><td colspan="3"><b>Silver:</b> ${money(s)}</td></tr>`;
+        }).join("");
+        const table = `<div class="table-wrap"><table class="t cm-loop cm-fold"><thead><tr><th scope="col">Do</th><th class="r" scope="col">Amount</th><th class="cm-wide" scope="col">Price</th></tr></thead><tbody>${body}</tbody></table></div>`;
+
+        const t = L.tot;
+        const whole = `<p class="cm-whole"><b>Whole loop:</b> spend about ${silver(t.spend)}, earn about ${silver(t.earn)}${t.fee >= 0.5 ? `, station fees ${silver(t.fee)}` : ""}, so you ${t.keep >= 0 ? `keep about <b>${silver(t.keep)}</b>` : `put in about <b>${silver(-t.keep)}</b>`}${R.days < 1 ? "" : " a day"}${L.banked > 0.05 ? `, and bank crafts worth about ${silver(L.bankValue)} to sell later` : ""}.${O ? ` On the ${esc(other.name)} (${int(other.kg)} kg) this loop ${O.fits ? `${Math.abs(O.tot.keep - t.keep) <= Math.abs(t.keep) * 0.01 + 1 ? "comes to the same" : `${O.tot.keep >= 0 ? "keeps" : "puts in"} about ${silver(Math.abs(O.tot.keep))}`}${O.saved < L.saved - 1 ? ", refining less because it carries less" : ""}` : `doesn't fit: its heaviest leg would be ${int(O.max.kg)} kg`}.` : ""}</p>`;
+        const benches = L.order.filter((c) => c !== L.main && L.stops.get(c).craft.length);
+        const first = L.order.length > 1 ? `<p class="small muted cm-first"><b>First day:</b> nothing is on board yet, so start at stop 2, buy as you go, and craft when you're back in ${esc(L.main)}${benches.length ? ` (in ${and(benches.map(esc))}, from the next time you pass with its materials)` : ""}${L.dayOne.length ? `. That day, buy ${and(L.dayOne.map((b) => `${qty(b.qty)} ${nm(b.m)} in ${esc(b.city)}`))} ready-made: the ride reaches ${L.dayOne.length > 1 ? "their refining stops before their" : "its refining stop before its"} inputs are aboard` : ""}.</p>` : "";
+        const refining = L.refinables.length ? `<details class="cm-more"><summary>Refining your own materials</summary><div class="table-wrap"><table class="t cm-fold"><thead><tr><th scope="col">Material</th><th class="cm-wide" scope="col">Refined in</th><th class="r" scope="col">To buy</th><th class="r" scope="col">To refine</th><th class="r" scope="col">Saving</th></tr></thead><tbody>${L.refinables.map((f) => `<tr><td>${nm(f.m)}<div class="cm-sm">Refined in ${esc(f.city)}</div></td><td class="cm-wide">${esc(f.city)}</td><td class="r num">${int(f.price)}</td><td class="r num">${int(f.own)}</td><td class="r num">${pct(f.saving / f.price)}</td></tr>`).join("")}</tbody></table></div><p class="small muted">Refined without focus in the refining bonus city, which returns ${pct(cat.RETURN.refineBonus.none, 1)} of the inputs, at your station fee. The loop refines only what saves more than ${pct(LP.REFINE_MIN)}. A raw material's "at most" is the price where refining stops beating buying ready-made. Refining needs the matching refining nodes on your Destiny Board.</p></details>` : "";
+        const every = p.steps.length > 1 ? `<details class="cm-more" id="cm-loop-all"><summary>Every stage on your mount</summary><div class="cm-more-body"></div></details>` : "";
+        return `<p class="small cm-loop-intro">${intro.join(" ")}</p>${offRing}${expandHTML}${table}${whole}${first}${refining}${every}`;
+      }
+      /* every stage's loop on the chosen mount and the other one, drawn when opened */
+      function drawEvery(el) {
+        const LP = AB.loop, cmNow = store.get("costMax"), auto = !!cmNow.mammoth;
+        const mount = LP.MOUNTS.find((m) => m.id === cmNow.mount) || LP.MOUNTS[0];
+        const use = auto ? LP.MAMMOTH : mount;
+        const other = LP.MOUNTS.find((m) => m.id === (!auto && mount.id === "ox8" ? "bear8" : "ox8"));
+        const keepText = (L) => (L.fits ? `${L.tot.keep >= 0 ? "keeps" : "puts in"} ${silver(Math.abs(L.tot.keep))}` : `<span class="cm-over">${icon("alert")}too heavy</span>`);
+        const rows = p.steps.map((st, k) => {
+          const R = LP.stage(B, p, k, { mount: use.kg, mammoth: auto, expand: !!cmNow.expand, other: other.kg });
+          if (!R) return `<tr><td>T${st.tier}</td><td colspan="4" class="muted">Nothing to craft</td></tr>`;
+          const L = R.loop, O = R.other;
+          const leg = L.order.length > 1 ? `${int(L.max.kg)} kg, ${esc(L.max.from)} to ${esc(L.max.to)}` : "no travel";
+          return `<tr><td>T${st.tier} <span class="muted">${lvl(st.from.t)} → ${lvl(st.to.t)}</span><div class="cm-sm">${leg}</div></td><td class="cm-wide">${leg}</td><td class="r num">${keepText(L)}</td><td class="r num">${keepText(O)}</td><td class="r num">${L.saved >= 1 ? `${silver(L.saved)}${L.fullSave > L.saved + 1 ? ` of ${silver(L.fullSave)}` : ""}` : "—"}</td></tr>`;
+        }).join("");
+        const head = (m) => `<span class="cm-wide">${esc(m.name)}</span><span class="cm-sm">${esc(m.short)}</span>`;
+        el.innerHTML = `<div class="table-wrap"><table class="t cm-fold"><thead><tr><th scope="col">Stage</th><th class="cm-wide" scope="col">Heaviest leg</th><th class="r" scope="col">${head(use)}</th><th class="r" scope="col">${head(other)}</th><th class="r" scope="col">Refining saves</th></tr></thead><tbody>${rows}</tbody></table></div><p class="small muted">A day of each stage. "Keeps" is the day's silver after buying, selling and station fees, before what goes to the bank; "of" shows what refining would save if all of it fit.</p>`;
+      }
+
       /* ---------- the form's controls ---------- */
       function wire() {
         const f = root.querySelector("#cm-form");
@@ -335,7 +480,8 @@ AB.pages.costmax = (() => {
             const v = Math.round(+el.value);
             if (!(v >= 0 && v <= 100) || el.value === "") { el.value = lv(el.dataset.node); return; }
             store.set("specLevels", { ...store.get("specLevels"), [el.dataset.node]: v });
-          } else if (el.dataset.k === "focus" || el.dataset.k === "journals") set({ [el.dataset.k]: el.checked });
+          } else if (["focus", "journals", "noCap"].includes(el.dataset.k)) set({ [el.dataset.k]: el.checked });
+          else if (el.dataset.k === "royal") store.set("safeOnly", el.checked);
           else if (el.dataset.k === "fee" || el.dataset.k === "lp") {
             const v = +el.value;
             if (!(v >= 0) || el.value === "") { el.value = cm[el.dataset.k]; return; }
@@ -343,7 +489,31 @@ AB.pages.costmax = (() => {
           }
         });
         ui.onSeg(root, "pace", (v) => set({ days: +v }));
-        const off = store.on("change", (k) => { if (k === "costMax" || k === "specLevels") again(); });
+        /* the daily loop: its stage, mount, Mammoth and Expand redraw only the loop */
+        const card = root.querySelector("#cm-loop");
+        if (card) {
+          ui.onSeg(card, "cm-stage", (v) => { loopAt.set(T.id, +v); drawLoop(); });
+          card.addEventListener("change", (e) => {
+            if (e.target.id === "cm-mount") set({ mount: e.target.value });
+            else if (e.target.dataset.k === "mammoth") set({ mammoth: e.target.checked });
+          });
+          card.addEventListener("click", (e) => {
+            const b = e.target.closest("[data-cm-expand]");
+            if (!b) return;
+            b.disabled = true;
+            b.textContent = b.dataset.cmExpand === "1" ? "Packing the mount…" : "Restoring…";
+            setTimeout(() => set({ expand: b.dataset.cmExpand === "1" }), 20);
+          });
+          card.addEventListener("toggle", (e) => { if (e.target.id === "cm-loop-all" && e.target.open) drawEvery(e.target.querySelector(".cm-more-body")); }, true);
+        }
+        let prev = store.get("costMax");
+        const off = store.on("change", (k) => {
+          if (k === "specLevels" || k === "safeOnly") return again();
+          if (k !== "costMax") return;
+          const now = store.get("costMax"), route = ROUTE_KEYS.some((x) => now[x] !== prev[x]);
+          prev = now;
+          if (route) again(); else drawLoop();
+        });
         return () => { alive = false; off(); };
       }
     },
