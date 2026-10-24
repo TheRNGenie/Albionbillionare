@@ -1,6 +1,7 @@
 /* Albion Billionaire v2 — Cost to Max: the cheapest route from the player's Destiny Board levels to level 100 in a
    crafting specialization or crafter mastery, priced in today's markets. The route and its rules live in
-   engine/spec.js; this page asks for the levels, draws the route and says how far to trust it. */
+   engine/spec.js; this page asks for the levels, draws the route, says how far to trust it, and lays each stage out
+   as a daily loop around the cities for the player's pack mount (engine/loop.js). */
 window.AB = window.AB || {};
 AB.pages = AB.pages || {};
 
@@ -423,7 +424,7 @@ AB.pages.costmax = (() => {
             const note = [focus >= 0.5 ? `${qty(focus)} with focus` : "", extra >= c.units - 1e-9 ? "added" : extra > 0 ? `${qty(extra)} added` : ""].filter(Boolean).join(", ");
             list.push(row(`Craft ${nm(c.id)}${note ? ` (${note})` : ""}`, qty(c.units)));
           }
-          for (const b of merge(s.bank, (x) => `${x.id}|${x.kept ? "" : x.market}`)) list.push(row(b.kept ? `Keep ${nm(b.id)} in the bank: no market here takes it` : `Bank ${b.journal ? `full ${jn(b.id)}s` : nm(b.id)} to sell on later days`, qty(b.units), b.kept ? "" : `for ${b.market === cat.BM ? "the Black Market" : esc(b.market)}`));
+          for (const b of merge(s.bank, (x) => `${x.id}|${x.kept ? "" : x.market}`)) list.push(row(b.kept ? `Keep ${nm(b.id)} in the bank: no market here takes it` : `Bank ${b.journal ? `full ${jn(b.id)}s` : nm(b.id)} to sell ${b.market === cat.BM ? "to the Black Market" : `in ${esc(b.market)}`} on later days`, qty(b.units), b.kept ? "" : `worth about ${int(b.net)} each`));
           for (const x of merge(s.sell, (v) => `${v.id}|${v.market}|${v.from}`)) list.push(row(`Sell ${nm(x.id)}${x.market === cat.BM ? " to the Black Market" : ""}${n < pos(x.from) ? ", crafted on the last loop" : ""}`, qty(x.units), `about ${int(x.price)} each`));
           for (const j of s.jsell) list.push(row(`Sell full ${jn(j.id)}s`, qty(j.qty), `about ${int(j.price)} each`));
           if (!s.refine.length) list.push(...raws);
