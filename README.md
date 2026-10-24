@@ -13,6 +13,7 @@ Every money-making play in Albion Online, scored twice: once for what it could e
 - **An Edge Lab.** What 200 days of trades say: which edges are real, and which popular ideas ("buy midweek, sell on Sunday", "raw prices lead refined prices") fail out of sample.
 - **A Trust page and a Ledger.** The app shows its own calibration (promised against delivered), and the Ledger checks its ranges against the trades you actually make.
 - **Prices that keep themselves fresh.** While the app is open, live prices reload by themselves every minute, as often as the free price server comfortably allows, and reach the page at a calm moment: never while you type, read a play or scroll, and with your filters, place and focus kept.
+- **Cost to Max.** The cheapest route from your Destiny Board levels to 100 in any crafting specialization or crafter mastery, at today's prices: what to craft at each stage as the mastery unlocks tiers, where to sell it without flooding a market, where focus, journals and learning points pay most, what it costs with an 80% range, and how far to trust it. The fame and level rules come from Albion's own game files.
 - **Alerts and timers.** A price alert on any item in any market (when the cheapest listing drops to your price, or the best buy order reaches it), checked against every price reload (and in the Windows app, every price your Data Client captures), with the item's usual range as a starting price. Island, laborer and focus timers, and a countdown to each server's daily maintenance. The Android app's reminders arrive even with the app closed.
 
 ## Pages
@@ -24,6 +25,7 @@ Every money-making play in Albion Online, scored twice: once for what it could e
 | **Edge Lab** | The research: crash rebounds, the Black Market premium, which enchanting materials pay, how long gaps between markets last, weekend volume, and the two myths that failed. |
 | **Markets** | Any item in all eight markets: four weeks of sales, a calibrated forecast with its 80% and 50% bands, where to buy and where to sell, and the plays that use it. |
 | **Planner** | The road to a billion in detail: the fan of paths, the odds for other hours and capital (with your own spot ringed), what holds you back month by month, and today's routine. |
+| **Cost to Max** | The cheapest way to level a crafting specialization or mastery to 100 from your levels: the running cost by level with its range, silver per fame for every tier and enchantment, what more time buys, each stage's crafts and where to sell them, every specialization in the line compared, and where the silver goes. |
 | **Trust** | How far to believe every number: calibration charts, how the score works, today's plays by confidence, price freshness, and what the app can't know. |
 | **Ledger** | Net worth check-ins against the straight pace to your goal, logged trades, and your own calibration. |
 | **Alerts** | Price alerts on any item in any market, your island, laborer and focus timers with reminders, and each server's daily maintenance. Any item page has an Alert button that fills the form in. |
@@ -78,11 +80,11 @@ Or open `index.html` from any static host (GitHub Pages works as is).
 
 ```sh
 ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci   # once: the page tests need jsdom, a simulated browser
-npm test         # 114 tests with Node's built-in runner (Node 22)
+npm test         # 138 tests with Node's built-in runner (Node 22)
 npm run lint     # ESLint's correctness rules (fetches a pinned ESLint on first run)
 ```
 
-The tests load the real app scripts in Node and check the statistics, the calibration claims the Trust page makes, the scanners, the simulator, the shipped data files, the settings and ledger against doctored backups, live mode against a fake price server (URL limits, the request budget, waiting out a rate limit, order flips, listing freshness, prices captured by the Windows app, a reload that asks only for current prices), the Windows app's Data Client link (uploads gathered into one push within a second, the page's own lookups, web pages turned away), and the rules behind alerts and timers (which prices meet an alert, how old a price may be, how often one may fire, maintenance across the day line, the focus refill). The page tests boot the whole app in jsdom and use it as a player would: a play opens once however many pages came before, one delete removes one trade, each page keeps its own filters, a Planner edit draws the page once, a restored backup can't put markup into a page, a broken link still loads, the price source ends where the player last asked for it, an alert set from an item page fires once with a notification and a badge, the alert form refuses what can't work, the timers drive the reminders, and reloaded prices wait while the player types or reads a play, keep filters and table views, update an item page in place, retry after a failure, pause while the app is hidden, never double up, and check alerts without a request of their own, an alert that keeps not firing never stalls the app, and Data Client captures reach the page and fire alerts with no request, survive a reload that's running, wait while the app is hidden, never cut short a failed reload's wait, never put older prices back, and arrive together when they come in bursts. `.github/workflows/tests.yml` runs the tests and lint on every push to the v2 branch and on pull requests.
+The tests load the real app scripts in Node and check the statistics, the calibration claims the Trust page makes, the scanners, the simulator, the shipped data files, the settings and ledger against doctored backups, live mode against a fake price server (URL limits, the request budget, waiting out a rate limit, order flips, listing freshness, prices captured by the Windows app, a reload that asks only for current prices), the Windows app's Data Client link (uploads gathered into one push within a second, the page's own lookups, web pages turned away), the rules behind alerts and timers (which prices meet an alert, how old a price may be, how often one may fire, maintenance across the day line, the focus refill), and Cost to Max (fame and levels matching the game, the stage-by-stage choice against an exhaustive search, markets never taking more than their share, totals that add up, more time never costing more, journals counted only as far as they sell). The page tests boot the whole app in jsdom and use it as a player would: a play opens once however many pages came before, one delete removes one trade, each page keeps its own filters, a Planner edit draws the page once, a restored backup can't put markup into a page, a broken link still loads, the price source ends where the player last asked for it, an alert set from an item page fires once with a notification and a badge, the alert form refuses what can't work, the timers drive the reminders, and reloaded prices wait while the player types or reads a play, keep filters and table views, update an item page in place, retry after a failure, pause while the app is hidden, never double up, and check alerts without a request of their own, an alert that keeps not firing never stalls the app, and Data Client captures reach the page and fire alerts with no request, survive a reload that's running, wait while the app is hidden, never cut short a failed reload's wait, never put older prices back, and arrive together when they come in bursts; and Cost to Max draws a route, saves the levels typed in, opens routes from links, says when a route can't be priced or is done, keeps a line's prices once loaded and retries a failed load when asked. `.github/workflows/tests.yml` runs the tests and lint on every push to the v2 branch and on pull requests.
 
 ### Android and Windows
 
@@ -104,12 +106,13 @@ The research and the snapshot are computed from saved daily history; nothing in 
 ```sh
 python3 tools/fetch_history.py 2025-10-01 west       # daily history -> data/history/daily.csv.gz
 python3 tools/v2/build_items.py path/to/items.json  # enchant costs and item power -> assets/data/v2/items.json
+python3 tools/v2/build_destiny.py path/to/ao-bin-dumps  # Destiny Board crafting rules -> assets/data/v2/destiny.json
 pip install numpy pandas
 python3 tools/v2/build_insights.py                   # -> assets/data/v2/insights.json and snapshot.json (about a minute)
 npm test                                             # the data tests check the rebuilt files
 ```
 
-`items.json` comes from [ao-bin-dumps](https://github.com/ao-data/ao-bin-dumps). The other files in `data/history` (raw resources, hides, enchanting materials) come from the same script with an explicit item list; the exact commands are in [docs/METHOD.md](docs/METHOD.md#1-data).
+`items.json` and the files `build_destiny.py` reads (achievements.json, items.json, localization.json) come from [ao-bin-dumps](https://github.com/ao-data/ao-bin-dumps). The other files in `data/history` (raw resources, hides, enchanting materials) come from the same script with an explicit item list; the exact commands are in [docs/METHOD.md](docs/METHOD.md#1-data).
 
 ## Code map
 
@@ -121,19 +124,20 @@ assets/js/core/            util (formatting, UTC dates), stats, store (settings 
                            api (price server, cache, snapshot), confidence (calibrated ranges, odds, the score),
                            notify (notifications on Android, Windows and in browsers)
 assets/js/engine/          market (the market model), scanners (the eight strategies), sim (the road to a billion),
-                           alerts (price alerts)
+                           alerts (price alerts), spec (Cost to Max: Destiny Board rules and the cheapest route)
 assets/js/charts/charts.js dependency-free SVG charts: line and fan, bars, scatter, heatmap, forest, network map
 assets/js/ui.js            shared pieces: cards, the play drawer, tables, tooltips
 assets/js/pages/           one file per page, plus detail.js (the play drawer)
-assets/data/v2/            insights.json (research), snapshot.json (offline prices), items.json (item data)
-tools/v2/                  build_insights.py and build_items.py
+assets/data/v2/            insights.json (research), snapshot.json (offline prices), items.json (item data),
+                           destiny.json (the Destiny Board's crafting rules)
+tools/v2/                  build_insights.py, build_items.py and build_destiny.py
 tests/                     the Node test suite
 desktop/                   the Electron shell (Windows)
 ```
 
 ## Not carried over from the original app
 
-v2 is a fresh start focused on market plays and how far to trust them. These parts of the original app are not in v2: the playstyle plans and method playbooks, the wiki, the spec, quality and island calculators, wealth by bank location, the character lookup, the crafting-plan tab, the laborer optimizer and focus budget planner, the loss budget, the Matchups tab, and the "Spend real money?" wheel. Any of them can come back.
+v2 is a fresh start focused on market plays and how far to trust them. These parts of the original app are not in v2: the playstyle plans and method playbooks, the wiki, the spec calculator (Cost to Max now plans crafting specializations), the quality and island calculators, wealth by bank location, the character lookup, the crafting-plan tab, the laborer optimizer and focus budget planner, the loss budget, the Matchups tab, and the "Spend real money?" wheel. Any of them can come back.
 
 ## Notes
 

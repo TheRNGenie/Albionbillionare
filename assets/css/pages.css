@@ -220,3 +220,39 @@ tr.al-mine td { background: var(--gold-wash); }
 .mp-val { font-weight: 650; font-size: 13px; color: var(--text-1); }
 .mp-sub { display: block; font-size: 11.5px; color: var(--text-3); margin: 1px 0 4px; }
 .chart .mp svg { width: 100%; height: auto; }
+
+/* ---------- cost to max ---------- */
+.cm-form-card { margin-bottom: 16px; }
+.cm-form { display: flex; flex-direction: column; gap: 16px; }
+.cm-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1.3fr) auto minmax(0, 1fr); gap: 14px; align-items: start; }
+.cm-row .select, .cm-row .input { width: 100%; }
+.cm-levels { border: 0; padding: 0; margin: 0; min-width: 0; }
+.cm-levels legend { padding: 0; margin-bottom: 8px; font-size: 12px; color: var(--text-2); font-weight: 560; }
+.cm-lv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px 12px; }
+.cm-lv-grid .field > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.cm-opts { grid-template-columns: auto auto minmax(180px, 300px) minmax(0, 1fr); align-items: center; }
+.cm-prem { justify-self: end; text-align: right; }
+.kpi .k-tier { font-size: 14px; font-weight: 600; color: var(--text-2); letter-spacing: 0; }
+.cm-steps .cm-stage th { background: var(--surface-2); font-size: 12.5px; font-weight: 500; color: var(--text-2); text-transform: none; letter-spacing: 0; position: static; white-space: normal; }
+.cm-steps .cm-stage b { color: var(--text-1); font-weight: 650; }
+.cm-steps .cm-sell { font-size: 12.5px; color: var(--text-2); }
+.cm-steps .cm-sell-sm { display: none; }
+.cm-nw { white-space: nowrap; }
+@media (max-width: 1180px) {
+  .cm-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cm-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cm-prem { justify-self: start; text-align: left; grid-column: 1 / -1; }
+}
+@media (max-width: 680px) {
+  .cm-row, .cm-opts { grid-template-columns: minmax(0, 1fr); }
+  .cm-lv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* the route on a phone: craft (with where it sells under it), count and cost; the focus and journal counts and the
+     Sell column stay on wider screens, and long names wrap instead of widening the table */
+  .cm-steps .cm-wide { display: none; }
+  .cm-steps .item { gap: 8px; }
+  .cm-steps .item .ic { width: 28px; height: 28px; border-radius: 7px; }
+  .cm-steps .cm-sell-sm { display: block; margin: 4px 0 0 36px; font-size: 12px; line-height: 1.35; color: var(--text-2); }
+  .cm-steps .it-name, .cm-steps .it-sub { white-space: normal; }
+  .cm-steps td.r { white-space: nowrap; }
+  .cm-steps td, .cm-steps th { padding-left: 6px; padding-right: 6px; }
+}

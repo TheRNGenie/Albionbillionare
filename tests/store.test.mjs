@@ -108,3 +108,24 @@ test("alerts and timers keep only what they can use, and Reset settings keeps bo
   assert.equal(copy.settings.alerts.length, 50, "backups carry them");
   assert.equal(copy.settings.timers.focus, 30000);
 });
+
+test("Cost to Max keeps a real board node, days and fee in range, and levels from 0 to 100; Reset keeps the levels", (t) => {
+  t.after(restore);
+  assert.equal(store.set("costMax", { node: "CRAFT_BAG", days: 10000, focus: "no", journals: false, fee: 5000, lp: -4 }), true);
+  assert.deepEqual(store.get("costMax"), { node: "CRAFT_BAG", days: 3650, focus: true, journals: false, fee: 1000, lp: 0 });
+  assert.equal(store.set("costMax", { node: "CRAFT_BAG", days: "30", fee: "cheap", lp: 250.6 }), true);
+  assert.deepEqual(store.get("costMax"), { node: "CRAFT_BAG", days: 90, focus: true, journals: true, fee: 0, lp: 251 });
+  for (const node of ["craft_bag", "CRAFT_<b>", "BAG", 7, null]) assert.equal(store.set("costMax", { node, days: 30 }), false, String(node));
+  assert.equal(store.set("costMax", "CRAFT_BAG"), false);
+  assert.equal(store.set("specLevels", { CRAFT_BAG: 12.9, CRAFT_SWORDS: -1, CRAFT_X: "5", "bad key": 5, CRAFT_MAGE: 101 }), true);
+  assert.deepEqual(store.get("specLevels"), { CRAFT_BAG: 12, CRAFT_SWORDS: 0, CRAFT_MAGE: 100 });
+  assert.equal(store.set("specLevels", [["CRAFT_BAG", 5]]), false);
+  const many = Object.fromEntries(Array.from({ length: 500 }, (_, i) => [`CRAFT_N${i}`, 50]));
+  assert.equal(store.set("specLevels", many), true);
+  assert.equal(Object.keys(store.get("specLevels")).length, 400, "at most 400 nodes");
+  store.set("costMax", { node: "CRAFT_BAG", days: 30 });
+  store.reset();
+  assert.equal(store.get("costMax").node, "CRAFT_SWORDS_CLAYMORE", "the route's settings went back");
+  assert.equal(Object.keys(store.get("specLevels")).length, 400, "the player's levels stayed");
+  assert.equal(JSON.parse(store.exportAll()).settings.specLevels.CRAFT_N7, 50, "backups carry them");
+});

@@ -94,3 +94,41 @@ test("upgrades read from the item data: runes, souls, relics in order", async ()
   assert.equal(AB.cat.upgrade("T6_LEATHER@1"), null, "resources are refined, not upgraded");
   assert.equal(AB.cat.label("T6_2H_CLAYMORE@1"), "T6.1 Claymore");
 });
+
+test("destiny.json: the crafting half of the Destiny Board, with the game's level totals and unlocks", () => {
+  const d = json("assets/data/v2/destiny.json");
+  const sum = (a) => a.reduce((x, y) => x + y, 0);
+  assert.ok(isDate(d.v));
+  for (const k of ["base", "spec"]) {
+    for (const col of ["fame", "lp", "min"]) assert.equal(d.tpl[k][col].length, 100, `${k}.${col}: one per level`);
+    assert.ok(d.tpl[k].fame.every((f) => f > 0) && d.tpl[k].lp.every((x) => x > 0));
+  }
+  assert.equal(sum(d.tpl.base.fame), 6439736, "a mastery at fame multiplier 1");
+  assert.equal(sum(d.tpl.spec.fame), 12879472, "a specialization at fame multiplier 1");
+  assert.deepEqual(d.tpl.base.unlock, { 4: 1, 5: 10, 6: 30, 7: 60, 8: 100 });
+  assert.equal(d.tpl.base.min[0], 3, "a mastery's first level counts tier-3 crafts");
+  assert.ok(d.tpl.base.min.slice(1).every((t) => t === 4) && d.tpl.spec.min.every((t) => t === 4));
+  assert.deepEqual(d.jr.silver, [2000, 4000, 8000, 16000, 32000]);
+  assert.ok(d.jr.fame.length === 5 && d.jr.fame.every((f, i) => f > 0 && (i === 0 || f > d.jr.fame[i - 1])));
+  assert.deepEqual(Object.keys(d.cats).sort(), ["hunter", "mage", "toolmaker", "warrior"]);
+  assert.equal(d.lines.length, 39);
+  const ids = new Set();
+  for (const L of d.lines) {
+    assert.ok(d.cats[L.cat], L.id);
+    assert.ok(L.specs.length > 0, L.id);
+    for (const n of [L, ...L.specs]) {
+      assert.match(n.id, /^CRAFT_[A-Z0-9_]+$/);
+      assert.ok(!ids.has(n.id), `${n.id} once`);
+      ids.add(n.id);
+      assert.ok(n.name && n.fm > 0 && n.lpm > 0, n.id);
+      assert.ok(n.fc.length > 0 && n.fc.every(([bonus, i]) => bonus > 0 && d.pat[i]?.length > 0), `${n.id}: focus bonuses`);
+    }
+    for (const s of L.specs) {
+      assert.ok(s.fam.every((f) => L.fam.includes(f)), `${s.id}: its items are its line's`);
+      assert.ok(d.jr.types.includes(s.j), `${s.id}: journal type`);
+    }
+  }
+  for (const t of [3, 4, 5, 6, 7, 8]) for (const r of ["PLANKS", "METALBAR", "LEATHER", "CLOTH"]) assert.ok(d.res[`T${t}_${r}`]?.[0] > 0, `T${t}_${r} has fame`);
+  assert.ok(Object.values(d.ff).every((f) => f >= 1.1 && f <= 1.4), "artifact factors 1.1 to 1.4");
+});
+

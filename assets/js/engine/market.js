@@ -154,6 +154,22 @@ AB.market = (() => {
     return pending;
   }
 
+  /* The model on screen with more items in it: current prices and four-week histories for ids it lacks (the Cost to
+     Max page prices every tier and enchantment of a crafting line, its artifacts and its journals, most of which the
+     scan never reads). The requests go through api.js like the scan's, so they share its cache and request budget, and
+     in snapshot mode they read the snapshot. Returns a new model; the one on screen stays as it is. */
+  async function extend(ids) {
+    const base = M;
+    if (!base) throw new Error("No market data yet.");
+    const want = [...new Set(ids)];
+    const needP = want.filter((id) => !base.P[id]), needH = want.filter((id) => !base.hist[id]);
+    const [rows, hist] = await Promise.all([
+      needP.length ? api.prices(needP, cat.MARKETS) : [],
+      needH.length ? api.daily(needH, cat.MARKETS, 28) : {},
+    ]);
+    return build([...base.rows, ...rows], { ...base.hist, ...hist }, base.U, base.checkedAt);
+  }
+
   /* `now` is when the model was built, which listing ages count from; `checkedAt` is when its prices last came from
      the price server (a model rebuilt with captures keeps the one before it); `seq` counts builds, newest highest.
      The per-market statistics depend on the histories and the day only, so a model rebuilt from `prev` with the same
@@ -229,7 +245,7 @@ AB.market = (() => {
   }
 
   return {
-    load, update, capture, hasCaptures, withCaptures, universe, freshnessByCity,
+    load, update, extend, capture, hasCaptures, withCaptures, universe, freshnessByCity,
     get data() { return M; },
     on: (e, fn) => ev.on(e, fn),
     /* a new server or data source: its next load starts over (the Windows app hands the captures over again then) */

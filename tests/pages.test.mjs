@@ -667,3 +667,168 @@ test("a burst of captures is scored together, at most once every 2 seconds, and 
   assert.deepEqual(app.errors, []);
   app.close();
 });
+
+/* ---------- Cost to Max ---------- */
+/* the page is done drawing once its last chart (every specialization) is up, or it shows why it can't be */
+const cmReady = (app) => until(() => app.$("#cm-specs svg") || app.$("#page .card .empty") || app.$("[data-cm-retry]"));
+const stageTiers = (app) => app.$$(".cm-steps .cm-stage").map((r) => /crafts up to T(\d)/.exec(r.textContent)?.[1] ?? "tier 3");
+
+test("Cost to Max draws the cheapest route from the snapshot: the totals, every chart and each stage's crafts", async () => {
+  const app = await boot({ hash: "#/costmax" });
+  await cmReady(app);
+  const { $, $$ } = app;
+  assert.ok($$("#nav a").some((a) => a.textContent.includes("Cost to Max")));
+  assert.equal($("#cm-target").value, "CRAFT_SWORDS_CLAYMORE", "Claymore opens first");
+  assert.equal($$(".kpi").length, 4);
+  assert.match($(".kpi .k-range").textContent, /^80% range: (pays [\d.]+[kMB]? to [\d.]+[kMB]?|costs .+ to .+|pays .+ to costs .+)$/, "a range reads in one direction, never \"pays X to pays Y\"");
+  for (const id of ["cm-curve", "cm-heat", "cm-pace", "cm-specs", "cm-flow"]) assert.ok($(`#${id} svg`), `${id} drew`);
+  assert.deepEqual(stageTiers(app), ["tier 3", "4", "5", "6", "7", "8"], "Sword Crafter's first level, then a stage per tier it opens");
+  assert.ok($$(".cm-steps tbody tr:not(.cm-stage)").length >= 5);
+  /* the snapshot doesn't price tier 3 or journals, and the page says so */
+  assert.match($("#page .banner.info").textContent, /tier-3 crafts.*snapshot/);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("a level typed into Cost to Max is saved and the route starts from it; a bad entry is put back", async () => {
+  const app = await boot({ hash: "#/costmax" });
+  await cmReady(app);
+  const { $, AB } = app;
+  const n = await app.renders("costmax", async () => { app.change($('input[data-node="CRAFT_SWORDS"]'), 45); await cmReady(app); });
+  assert.equal(n, 1, "one edit, one redraw");
+  assert.equal(AB.store.get("specLevels").CRAFT_SWORDS, 45);
+  assert.deepEqual(stageTiers(app), ["6", "7", "8"], "Sword Crafter 45 has T4 to T6 open already");
+  for (const bad of [150, -3, ""]) {
+    app.change($('input[data-node="CRAFT_SWORDS_CLAYMORE"]'), bad);
+    assert.equal($('input[data-node="CRAFT_SWORDS_CLAYMORE"]').value, "0", `${JSON.stringify(bad)} isn't a level`);
+  }
+  assert.deepEqual(plain(AB.store.get("specLevels")), { CRAFT_SWORDS: 45 });
+  AB.store.reset();
+  assert.equal(AB.store.get("specLevels").CRAFT_SWORDS, 45, "Reset settings keeps the player's levels");
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("a link to a Cost to Max route opens it and is remembered; a link to no route falls back to the last one", async () => {
+  const app = await boot({ hash: "#/costmax/CRAFT_BAG" });
+  await cmReady(app);
+  const { $, AB } = app;
+  assert.equal($("#cm-target").value, "CRAFT_BAG");
+  assert.equal($("#cm-line").value, "CRAFT_BAG");
+  assert.equal(AB.store.get("costMax").node, "CRAFT_BAG");
+  assert.equal($('#cm-line option[value="CRAFT_TOOL_TRACKING"]'), null, "a line with no recipes in the item data isn't offered");
+  for (const h of ["#/costmax/CRAFT_NOT_A_NODE", "#/costmax/CRAFT_TOOL_TRACKING", `#/costmax/${encodeURIComponent('"><img id="x1" src=x>')}`]) {
+    await app.go(h);
+    await cmReady(app);
+    assert.equal($("#cm-target").value, "CRAFT_BAG", h);
+  }
+  assert.equal($("#x1"), null);
+  /* another line opens on its first specialization the snapshot can price */
+  const line = $("#cm-line");
+  line.value = "CRAFT_SWORDS";
+  line.dispatchEvent(new app.w.Event("change", { bubbles: true }));
+  await sleep(25);
+  await cmReady(app);
+  const id = decodeURIComponent(app.w.location.hash.split("/")[2]), node = AB.spec.node(id);
+  assert.deepEqual([node.line, node.kind, AB.spec.special(node)], ["CRAFT_SWORDS", "spec", false]);
+  assert.equal($("#cm-target").value, id);
+  assert.equal(AB.store.get("costMax").node, id);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("Cost to Max says plainly when the snapshot can't price a route, or the route is already done", async () => {
+  const app = await boot({ hash: "#/costmax/CRAFT_SWORDS_AVALON" });
+  await cmReady(app);
+  assert.match(app.$("#page .card .empty").textContent, /None of the Kingmaker items can be priced from the saved snapshot/);
+  app.AB.store.set("specLevels", { CRAFT_SWORDS_CLAYMORE: 100 });
+  await app.go("#/costmax/CRAFT_SWORDS_CLAYMORE");
+  await cmReady(app);
+  assert.match(app.$("#page .card .empty").textContent, /Claymore is already at 100/);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("a doctored backup can't put markup into Cost to Max, and keeps the levels it can use", async () => {
+  const app = await boot();
+  const { store } = app.AB;
+  const evil = (id) => `"><img id="${id}" src="x" onerror="window.pwned=1">`;
+  const refused = store.importAll(JSON.stringify({
+    app: "albion-billionaire-v2",
+    settings: {
+      costMax: { node: "CRAFT_SWORDS" + evil("c1"), days: 30 },
+      specLevels: { CRAFT_SWORDS: 30, [evil("c2")]: 50, CRAFT_SWORDS_CLAYMORE: evil("c3"), CRAFT_BAG: 250, CRAFT_SWORDS_DUAL: 12.7 },
+    },
+  }));
+  assert.equal(refused, 1, "the target with markup in it");
+  assert.equal(store.get("costMax").node, "CRAFT_SWORDS_CLAYMORE");
+  assert.deepEqual(plain(store.get("specLevels")), { CRAFT_SWORDS: 30, CRAFT_BAG: 100, CRAFT_SWORDS_DUAL: 12 });
+  await app.go("#/costmax");
+  await cmReady(app);
+  for (const id of ["c1", "c2", "c3"]) assert.equal(app.$("#" + id), null);
+  assert.equal(app.$('input[data-node="CRAFT_SWORDS"]').value, "30");
+  assert.equal(app.w.pwned, undefined);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("Cost to Max loads a line's prices once and keeps them; a failed load says so and tries again when asked", async () => {
+  const app = await boot();
+  const { AB } = app;
+  const extend = AB.market.extend;
+  let calls = 0, fail = true;
+  AB.market.extend = (ids) => {
+    calls++;
+    if (fail) { fail = false; return Promise.reject(new Error("The price server didn't answer.")); }
+    return extend(ids);
+  };
+  await app.go("#/costmax");
+  await until(() => app.$("[data-cm-retry]"));
+  assert.match(app.$("[data-cm-retry]").closest(".banner").textContent, /Prices for Sword Crafter didn't load.*The price server didn't answer/);
+  for (const h of ["#/command", "#/costmax"]) await app.go(h);
+  assert.equal(calls, 1, "a failed load waits to be asked again");
+  app.click(app.$("[data-cm-retry]"));
+  await cmReady(app);
+  assert.ok(app.$("#cm-curve svg"));
+  assert.equal(calls, 2);
+  for (const h of ["#/command", "#/costmax", "#/costmax/CRAFT_SWORDS_DUAL", "#/costmax/CRAFT_SWORDS"]) { await app.go(h); if (h !== "#/command") await cmReady(app); }
+  assert.equal(calls, 2, "one load serves every visit and every route in the line");
+  await app.go("#/costmax/CRAFT_BAG");
+  await cmReady(app);
+  assert.equal(calls, 3, "another line loads its own");
+  await app.go("#/costmax/CRAFT_SWORDS_CLAYMORE");
+  await cmReady(app);
+  assert.equal(calls, 3, "and the first is still kept");
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("Cost to Max's pace, focus and journal choices are saved, and focus waits for premium", async () => {
+  const app = await boot({ hash: "#/costmax" });
+  await cmReady(app);
+  const { $, $$, AB } = app;
+  app.click($('[data-seg="pace"] button[data-v="14"]'));
+  await cmReady(app);
+  assert.equal(AB.store.get("costMax").days, 14);
+  assert.match($$(".kpi")[2].textContent, /2 weeks/);
+  assert.equal($('[data-seg="pace"] button[aria-pressed="true"]').dataset.v, "14");
+  for (const k of ["focus", "journals"]) {
+    const box = $(`input[data-k="${k}"]`);
+    assert.equal(box.checked, true);
+    box.checked = false;
+    box.dispatchEvent(new app.w.Event("change", { bubbles: true }));
+    await cmReady(app);
+    assert.equal(AB.store.get("costMax")[k], false, k);
+    assert.equal($(`input[data-k="${k}"]`).checked, false, `${k} stays off after the redraw`);
+  }
+  assert.match($("#page .know").textContent, /Focus is off\..*Journals are left out\./);
+  AB.store.set("costMax", { ...AB.store.get("costMax"), focus: true });
+  AB.store.set("premium", false);
+  for (const h of ["#/settings", "#/costmax"]) await app.go(h);
+  await cmReady(app);
+  assert.equal($('input[data-k="focus"]').disabled, true, "without premium, focus doesn't refill");
+  assert.equal($('input[data-k="focus"]').checked, false);
+  assert.match($("#page .know").textContent, /Focus is off: without premium it doesn't refill/);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});

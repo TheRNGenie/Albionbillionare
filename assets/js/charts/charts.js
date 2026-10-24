@@ -71,6 +71,9 @@ AB.charts = (() => {
   const tick = (f) => (v) => trim(f(v));
   /* Shorten a label to fit a width (estimated), with an ellipsis. The full text stays in the tooltip. */
   const fit = (t, maxW, px = 12) => { t = String(t); if (textW(t, px) <= maxW) return t; const n = Math.max(1, Math.floor((maxW - 2) / (px * 0.58)) - 1); return t.slice(0, n).trimEnd() + "…"; };
+  /* Every k-th label of a row of evenly spaced x-axis ticks, the fewest skipped so neighbours keep 8px apart on a
+     narrow chart (the gridlines all stay). */
+  const tickEvery = (ticks, X, ft) => { if (ticks.length < 2) return 1; const gap = Math.abs(X(ticks[1]) - X(ticks[0])), w = Math.max(...ticks.map((v) => textW(ft(v)))); return Math.max(1, Math.ceil((w + 8) / Math.max(1, gap))); };
 
   function svgEl(w, h, label) {
     return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" role="img" aria-label="${esc(label || "chart")}">`;
@@ -99,7 +102,8 @@ AB.charts = (() => {
 
   /* =====================================================================================================
      Line / area / band chart. spec: { series:[{name,color,data:[[x,y]],width,dash,area,dots,muted}], bands:[{name,color,data:[[x,lo,hi]],opacity}],
-     x:{type:'time'|'linear',fmt,min,max,label}, y:{fmt,min,max,zero,label}, height, hlines:[{y,label}], vlines:[{x,label}], endLabels, legend } */
+     x:{type:'time'|'linear',fmt,min,max,label}, y:{fmt,min,max,zero,label}, height, hlines:[{y,label}], vlines:[{x,label}], endLabels, legend,
+     tooltip:{title(x), fmt(y), range(lo, hi) (a band's range in words), note(x)} } */
   function drawLine(el, s, W) {
     if (!s) return;
     const H = s.height || 240;
@@ -195,7 +199,7 @@ AB.charts = (() => {
       }
       for (const b of s.bands || []) {
         const p = b.data.find((d) => d[0] === best);
-        if (p && p[1] != null && b.name) rows.push({ color: b.color, name: b.name, value: `${(s.tooltip?.fmt || yf)(p[1])} – ${(s.tooltip?.fmt || yf)(p[2])}`, box: true });
+        if (p && p[1] != null && b.name) rows.push({ color: b.color, name: b.name, value: s.tooltip?.range ? s.tooltip.range(p[1], p[2]) : `${(s.tooltip?.fmt || yf)(p[1])} – ${(s.tooltip?.fmt || yf)(p[2])}`, box: true });
       }
       hot.innerHTML = dots;
       showTip(ev.clientX, ev.clientY, (s.tooltip?.title || xf)(best), rows, s.tooltip?.note?.(best));
@@ -206,13 +210,13 @@ AB.charts = (() => {
   }
 
   /* =====================================================================================================
-     Bars. spec: { categories:[...], series:[{name,color,values:[...]}], stacked, horizontal, fmt, height, valueLabels, colors:[per-category color],
-     zero line, diverging (values can be negative), notes:[per-category tooltip note] } */
+     Bars. spec: { categories:[...], series:[{name,color,values:[...]}], stacked, horizontal, fmt, height, valueLabels, labelFmt (the value
+     labels; fmt otherwise), tipFmt, colors:[per-category color], zero line, diverging (values can be negative), notes:[per-category tooltip note] } */
   function drawBars(el, s, W) {
     if (!s) return;
     const cats = s.categories || [], ser = s.series || [];
     if (!cats.length) { el.innerHTML = `<div class="empty">${esc(s.empty || "No data to draw yet.")}</div>`; return; }
-    const fmt = s.fmt || ((v) => silver(v)), ft = tick(fmt);
+    const fmt = s.fmt || ((v) => silver(v)), ft = tick(fmt), lf = s.labelFmt || fmt;
     const tot = cats.map((_, i) => s.stacked ? ser.reduce((a, se) => a + Math.max(0, se.values[i] || 0), 0) : Math.max(...ser.map((se) => se.values[i] ?? 0)));
     const neg = cats.map((_, i) => s.stacked ? ser.reduce((a, se) => a + Math.min(0, se.values[i] || 0), 0) : Math.min(0, ...ser.map((se) => se.values[i] ?? 0)));
     let lo = Math.min(0, ...neg), hi = Math.max(0, ...tot);
@@ -226,13 +230,14 @@ AB.charts = (() => {
     if (s.horizontal) {
       const rowH = s.rowHeight || Math.max(22, Math.min(34, 8 + 16 * k));
       const labW = Math.min(W * 0.42, Math.max(...cats.map((c) => textW(c, 12))) + 12);
-      const valW = s.valueLabels ? Math.max(...tot.map((v) => textW(fmt(v)))) + 10 : 10;
+      const valW = s.valueLabels ? Math.max(...tot.map((v) => textW(lf(v)))) + 10 : 10;
       const H = s.height || n * rowH + 28;
       const ml = labW, mr = valW, mt = 4, mb = 22, iw = Math.max(40, W - ml - mr), ih = H - mt - mb;
       const X = lin(lo, hi, ml, ml + iw);
       const band = ih / n, bw = Math.min(s.stacked ? 18 : 14, (band - 6) / k);
       g = svgEl(W, H, s.label);
-      for (const v of ticks) g += `<line class="gridline" x1="${X(v)}" x2="${X(v)}" y1="${mt}" y2="${mt + ih}"/><text x="${X(v)}" y="${H - 6}" text-anchor="middle">${esc(ft(v))}</text>`;
+      const ke = tickEvery(ticks, X, ft);
+      ticks.forEach((v, i) => { g += `<line class="gridline" x1="${X(v)}" x2="${X(v)}" y1="${mt}" y2="${mt + ih}"/>${i % ke === 0 ? `<text x="${X(v)}" y="${H - 6}" text-anchor="middle">${esc(ft(v))}</text>` : ""}`; });
       g += `<g class="ax"><line x1="${X(0)}" x2="${X(0)}" y1="${mt}" y2="${mt + ih}"/></g>`;
       cats.forEach((c, i) => {
         const cy = mt + band * i + band / 2;
@@ -251,7 +256,7 @@ AB.charts = (() => {
           const d = last ? barPath(xa + gap, y, Math.max(0, xb - xa - gap), bw, 4, v >= 0 ? "right" : "left") : `M${xa + gap},${y}H${xb}V${y + bw}H${xa + gap}Z`;
           g += `<path class="mark-hover" data-i="${i}" data-j="${j}" d="${d}" style="fill:${col(color)}"/>`;
         });
-        if (s.valueLabels) { const v = s.stacked ? tot[i] : ser[0].values[i]; if (v != null) g += `<text x="${X(Math.max(0, v)) + 6}" y="${cy + 4}" class="label-strong" style="font-size:11.5px">${esc(fmt(v))}</text>`; }
+        if (s.valueLabels) { const v = s.stacked ? tot[i] : ser[0].values[i]; if (v != null) g += `<text x="${X(Math.max(0, v)) + 6}" y="${cy + 4}" class="label-strong" style="font-size:11.5px">${esc(lf(v))}</text>`; }
         g += `<rect class="hit" data-row="${i}" x="0" y="${mt + band * i}" width="${W}" height="${band}" style="cursor:default"/>`;
       });
       g += "</svg>";
@@ -261,6 +266,8 @@ AB.charts = (() => {
       const iw = Math.max(40, W - ml - mr), ih = H - mt - mb;
       const Y = lin(lo, hi, mt + ih, mt);
       const band = iw / n, bw = Math.min(24, (band * 0.7 - (k - 1) * 2) / k);
+      /* value labels only when each fits above its bar; on a narrow chart the tooltip and the table carry them */
+      const labels = s.valueLabels && cats.every((_, i) => { const v = s.stacked ? tot[i] : ser[0].values[i]; return v == null || textW(lf(v), 11) <= band - 2; });
       g = svgEl(W, H, s.label);
       for (const v of ticks) g += `<line class="gridline" x1="${ml}" x2="${ml + iw}" y1="${Y(v)}" y2="${Y(v)}"/><text x="${ml - 8}" y="${Y(v) + 3.5}" text-anchor="end">${esc(ft(v))}</text>`;
       const every = Math.ceil(n / Math.max(1, Math.floor(iw / Math.max(28, Math.max(...cats.map((c) => textW(c))) + 6))));
@@ -280,7 +287,7 @@ AB.charts = (() => {
           const d = last ? barPath(x, ya, bw, Math.max(0, yb - ya - gap), 4, v >= 0 ? "up" : "down") : `M${x},${ya}H${x + bw}V${yb - gap}H${x}Z`;
           g += `<path class="mark-hover" data-i="${i}" data-j="${j}" d="${d}" style="fill:${col(color)}"/>`;
         });
-        if (s.valueLabels) { const v = s.stacked ? tot[i] : ser[0].values[i]; if (v != null) g += `<text x="${cx}" y="${Y(Math.max(0, v)) - 5}" text-anchor="middle" class="label-strong" style="font-size:11px">${esc(fmt(v))}</text>`; }
+        if (labels) { const v = s.stacked ? tot[i] : ser[0].values[i]; if (v != null) g += `<text x="${cx}" y="${Y(Math.max(0, v)) - 5}" text-anchor="middle" class="label-strong" style="font-size:11px">${esc(lf(v))}</text>`; }
         g += `<rect class="hit" data-row="${i}" x="${ml + band * i}" y="${mt}" width="${band}" height="${ih}" style="cursor:default"/>`;
       });
       g += `<g class="ax"><line x1="${ml}" x2="${ml + iw}" y1="${Y(Math.max(lo, 0))}" y2="${Y(Math.max(lo, 0))}"/></g>`;
@@ -375,7 +382,8 @@ AB.charts = (() => {
 
   /* =====================================================================================================
      Heatmap. spec: { rows:[...], cols:[...], values:[[...]] (null = no data), scale:'seq'|'div', domain:[lo,hi] (div: symmetric),
-     fmt, cellH, note(i,j) } */
+     flip (div: negative values take the positive pole's colour, for a measure where lower is better), gamma (div: below 1 lifts the colour
+     of small values next to big ones; 0.5 is a square-root scale), fmt, cellH, note(i,j) } */
   /* Sequential: low values sit close to the surface, high values stand out from it. The --seq tokens are defined
      per theme with seq-1 nearest the surface, so the same order works in light and dark. */
   function seqColor(t) {
@@ -404,6 +412,7 @@ AB.charts = (() => {
     const vals = s.values.flat().filter((v) => v != null && isFinite(v));
     let [lo, hi] = s.domain || [Math.min(...vals), Math.max(...vals)];
     if (s.scale === "div") { const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1; lo = -m; hi = m; }
+    const tone = (t) => Math.sign(t) * Math.pow(Math.min(1, Math.abs(t)), s.gamma || 1);
     const labW = Math.min(W * 0.36, Math.max(...rows.map((r) => textW(r, 12))) + 12);
     const cellH = s.cellH || 30, mt = 22, leg = s.legend === false ? 0 : 40, H = mt + rows.length * cellH + 4 + leg;
     const cw = (W - labW - 4) / cols.length;
@@ -415,7 +424,7 @@ AB.charts = (() => {
         const v = s.values[i]?.[j];
         const x = labW + cw * j + 1, y = mt + cellH * i + 1;
         let fill = "var(--surface-2)";
-        if (v != null && isFinite(v)) fill = s.scale === "div" ? divColor(v / hi) : seqColor((v - lo) / (hi - lo || 1));
+        if (v != null && isFinite(v)) fill = s.scale === "div" ? divColor(tone((s.flip ? -v : v) / hi)) : seqColor((v - lo) / (hi - lo || 1));
         g += `<rect class="mark-hover" data-i="${i}" data-j="${j}" x="${x}" y="${y}" width="${Math.max(0, cw - 2)}" height="${cellH - 2}" rx="4" style="fill:${fill}"/>`;
         if (s.cellLabels !== false && v != null && cw > 34) {
           const ink = fill.startsWith("#") && lum(fill) > 0.32 ? "#0b0b0b" : "#ffffff";
@@ -429,7 +438,7 @@ AB.charts = (() => {
       /* the scale: a gradient strip from the lowest to the highest value, labelled at both ends */
       const nameW = s.valueName ? textW(s.valueName) + 12 : 0;
       const gy = mt + rows.length * cellH + 18, gw = Math.max(80, Math.min(260, W - labW - 8 - nameW)), gx = labW + 1, id = "hg" + Math.random().toString(36).slice(2, 8);
-      const stops = s.scale === "div" ? [-1, -0.5, 0, 0.5, 1].map((t) => divColor(t)) : [0, 1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6, 1].map((t) => seqColor(t));
+      const stops = s.scale === "div" ? [-1, -0.5, 0, 0.5, 1].map((t) => divColor(s.flip ? -t : t)) : [0, 1 / 6, 2 / 6, 3 / 6, 4 / 6, 5 / 6, 1].map((t) => seqColor(t));
       g += `<defs><linearGradient id="${id}" x1="0" x2="1" y1="0" y2="0">${stops.map((c, k) => `<stop offset="${(k / (stops.length - 1)) * 100}%" stop-color="${c}"/>`).join("")}</linearGradient></defs>`;
       g += `<rect x="${gx}" y="${gy}" width="${gw}" height="8" rx="4" fill="url(#${id})"/>`;
       g += `<text x="${gx}" y="${gy + 21}" class="label-2">${esc(fmt(lo))}</text><text x="${gx + gw}" y="${gy + 21}" text-anchor="end" class="label-2">${esc(fmt(hi))}</text>`;
@@ -445,31 +454,33 @@ AB.charts = (() => {
   }
 
   /* =====================================================================================================
-     Forest plot: the confidence ladder. spec: { rows:[{label,sub,lo,mid,hi,tier,id}], fmt, onClick, zero:true } */
+     Forest plot: the confidence ladder. spec: { rows:[{label,sub,lo,mid,hi,tier,id}], fmt (axis), labelFmt (the value beside each row), tipFmt,
+     rangeFmt(lo, hi) (a range in words, for the tooltip and screen readers), midName, rangeName, onClick, zero:true } */
   function drawForest(el, s, W) {
     if (!s) return;
     const rows = s.rows || [];
     if (!rows.length) { el.innerHTML = `<div class="empty">${esc(s.empty || "Nothing to rank yet.")}</div>`; return; }
-    const fmt = s.fmt || ((v) => silver(v)), ft = tick(fmt);
+    const fmt = s.fmt || ((v) => silver(v)), ft = tick(fmt), lf = s.labelFmt || fmt, tf = s.tipFmt || fmt;
     const rowH = 30, mt = 6, mb = 24, H = mt + rows.length * rowH + mb;
     let lo = Math.min(0, ...rows.map((r) => Math.min(r.lo, r.mid))), hi = Math.max(...rows.map((r) => Math.max(r.hi, r.mid)));
     const ticks = niceTicks(lo, hi, 4);
     lo = ticks[0]; hi = ticks[ticks.length - 1];
     const labW = Math.min(W * 0.42, Math.max(...rows.map((r) => textW(r.label, 12))) + 16);
-    const ml = labW, mr = Math.max(...rows.map((r) => textW(fmt(r.mid)))) + 14, iw = Math.max(60, W - ml - mr);
+    const ml = labW, mr = Math.max(...rows.map((r) => textW(lf(r.mid)))) + 14, iw = Math.max(60, W - ml - mr);
     const X = lin(lo, hi, ml, ml + iw);
     const color = { high: "var(--good)", med: "var(--warning)", low: "var(--serious)", vlow: "var(--critical)" };
     let g = svgEl(W, H, s.label);
-    for (const v of ticks) g += `<line class="gridline" x1="${X(v)}" x2="${X(v)}" y1="${mt}" y2="${mt + rows.length * rowH}"/><text x="${X(v)}" y="${H - 6}" text-anchor="middle">${esc(ft(v))}</text>`;
+    const ke = tickEvery(ticks, X, ft);
+    ticks.forEach((v, i) => { g += `<line class="gridline" x1="${X(v)}" x2="${X(v)}" y1="${mt}" y2="${mt + rows.length * rowH}"/>${i % ke === 0 ? `<text x="${X(v)}" y="${H - 6}" text-anchor="middle">${esc(ft(v))}</text>` : ""}`; });
     if (lo < 0) g += `<line x1="${X(0)}" x2="${X(0)}" y1="${mt}" y2="${mt + rows.length * rowH}" style="stroke:var(--text-3);stroke-width:1"/>`;
     rows.forEach((r, i) => {
       const cy = mt + rowH * i + rowH / 2, c = color[r.tier] || "var(--s1)";
       g += `<text x="${ml - 10}" y="${cy + 4}" text-anchor="end" class="label-2" style="font-size:12px">${esc(fit(r.label, ml - 12))}</text>`;
       g += `<rect x="${X(r.lo)}" y="${cy - 4}" width="${Math.max(2, X(r.hi) - X(r.lo))}" height="8" rx="4" style="fill:${c};opacity:0.35"/>`;
       g += `<circle cx="${X(r.mid)}" cy="${cy}" r="5" style="fill:${c};stroke:var(--surface-1);stroke-width:2"/>`;
-      g += `<text x="${ml + iw + 8}" y="${cy + 4}" class="label-strong" style="font-size:11.5px">${esc(fmt(r.mid))}</text>`;
+      g += `<text x="${ml + iw + 8}" y="${cy + 4}" class="label-strong" style="font-size:11.5px">${esc(lf(r.mid))}</text>`;
       /* rows that open something are buttons for the keyboard too */
-      const btn = s.onClick ? ` tabindex="0" role="button" aria-label="${esc(`${r.label}: most likely ${fmt(r.mid)}, 80% range ${fmt(r.lo)} to ${fmt(r.hi)}`)}"` : "";
+      const btn = s.onClick ? ` tabindex="0" role="button" aria-label="${esc(`${r.label}: ${(s.midName || "most likely").toLowerCase()} ${tf(r.mid)}, 80% range ${s.rangeFmt ? s.rangeFmt(r.lo, r.hi) : `${tf(r.lo)} to ${tf(r.hi)}`}`)}"` : "";
       g += `<rect class="hit" data-i="${i}" x="0" y="${mt + rowH * i}" width="${W}" height="${rowH}" style="cursor:${s.onClick ? "pointer" : "default"}"${btn}/>`;
     });
     g += "</svg>";
@@ -477,8 +488,8 @@ AB.charts = (() => {
     el.querySelectorAll(".hit").forEach((h) => {
       const r = rows[+h.dataset.i];
       const on = (ev) => showTip(ev.clientX, ev.clientY, r.label, [
-        { color: color[r.tier], name: s.midName || "Most likely", value: fmt(r.mid), box: true },
-        { color: color[r.tier], name: s.rangeName || "80% range", value: `${fmt(r.lo)} – ${fmt(r.hi)}`, box: true },
+        { color: color[r.tier], name: s.midName || "Most likely", value: tf(r.mid), box: true },
+        { color: color[r.tier], name: s.rangeName || "80% range", value: s.rangeFmt ? s.rangeFmt(r.lo, r.hi) : `${tf(r.lo)} – ${tf(r.hi)}`, box: true },
         ...(r.extra || []),
       ], r.sub);
       h.addEventListener("pointermove", on);

@@ -23,9 +23,13 @@ AB.store = (() => {
     risk: "balanced",
     alerts: [], // price alerts (see engine/alerts.js)
     timers: { planted: null, laborers: null, focus: null, focusAt: null, remind: { harvest: true, laborers: true, focus: true, reset: false } },
+    /* Cost to Max: the target node, days to take, focus and journals on or off, the station's fee per 100 nutrition and
+       the learning points to spend (see engine/spec.js) */
+    costMax: { node: "CRAFT_SWORDS_CLAYMORE", days: 90, focus: true, journals: true, fee: 0, lp: 0 },
+    specLevels: {}, // the player's Destiny Board crafting levels, {nodeId: 0-100}
   };
   /* Kept by "Reset settings": they're the player's own lists, not preferences. */
-  const KEEP = new Set(["watch", "alerts", "timers"]);
+  const KEEP = new Set(["watch", "alerts", "timers", "specLevels"]);
   const read = (k) => { try { const v = localStorage.getItem(NS + k); return v == null ? undefined : JSON.parse(v); } catch (e) { return undefined; } };
   const write = (k, v) => { try { localStorage.setItem(NS + k, JSON.stringify(v)); return true; } catch (e) { return false; } };
 
@@ -41,6 +45,9 @@ AB.store = (() => {
   const SILVER = clampTo(0, 1e13);
   /* A market name: letters and spaces only, so it can't carry markup into a page or a request. */
   const PLACE = /^[A-Za-z ]{2,30}$/;
+  /* A Destiny Board crafting node (CRAFT_SWORDS_CLAYMORE): capitals, digits and underscores only. */
+  const NODE = /^CRAFT_[A-Z0-9_]{1,48}$/;
+  const level = clampTo(0, 100);
   function cleanAlert(a) {
     if (!obj(a) || !isItem(a.id) || typeof a.city !== "string" || !PLACE.test(a.city) || !["below", "above"].includes(a.kind) || !(fin(a.price) > 0)) return null;
     return {
@@ -75,6 +82,11 @@ AB.store = (() => {
     risk: oneOf("cautious", "balanced", "bold"),
     alerts: (v) => (Array.isArray(v) ? v.map(cleanAlert).filter(Boolean).slice(0, 50) : undefined),
     timers: cleanTimers,
+    costMax: (v) => (obj(v) && NODE.test(v.node) ? {
+      node: v.node, days: Math.round(clampTo(1, 3650)(v.days) ?? 90), focus: v.focus !== false, journals: v.journals !== false,
+      fee: clampTo(0, 1000)(v.fee) ?? 0, lp: Math.round(clampTo(0, 1e6)(v.lp) ?? 0),
+    } : undefined),
+    specLevels: (v) => (obj(v) ? Object.fromEntries(Object.entries(v).filter(([k, x]) => NODE.test(k) && level(x) !== undefined).slice(0, 400).map(([k, x]) => [k, Math.floor(level(x))])) : undefined),
   };
   const clean = (k, v) => (v == null ? undefined : CHECK[k](v));
 
