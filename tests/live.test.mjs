@@ -28,6 +28,11 @@ const series = (id, city) => {
 /* A client-captured price newer and lower than the server's, as the Windows app's own data client would report it. */
 const CLIENT = { id: "T6_LEATHER", city: "Martlock" };
 
+/* Order books planted for the sale check (chosen below, once the app's price model is loaded): `{ buy, sell }` in
+   silver, seen an hour ago; a missing side keeps the usual fake order. */
+const PLANT = new Map();
+const plant = (id, city, o) => PLANT.set(id + "|" + city, { ageH: 1, ...o });
+
 const urls = [], sentAt = [];
 const historyIds = new Set();
 let rateLimitOnce = true, limited = null, down = false;
@@ -65,11 +70,12 @@ function fakeADP(url) {
     for (const id of ids) for (const city of cities) {
       const s = series(id, city);
       if (!s.length) continue;
-      const p = s[s.length - 1].price, at = iso(now - ageOf(id, city) * HOUR), bm = city === "Black Market";
+      const pl = PLANT.get(id + "|" + city) || {};
+      const p = s[s.length - 1].price, at = iso(now - (pl.ageH ?? ageOf(id, city)) * HOUR), bm = city === "Black Market";
       const spread = 0.75 + (hash(city + id) % 21) / 100; // best buy order 75-95% of the last sale
       rows.push({ item_id: id, city, quality: 1,
-        sell_price_min: bm ? 0 : Math.round(p * 1.03), sell_price_min_date: bm ? "0001-01-01T00:00:00" : at,
-        buy_price_max: Math.round(p * (bm ? 1 : spread)), buy_price_max_date: at });
+        sell_price_min: pl.sell ?? (bm ? 0 : Math.round(p * 1.03)), sell_price_min_date: bm ? "0001-01-01T00:00:00" : at,
+        buy_price_max: pl.buy ?? Math.round(p * (bm ? 1 : spread)), buy_price_max_date: at });
     }
     return respond(200, rows);
   }
@@ -89,6 +95,46 @@ globalThis.albionDesktop = {
   prices: async (ids) => (ids.includes(CLIENT.id) ? [{ id: CLIENT.id, city: CLIENT.city, sell: 1234, sellAt: now - 60e3, buy: 0, buyAt: 0 }] : []),
 };
 const AB = loadAB({ net: fakeADP });
+
+/* ---------- the planted order books ----------
+   Each market's range comes from the same sales the app will load (`sold` in market.js: the calibrated 80% range for
+   today, a day past the last full one), so a planted order sits a known way inside or outside it. */
+await Promise.all([AB.cat.ready(), AB.conf.ready()]);
+const asOf = today0 - DAY;
+const saleOf = (id, city) => { const st = AB.conf.seriesStats(series(id, city), asOf); return st.pred && st.n >= 3 ? { st, ...AB.conf.range(st, 1), S: st.pred } : null; };
+const KEEP = 1 - 0.04 - 0.025, PAY = 1.025; // a sell order keeps this after premium tax and the listing fee; a buy order costs this
+const pairs = [];
+for (const id of Object.keys(snap.s)) {
+  if (!/^T[4-8]_(PLANKS|METALBAR|LEATHER|CLOTH|STONEBLOCK)/.test(id)) continue;
+  for (const city of ["Lymhurst", "Martlock", "Bridgewatch", "Thetford", "Fort Sterling"]) {
+    const s = saleOf(id, city);
+    if (s && s.st.v14 >= 10 && s.st.n >= 12) pairs.push({ id, city, s, w: s.hi / s.lo });
+  }
+}
+pairs.sort((a, b) => a.w - b.w);
+/* a steady market, too narrow to flip inside what sells: a buy order at 1% of the price and a sell order at three times
+   it, which the book alone would score as a flip worth hundreds of times its cost */
+const STEADY = pairs.find((x) => x.s.hi * KEEP < x.s.lo * PAY);
+/* the widest markets: one with both orders just inside what sells (a real flip), one with both far outside it */
+const [WIDE, BAITED] = pairs.slice(-2).reverse();
+plant(STEADY.id, STEADY.city, { buy: Math.round(STEADY.s.S * 0.01), sell: Math.round(STEADY.s.S * 3) });
+plant(WIDE.id, WIDE.city, { buy: Math.round(WIDE.s.lo * 1.01), sell: Math.round(WIDE.s.hi * 0.99) });
+plant(BAITED.id, BAITED.city, { buy: Math.round(BAITED.s.S * 0.01), sell: Math.round(BAITED.s.S * 3) });
+/* gear the Black Market pays the most over Caerleon for: a Caerleon sell order at a fifth of what it sells for (bought
+   already, or a mistake) and a Black Market buy order at three times what it has paid (filled already) */
+let GEAR = null;
+for (const id of AB.market.universe().gear) {
+  const c = saleOf(id, "Caerleon"), b = saleOf(id, "Black Market");
+  if (!c || !b || c.st.n < 7 || b.st.n < 7) continue;
+  const edge = Math.floor(b.hi) * 0.96 - Math.ceil(c.lo); // what the play earns on the range's edges
+  if (edge > 0.1 * c.lo && (!GEAR || b.S / c.S > GEAR.r)) GEAR = { id, c, b, r: b.S / c.S };
+}
+plant(GEAR.id, "Caerleon", { sell: Math.round(GEAR.c.S * 0.2) });
+plant(GEAR.id, "Black Market", { buy: Math.round(GEAR.b.S * 3) });
+/* a busy market with no spike in its sales, and a sell order at twice the price */
+const CALM = pairs.find((x) => x !== STEADY && x !== WIDE && x !== BAITED && x.s.st.m14 >= 500 && Math.abs(Math.log(x.s.st.lastPrice / x.s.st.m14)) < 0.1 && x.s.st.ageDays <= 1);
+plant(CALM.id, CALM.city, { sell: Math.round(CALM.s.st.lastPrice * 2) });
+
 const M = await AB.market.load({});
 const R = AB.scan.run(M);
 
@@ -118,20 +164,110 @@ test("history is only fetched for items that could be part of a play", () => {
   for (const id of U.ench) assert.ok(historyIds.has(id), `${id} history`);
 });
 
-test("live order books unlock order flips, priced one silver inside the spread", () => {
+test("live order books unlock order flips, each order one silver inside the book or at the edge of what sells", () => {
   const flips = R.byKind.flip;
   assert.ok(flips.length > 0, "some fake order books are wide enough to flip");
   for (const o of flips) {
-    const r = M.P[o.item][o.from];
-    assert.equal(o.legs[0].fixed, r.buy + 1);
-    assert.ok(Math.abs(o.unitCost - (r.buy + 1) * (1 + AB.store.setupFee)) < 1e-9);
+    const r = M.P[o.item][o.from], s = M.sold(o.item, o.from);
+    const bid = Math.max(r.buy + 1, Math.ceil(s.lo)), ask = Math.min(r.sell - 1, Math.floor(s.hi));
+    assert.equal(o.legs[0].fixed, bid, `${o.key}: the buy order`);
+    assert.equal(o.legs[1].cap, ask, `${o.key}: the sell order`);
+    assert.ok(bid < s.S, `${o.key}: a buy order under what it sells for`);
+    assert.ok(Math.abs(o.unitCost - bid * (1 + AB.store.setupFee)) < 1e-9);
+    assert.equal(o.checks.length, (bid > r.buy + 1) + (ask < r.sell - 1), `${o.key}: a note for each order priced from sales`);
     for (const side of ["buy", "sell"]) assert.ok(M.listing(o.item, o.from, side).ageH <= 6, "both sides of the book are fresh");
+    /* the simulation never sells above your order's price */
+    assert.ok(AB.scan.samples(o, 300).every((x) => x <= o.qty * (ask * (1 - AB.store.tax() - AB.store.setupFee) - bid * (1 + AB.store.setupFee)) + 1e-6), o.key);
   }
+  /* both orders inside what sells: the book as it is, and full marks for matching sales */
+  const wide = flips.find((o) => o.key === `flip|${WIDE.id}|${WIDE.city}`);
+  assert.ok(wide, `${WIDE.id} in ${WIDE.city} flips`);
+  assert.deepEqual([wide.legs[0].fixed, wide.legs[1].cap, wide.checks.length, wide.factors.agree], [M.P[WIDE.id][WIDE.city].buy + 1, M.P[WIDE.id][WIDE.city].sell - 1, 0, 1]);
+});
+
+test("orders set far off the price to catch a careless player never make a flip", () => {
+  /* a steady market: at 1% and three times the price the book alone is a flip of hundreds of times its cost; inside
+     what sells there's nothing to earn after fees */
+  const r = M.P[STEADY.id][STEADY.city];
+  assert.ok(r.sell * KEEP > 100 * r.buy * PAY, "the book alone would flip");
+  assert.ok(!R.opps.some((o) => o.key === `flip|${STEADY.id}|${STEADY.city}`), `${STEADY.id} in ${STEADY.city}`);
+  /* a market wide enough to flip inside what sells: planned at the edges, never at the planted orders */
+  const o = R.byKind.flip.find((x) => x.key === `flip|${BAITED.id}|${BAITED.city}`), s = M.sold(BAITED.id, BAITED.city);
+  assert.ok(o, `${BAITED.id} in ${BAITED.city} still flips inside what sells`);
+  assert.deepEqual([o.legs[0].fixed, o.legs[1].cap], [Math.ceil(s.lo), Math.floor(s.hi)]);
+  assert.equal(o.checks.length, 2);
+  assert.match(o.checks[0], /best buy order .* is below the range it sells in .* waits for someone selling in a hurry.*Your order is planned at/);
+  assert.match(o.checks[1], /cheapest sell order .* is above the range it sells in .* waits for someone buying in a hurry/);
+  assert.ok(o.factors.agree < 0.01, "and the orders don't match sales");
+  assert.match(o.steps[0], /not just over the best one/);
+});
+
+test("an order out of line with sales is priced at the edge of what sells, on the side that flatters the play only", () => {
+  const { id } = GEAR, l = M.listing(id, "Caerleon", "sell"), s = M.sold(id, "Caerleon");
+  assert.deepEqual(s, { S: GEAR.c.S, lo: GEAR.c.lo, hi: GEAR.c.hi }, "the range comes from the loaded sales");
+  const pay = M.checked(l, "pay"), get = M.checked(l, "get");
+  assert.deepEqual([pay.price, pay.raw, pay.off], [Math.ceil(s.lo), l.price, -1], "too cheap to pay");
+  assert.deepEqual([get.price, get.off], [l.price, 0], "but a low price you'd get stands as it is");
+  const inside = M.checked({ ...l, price: Math.round(s.S) }, "pay", 1);
+  assert.deepEqual([inside.price, inside.raw, inside.off], [Math.round(s.S) + 1, Math.round(s.S), 0], "inside the range, the order as it is (one silver over)");
+  const none = M.U.gear.map((x) => M.listing(x, "Brecilien", "sell")).find((x) => x && !M.sold(x.id, x.city));
+  assert.deepEqual([M.checked(none, "pay").price, M.checked(none, "pay").sale], [none.price, null], "too few sales to check: as it is");
+  /* the plays: a Black Market flip of the planted item buys at the bottom of Caerleon's range and sells at the top of
+     the Black Market's, both priced from sales in the simulation, with a note for each */
+  const o = R.opps.find((x) => x.key === `bm|${id}`), b = M.sold(id, "Black Market");
+  assert.ok(o, "the Black Market flip");
+  assert.deepEqual(o.legs.map((lg) => [lg.l.price, lg.l.raw, lg.mode, lg.point]), [[Math.ceil(s.lo), l.price, "model", Math.ceil(s.lo)], [Math.floor(b.hi), M.P[id]["Black Market"].buy, "model", Math.floor(b.hi)]]);
+  assert.match(o.checks[0], /most likely been bought already/);
+  assert.match(o.checks[1], /Black Market's buy order .* most likely been filled already/);
+  assert.ok(o.factors.agree < 0.05);
+  assert.match(o.factorList.find((f) => f.key === "agree").note, /so the plan prices it from sales instead/);
+  /* every play that sells it to the Black Market sells at the top of what the Black Market has paid */
+  for (const p of R.opps) for (const lg of p.legs) if (lg.id === id && lg.city === "Black Market") assert.equal(lg.l.price, Math.floor(b.hi), p.key);
+});
+
+test("every play's prices are checked, and none counts on an order outside what sells", () => {
+  let moved = 0;
+  for (const o of R.opps) {
+    if (o.kind === "dip") continue; // a panic buy is a listing under the price on purpose (see scanDips)
+    const off = o.legs.filter((lg) => lg.l?.off);
+    moved += off.length;
+    assert.equal(o.checks.length, off.length, o.key);
+    for (const lg of o.legs) {
+      if (!lg.l) continue;
+      assert.ok("sale" in lg.l, `${o.key}: ${lg.label} was checked`);
+      const s = lg.l.sale;
+      if (!s) continue;
+      const pays = lg.role !== "sell";
+      if (pays) assert.ok(lg.l.price >= s.lo - 1e-9, `${o.key}: ${lg.label} pays ${lg.l.price} under ${s.lo}`);
+      else assert.ok(lg.l.price <= s.hi + 1e-9, `${o.key}: ${lg.label} gets ${lg.l.price} over ${s.hi}`);
+      if (lg.l.off && !lg.own) assert.deepEqual([lg.mode, lg.point], ["model", lg.l.price], `${o.key}: priced from sales`);
+    }
+  }
+  assert.ok(moved > 10, `${moved} orders priced from sales`);
+});
+
+test("a spike counts only as far as sales confirm it, and the Trust page's counts match the book", () => {
+  const r = M.P[CALM.id][CALM.city];
+  assert.ok(Math.log(r.sell) - CALM.s.st.lm14 > 0.5, "the book alone shows a spike");
+  assert.ok(!R.alerts.some((a) => a.id === CALM.id && a.city === CALM.city), "but its sales don't");
+  for (const a of R.alerts) {
+    const st = M.stat(a.id, a.city);
+    assert.equal(a.price, Math.min(a.listing, st.lastPrice), `${a.id} ${a.city}`);
+    assert.ok(Math.abs(a.dev - (Math.log(a.price) - st.lm14)) < 1e-12);
+  }
+  const by = Object.fromEntries(AB.market.saleCheckByCity(M).map((c) => [c.city, c]));
+  for (const [c, n] of Object.entries(by)) assert.ok(n.low <= n.buy && n.high <= n.sell, c);
+  const count = (city, side, out) => Object.keys(M.P).filter((id) => { const r = M.P[id][city], s = r && M.sold(id, city); return s && r[side] && out(r[side], s); }).length;
+  assert.equal(by[BAITED.city].low, count(BAITED.city, "buy", (p, s) => p < s.lo));
+  assert.equal(by[BAITED.city].high, count(BAITED.city, "sell", (p, s) => p > s.hi));
+  assert.equal(by["Black Market"].sell, 0, "the Black Market has buy orders only");
+  assert.ok(by["Black Market"].buy > 100 && by[BAITED.city].low >= 1 && by[BAITED.city].high >= 1);
 });
 
 test("freshness comes from listing ages, and stale listings are left out of hauls", () => {
   for (const o of R.opps) {
-    const listed = o.legs.filter((lg) => lg.l && lg.mode !== "model" && lg.fixed == null && !lg.custom);
+    /* the orders a play takes its prices from: your own orders in a flip, and any other order counted as it is */
+    const listed = o.legs.filter((lg) => lg.l && (lg.book ?? (lg.mode !== "model" && lg.fixed == null && !lg.custom)));
     if (!listed.length) continue;
     const oldest = Math.max(...listed.map((lg) => lg.l.ageH));
     assert.ok(Math.abs(o.factors.fresh - AB.conf.F.fresh(oldest)) < 0.01, `${o.key}: fresh ${o.factors.fresh} vs ${oldest} h`);

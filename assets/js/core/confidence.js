@@ -112,6 +112,9 @@ AB.conf = (() => {
     liquidity: (v) => (v == null ? 0.25 : 1 - Math.exp(-Math.max(0, v) / 8)),
     history: (st) => (!st || !st.n ? 0.15 : Math.min(1, 0.25 + 0.75 * (st.n / 14)) * (st.calibrated ? 1 : 0.6)),
     agree: (listing, pred) => (!listing || !pred ? 0.75 : Math.exp(-Math.abs(Math.log(listing / pred)) / 0.15)),
+    /* the same scale for an order that should sit inside a range (an order flip's two orders, against the range the
+       item sold in): 1 inside it, falling with the distance past either end */
+    inRange: (p, lo, hi) => Math.exp(-Math.max(0, Math.log(lo / p), Math.log(p / hi)) / 0.15),
   };
   const WEIGHTS = { fresh: 0.2, liquidity: 0.2, history: 0.1, agree: 0.15, odds: 0.2, evidence: 0.15 };
   const FACTOR_NAMES = { fresh: "Fresh prices", liquidity: "Busy market", history: "Enough history", agree: "Listing matches sales", odds: "Chance it pays", evidence: "Backtest evidence" };

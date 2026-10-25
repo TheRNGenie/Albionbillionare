@@ -31,17 +31,43 @@ AB.scan = (() => {
   const histSpan = () => { const src = conf.insights.source; return `${AB.util.month(Date.parse(src.from))}–${AB.util.month(Date.parse(src.to))}`; };
 
   /* What a price turns out to be when you act. A listing still holds with a chance equal to its freshness; otherwise
-     the price is a draw from the calibrated range for that day. Sell orders you place yourself are pure model draws. */
+     the price is a draw from the calibrated range for that day. Sell orders you place yourself, and orders the sale
+     check found out of line with sales, are pure model draws; a sell order with a set price (`cap`) sells at that
+     price, or at the day's price when that's lower. */
   function legDraw(lg, r) {
     if (lg.fixed != null) return lg.fixed;
     if (lg.custom) return lg.custom(r);
     if (lg.mode !== "model" && lg.l && r() < lg.l.fresh) return lg.l.price;
     if (lg.sample === undefined) lg.sample = conf.sampler(lg.st, lg.h);
-    if (lg.sample) return lg.sample(r);
+    if (lg.sample) return lg.cap != null ? Math.min(lg.cap, lg.sample(r)) : lg.sample(r);
     /* no recent sales to calibrate against: the listing with a wide, uncalibrated spread */
     return lg.l ? lg.l.price * Math.exp(0.35 * S.normal(r) * Math.sqrt(Math.max(1, lg.h || 1))) : null;
   }
   const pointOf = (lg) => lg.fixed ?? lg.point ?? (lg.mode === "model" ? lg.st?.pred ?? lg.l?.price : lg.l?.price ?? lg.st?.pred) ?? null;
+
+  /* A leg's price fields from an order the sale check has seen (market.js `checked`): the order as it is, or, when
+     it was out of line with what the item sold for, the edge of the sale range for the plan and the calibrated sale
+     model for the simulation. */
+  const fromOrder = (l) => (l.off ? { l, mode: "model", point: l.price } : { l });
+  /* Does a leg's price come from an order on the book (so its age counts as the play's freshness)? Orders out of line
+     with sales and sell orders you list at the going rate don't; your own orders in an order flip set their price
+     from the book and say so (`book`). */
+  const booked = (lg) => !!lg.l && (lg.book ?? (lg.mode !== "model" && lg.fixed == null && !lg.custom));
+  /* What the sale check changed about a leg's order, in words, or null when the order counted as it is. */
+  function checkNote(lg) {
+    const l = lg.l;
+    if (!l?.off) return null;
+    const bm = l.city === BM, under = l.off < 0;
+    const order = l.side === "buy" ? (bm ? "The Black Market's buy order" : "The best buy order") : "The cheapest sell order";
+    const why = l.side === "buy"
+      ? (under ? "an order that low mostly waits for someone selling in a hurry, so few sell to it" : "it has most likely been filled already")
+      : (under ? "it has most likely been bought already, or was a mistake" : "an order that high mostly waits for someone buying in a hurry, so few buy from it");
+    const range = `the range it ${bm ? "has been bought at there" : "sells in"} (${silver(l.sale.lo)} to ${silver(l.sale.hi)}; about ${silver(l.sale.S)} on a typical day)`;
+    const at = `${lg.own ? "Your order is planned" : "Planned"} at ${silver(l.price)}.`;
+    /* the snapshot has no orders: its "listing" is the last day's average sale, so an odd one is one odd day */
+    if (l.src === "snapshot") return `In the saved snapshot, the last day's average sale for ${cat.label(l.id)}${bm ? " at the Black Market" : ` in ${l.city}`}, ${silver(l.raw)}, is ${under ? "below" : "above"} ${range}: one odd day isn't a price to count on. ${at}`;
+    return `${order} for ${cat.label(l.id)}${bm ? "" : ` in ${l.city}`}, ${silver(l.raw)}, is ${under ? "below" : "above"} ${range}: ${why}. ${at}`;
+  }
 
   /* Run the simulation, size the batch, score the confidence. */
   function finish(M, o) {
@@ -60,15 +86,17 @@ AB.scan = (() => {
     qty = Math.max(1, Math.floor(qty));
     const hours = typeof o.hours === "function" ? o.hours(qty) : o.hours;
     const total = { p10: mc.p10 * qty, p25: mc.p25 * qty, p50: mc.p50 * qty, p75: mc.p75 * qty, p90: mc.p90 * qty, mean: mc.mean * qty };
-    const listed = o.legs.filter((lg) => lg.l && lg.mode !== "model" && lg.fixed == null && !lg.custom);
+    const listed = o.legs.filter(booked);
     const oldest = listed.reduce((a, lg) => (lg.l.ageH != null && (a == null || lg.l.ageH > a.l.ageH) ? lg : a), null);
     const fresh = listed.length ? Math.min(...listed.map((lg) => lg.l.fresh)) : M.fresh(M.medianAgeH);
     const withSt = o.legs.filter((lg) => lg.st && !lg.custom);
     const thin = withSt.reduce((a, lg) => (!a || (lg.st.n || 0) < (a.st.n || 0) ? lg : a), null);
     const hist = withSt.length ? Math.min(...withSt.map((lg) => F.history(lg.st))) : 0.15;
-    const ag = listed.filter((lg) => lg.st?.pred);
-    const worst = ag.reduce((a, lg) => { const d = Math.abs(Math.log(lg.l.price / lg.st.pred)); return !a || d > a.d ? { lg, d } : a; }, null);
-    const agree = o.agree !== undefined ? o.agree : ag.length ? Math.exp(ag.reduce((a, lg) => a + Math.log(Math.max(0.02, F.agree(lg.l.price, lg.st.pred))), 0) / ag.length) : null;
+    /* listings against recent sales, at the order's own price (an order the sale check moved counts as it was) */
+    const ag = o.legs.filter((lg) => lg.st?.pred && (listed.includes(lg) || lg.l?.off));
+    const raw = (lg) => lg.l.raw ?? lg.l.price;
+    const worst = ag.reduce((a, lg) => { const d = Math.abs(Math.log(raw(lg) / lg.st.pred)); return !a || d > a.d ? { lg, d } : a; }, null);
+    const agree = o.agree !== undefined ? o.agree : ag.length ? Math.exp(ag.reduce((a, lg) => a + Math.log(Math.max(0.02, F.agree(raw(lg), lg.st.pred))), 0) / ag.length) : null;
     const f = { fresh, liquidity: F.liquidity(o.vol), history: hist, agree, odds: mc.pWin, evidence: o.evidence?.f ?? NO_TEST };
     const score = conf.score(f);
     const notes = {
@@ -77,7 +105,7 @@ AB.scan = (() => {
         : `Saved snapshot; its last day is ${dateFull(M.asOf)}.`,
       liquidity: o.vol != null ? `${o.vol < 10 ? o.vol.toFixed(1) : int(o.vol)} sold a day at ${o.volAt || o.to} (14-day median).` : "No sales count for this market.",
       history: thin ? `${thin.st.n || 0} of the last 14 days have sales for ${AB.cat.shortName(thin.id)} in ${thin.city}.` : "",
-      agree: o.agreeNote || (worst ? `The furthest listing is ${pct(Math.exp(worst.d) - 1)} ${worst.lg.l.price > worst.lg.st.pred ? "above" : "below"} its 7-day sale median (${worst.lg.city}).` : ""),
+      agree: o.agreeNote || (worst ? `The furthest listing is ${pct(Math.exp(worst.d) - 1)} ${raw(worst.lg) > worst.lg.st.pred ? "above" : "below"} its 7-day sale median (${worst.lg.city})${worst.lg.l.off ? ", so the plan prices it from sales instead" : ""}.` : ""),
       odds: `${pct(mc.pWin)} of 400 simulated outcomes made a profit.`,
       evidence: o.evidence?.text || "No backtest covers this kind of play yet.",
     };
@@ -85,6 +113,7 @@ AB.scan = (() => {
       ...o, meta: KINDS[o.kind], point, mc, qty, limit, caps, hours, hoursFn: o.hours, total, unitCost,
       perHour: total.mean / hours, capital: unitCost * qty, roi: mc.mean / unitCost,
       factors: f, score, tier: conf.tier(score), factorList: conf.factorList(f, notes), rank: (Math.max(0, total.mean) / hours) * (score / 100) ** 2,
+      checks: o.legs.map(checkNote).filter(Boolean),
     };
   }
 
@@ -95,7 +124,7 @@ AB.scan = (() => {
   function scanBM(M, out) {
     const tx = store.tax();
     for (const id of M.U.gear) {
-      const sell = M.listing(id, BM, "buy"), buy = M.listing(id, CAER, "sell");
+      const sell = M.checked(M.listing(id, BM, "buy"), "get"), buy = M.checked(M.listing(id, CAER, "sell"), "pay");
       if (!sell || !buy) continue;
       const net = sell.price * (1 - tx) - buy.price;
       if (net <= 0 || net / buy.price < 0.03) continue;
@@ -107,8 +136,8 @@ AB.scan = (() => {
         key: `bm|${id}`, kind: "bm", item: id, from: CAER, to: BM, zone: "city",
         title: `Flip ${cat.label(id)} to the Black Market`,
         legs: [
-          { role: "buy", id, city: CAER, l: buy, st: stC, h: M.h0, label: "Buy in Caerleon" },
-          { role: "sell", id, city: BM, l: sell, st: stB, h: M.h0, label: "Black Market buy order" },
+          { role: "buy", id, city: CAER, ...fromOrder(buy), st: stC, h: M.h0, label: "Buy in Caerleon" },
+          { role: "sell", id, city: BM, ...fromOrder(sell), st: stB, h: M.h0, label: "Black Market buy order" },
         ],
         value: (d) => d[1] * (1 - tx) - d[0],
         unitCost: buy.price, vol: stB.v14, volAt: "the Black Market",
@@ -132,7 +161,7 @@ AB.scan = (() => {
     for (const id of M.U.gear) {
       const up = cat.upgrade(id);
       if (!up) continue;
-      const sell = M.listing(id, BM, "buy");
+      const sell = M.checked(M.listing(id, BM, "buy"), "get");
       if (!sell) continue;
       const base = M.cheapest(up.from, places), mat = M.cheapest(up.mat, places);
       if (!base || !mat) continue;
@@ -151,9 +180,9 @@ AB.scan = (() => {
         key: `forge|${id}`, kind: "forge", item: id, from: base.city, to: BM, zone,
         title: `Forge ${cat.label(id)} from T${tier}.${lvl - 1} with ${up.count} ${matName}`,
         legs: [
-          { role: "buy", id: up.from, city: base.city, l: base, st: M.stat(up.from, base.city), h: M.h0, label: `Buy the T${tier}.${lvl - 1} item` },
-          { role: "mat", id: up.mat, city: mat.city, l: mat, st: M.stat(up.mat, mat.city), h: M.h0, n: up.count, label: `${up.count} × T${tier} ${matName}` },
-          { role: "sell", id, city: BM, l: sell, st: stB, h: M.h0 + (zone === "red" ? 1 : 0), label: "Black Market buy order" },
+          { role: "buy", id: up.from, city: base.city, ...fromOrder(base), st: M.stat(up.from, base.city), h: M.h0, label: `Buy the T${tier}.${lvl - 1} item` },
+          { role: "mat", id: up.mat, city: mat.city, ...fromOrder(mat), st: M.stat(up.mat, mat.city), h: M.h0, n: up.count, label: `${up.count} × T${tier} ${matName}` },
+          { role: "sell", id, city: BM, ...fromOrder(sell), st: stB, h: M.h0 + (zone === "red" ? 1 : 0), label: "Black Market buy order" },
         ],
         value: (d) => d[2] * (1 - tx) - d[0] - up.count * d[1],
         unitCost: cost, vol: stB.v14, volAt: "the Black Market",
@@ -180,7 +209,7 @@ AB.scan = (() => {
       /* safe: best royal pair by gap between the source listing and the destination's typical sale price */
       let best = null;
       for (const a of cat.ROYAL) {
-        const l = M.listing(id, a, "sell");
+        const l = M.checked(M.listing(id, a, "sell"), "pay");
         if (!l || (M.live && l.ageH > 48)) continue;
         for (const b of cat.ROYAL) {
           if (a === b) continue;
@@ -198,7 +227,7 @@ AB.scan = (() => {
           key: `haul|${id}|${a}|${b}`, kind: "haul", item: id, from: a, to: b, zone: "safe",
           title: `Haul ${cat.label(id)} from ${a} to ${b}`,
           legs: [
-            { role: "buy", id, city: a, l, st: M.stat(id, a), h: M.h0, label: `Buy in ${a}` },
+            { role: "buy", id, city: a, ...fromOrder(l), st: M.stat(id, a), h: M.h0, label: `Buy in ${a}` },
             { role: "sell", id, city: b, mode: "model", st, h: M.h0 + 2, label: `List in ${b}` },
           ],
           value: (d) => d[1] * (1 - fee) - d[0],
@@ -216,12 +245,12 @@ AB.scan = (() => {
       }
       /* red: cheapest royal listing -> Black Market buy order */
       if (cat.parse(id).kind !== "gear") continue;
-      const sell = M.listing(id, BM, "buy");
+      const sell = M.checked(M.listing(id, BM, "buy"), "get");
       if (!sell) continue;
       const src = M.cheapest(id, cat.ROYAL, M.live ? 48 : 1e9);
       if (!src) continue;
       const g = Math.log(sell.price / src.price);
-      const caerBuy = M.listing(id, CAER, "sell");
+      const caerBuy = M.checked(M.listing(id, CAER, "sell"), "pay");
       if (g <= conf.insights.survival.edges[0] || (caerBuy && caerBuy.price <= src.price * 1.05)) continue;
       const stB = M.stat(id, BM);
       if ((stB.n || 0) < 4) continue;
@@ -230,8 +259,8 @@ AB.scan = (() => {
         key: `redhaul|${id}|${src.city}`, kind: "redhaul", item: id, from: src.city, to: BM, zone: "red",
         title: `Run ${cat.label(id)} from ${src.city} to the Black Market`,
         legs: [
-          { role: "buy", id, city: src.city, l: src, st: M.stat(id, src.city), h: M.h0, label: `Buy in ${src.city}` },
-          { role: "sell", id, city: BM, l: sell, st: stB, h: M.h0 + 1, label: "Black Market buy order" },
+          { role: "buy", id, city: src.city, ...fromOrder(src), st: M.stat(id, src.city), h: M.h0, label: `Buy in ${src.city}` },
+          { role: "sell", id, city: BM, ...fromOrder(sell), st: stB, h: M.h0 + 1, label: "Black Market buy order" },
         ],
         value: (d) => d[1] * (1 - tx) - d[0],
         unitCost: src.price, vol: stB.v14, volAt: "the Black Market",
@@ -260,9 +289,14 @@ AB.scan = (() => {
         if (!l) continue;
         const dev = Math.log(l.price) - st.lm14;
         if (dev >= 0.25) {
-          /* spikes worth acting on: a busy market, a price that matters, and not so far out that it's likely a typo */
-          const row = conf.rebound(dev, st.v14);
-          if (row && row.n && dev <= Math.log(3) && st.v14 >= 10 && st.m14 >= 500) alerts.push({ id, city, dev, price: l.price, typical: st.m14, row, ageH: l.ageH, v14: st.v14 });
+          /* A spike counts only as far as sales confirm it: a sell order far over the price is often one nobody buys
+             from (set high for a careless buyer), so the spike is the lower of the listing and the last day's average
+             sale, when the item sold that day or the day before. Worth acting on: a busy market, a price that matters,
+             and not so far out that it's likely a typo. */
+          const sold = st.ageDays <= 1 ? Math.min(l.price, st.lastPrice) : null;
+          const sdev = sold ? Math.log(sold) - st.lm14 : 0;
+          const row = sdev >= 0.25 ? conf.rebound(sdev, st.v14) : null;
+          if (row && row.n && sdev <= Math.log(3) && st.v14 >= 10 && st.m14 >= 500) alerts.push({ id, city, dev: sdev, price: sold, listing: l.price, typical: st.m14, row, ageH: l.ageH, v14: st.v14 });
           continue;
         }
         if (dev > -0.15) continue;
@@ -317,7 +351,7 @@ AB.scan = (() => {
         const focus = cat.focusCost(rec.focus, eff);
         const perDay = Math.floor(store.get("focus") / Math.max(1, focus));
         if (perDay < 1) continue;
-        const legs = buys.map((b) => ({ role: "mat", id: b.m.id, city: b.l.city, l: b.l, st: M.stat(b.m.id, b.l.city), h: M.h0, n: b.m.n, label: `${b.m.n} × ${cat.label(b.m.id)}` }));
+        const legs = buys.map((b) => ({ role: "mat", id: b.m.id, city: b.l.city, ...fromOrder(b.l), st: M.stat(b.m.id, b.l.city), h: M.h0, n: b.m.n, label: `${b.m.n} × ${cat.label(b.m.id)}` }));
         legs.push({ role: "sell", id, city: dest.c, mode: "model", st: dest.st, h: M.h0 + 2, label: `List in ${dest.c}` });
         const k = legs.length - 1;
         const value = (d) => d[k] * (1 - fee) - (1 - RR) * legs.slice(0, k).reduce((a, lg, i) => a + d[i] * lg.n, 0);
@@ -347,7 +381,7 @@ AB.scan = (() => {
     for (const id of M.U.gear) {
       const rec = cat.recipe(id);
       if (!rec || rec.amount !== 1) continue;
-      const sell = M.listing(id, BM, "buy");
+      const sell = M.checked(M.listing(id, BM, "buy"), "get");
       if (!sell) continue;
       const city = cat.craftCity(id) || "Martlock";
       const rr = cat.craftCity(id) ? cat.RETURN.craftBonus.none : cat.RETURN.city.none;
@@ -358,8 +392,8 @@ AB.scan = (() => {
       if (net <= 0 || net / cost < 0.05) continue;
       const stB = M.stat(id, BM);
       if ((stB.n || 0) < 4) continue;
-      const legs = buys.map((b) => ({ role: "mat", id: b.m.id, city: b.l.city, l: b.l, st: M.stat(b.m.id, b.l.city), h: M.h0, n: b.m.n, noReturn: b.m.noReturn, label: `${b.m.n} × ${cat.label(b.m.id)}` }));
-      legs.push({ role: "sell", id, city: BM, l: sell, st: stB, h: M.h0 + 1, label: "Black Market buy order" });
+      const legs = buys.map((b) => ({ role: "mat", id: b.m.id, city: b.l.city, ...fromOrder(b.l), st: M.stat(b.m.id, b.l.city), h: M.h0, n: b.m.n, noReturn: b.m.noReturn, label: `${b.m.n} × ${cat.label(b.m.id)}` }));
+      legs.push({ role: "sell", id, city: BM, ...fromOrder(sell), st: stB, h: M.h0 + 1, label: "Black Market buy order" });
       const k = legs.length - 1;
       const value = (d) => d[k] * (1 - tx) - legs.slice(0, k).reduce((a, lg, i) => a + d[i] * lg.n * (lg.noReturn ? 1 : 1 - rr), 0);
       const zone = city === CAER ? "city" : "red";
@@ -382,35 +416,50 @@ AB.scan = (() => {
   }
 
   /* ---------------------------------------------------------------- 8. Same-city order flips (live only) */
+  /* A flip earns the gap between your buy order and your sell order, but only when someone sells to the one and
+     someone buys from the other. The best buy order and the cheapest sell order show where the order book is, not
+     always where trades happen (a buy order far under the price waits for a careless seller, a sell order far over it
+     for a careless buyer), so both are checked against what the item sold for there (market.js `checked`): your buy
+     order goes in at least at the low end of that range, and your sell order at most at its high end. In the
+     simulation your sell order sells at its price, or at the day's price when that's lower. */
   function scanFlips(M, out) {
     if (!M.live) return;
     const tx = store.tax(), sf = store.setupFee;
     const ids = [...M.U.gear, ...M.U.res];
     for (const id of ids) for (const city of [...cat.ROYAL, CAER]) {
-      const r = M.P[id]?.[city];
-      if (!r || !r.buy || !r.sell) continue;
       const bl = M.listing(id, city, "buy"), sl = M.listing(id, city, "sell");
       if (!bl || !sl || bl.ageH > 6 || sl.ageH > 6) continue;
-      const bid = r.buy + 1, ask = r.sell - 1;
-      const net = ask * (1 - tx - sf) - bid * (1 + sf);
-      if (net <= 0 || net / bid < 0.06) continue;
       const st = M.stat(id, city);
       if ((st.v14 || 0) < 3) continue;
+      const bid = M.checked(bl, "pay", 1), ask = M.checked(sl, "get", -1), sale = bid.sale;
+      /* nothing to check the book against: no flip; nor with a buy order at or over what the item sells for, which
+         leaves nothing once fees are paid (a quick skip: the simulation would drop it too) */
+      if (!sale || bid.price >= sale.S) continue;
+      const net = ask.price * (1 - tx - sf) - bid.price * (1 + sf);
+      if (net <= 0 || net / bid.price < 0.06) continue;
+      /* how far the book sits from the sales: the order further outside the range sets the "listing matches sales" check */
+      const fit = [F.inRange(bl.price, sale.lo, sale.hi), F.inRange(sl.price, sale.lo, sale.hi)];
+      const worse = fit[0] <= fit[1] ? bl : sl;
+      const outBy = Math.max(sale.lo / worse.price, worse.price / sale.hi) - 1;
       const o = finish(M, {
         key: `flip|${id}|${city}`, kind: "flip", item: id, from: city, to: city, zone: city === CAER ? "city" : "safe",
         title: `Order-flip ${cat.label(id)} in ${city}`,
         legs: [
-          { role: "buy", id, city, fixed: bid, label: "Your buy order" },
-          { role: "sell", id, city, l: sl, st, h: M.h0 + 2, label: "Your sell order" },
+          { role: "buy", id, city, fixed: bid.price, l: bid, st, book: true, own: true, label: "Your buy order" },
+          { role: "sell", id, city, l: ask, st, h: M.h0 + 2, mode: "model", cap: ask.price, point: ask.price, book: true, own: true, label: "Your sell order" },
         ],
         value: (d) => d[1] * (1 - tx - sf) - d[0] * (1 + sf),
-        unitCost: bid * (1 + sf), vol: st.v14, volAt: city,
+        unitCost: bid.price * (1 + sf), vol: st.v14, volAt: city,
         caps: { market: volCap(st, 0.3) },
         hours: 0.3, lockDays: 2,
+        agree: Math.min(...fit),
+        agreeNote: outBy > 0 ? `The ${worse.side === "buy" ? "best buy order" : "cheapest sell order"} is ${pct(outBy)} ${worse.side === "buy" ? "under" : "over"} the range it sold in this week (${silver(sale.lo)} to ${silver(sale.hi)}).`
+          : `Both orders sit inside the range it sold in this week (${silver(sale.lo)} to ${silver(sale.hi)}).`,
         evidence: { f: NO_TEST_FLIP, text: "Not backtested: the history has daily averages, not order books, so fill odds are a guess from how much sells a day." },
         steps: [
-          `Place a buy order for ${cat.label(id)} in ${city} at ${silver(bid)} (2.5% fee).`,
-          `When it fills, list it at ${silver(ask)}, just under the cheapest sell order.`,
+          `Place a buy order for ${cat.label(id)} in ${city} at ${silver(bid.price)} (2.5% fee)${bid.off ? `, not just over the best one (${silver(bl.price)}): that one is below the range it sells in, so few sell to it` : ""}.`,
+          ask.off ? `When it fills, list it at ${silver(ask.price)}. The cheapest sell order (${silver(sl.price)}) is above the range it sells in, so it isn't the price to match.`
+            : `When it fills, list it at ${silver(ask.price)}, just under the cheapest sell order.`,
           `Re-check both orders every few hours; someone outbidding you by 1 silver ends the edge.`,
         ],
       });

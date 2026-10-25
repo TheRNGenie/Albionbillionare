@@ -113,14 +113,15 @@ test("a link with a broken escape still loads the app, and Markets says it names
 
 /* A price server that can be switched on, slowed down, or made to fail partway. Its answers are valid but empty (these
    tests are about which source the app ends up on, not the prices), except for any current prices a test puts in
-   `prices`, which every price request gets. */
+   `prices` and any sales history in `history`, which every request of that kind gets. */
 function server() {
-  const s = { online: false, delay: 0, failPrices: false, prices: [] };
+  const s = { online: false, delay: 0, failPrices: false, prices: [], history: [] };
   s.net = async (url) => {
     if (!s.online) throw new TypeError("offline");
     if (s.delay) await sleep(s.delay);
     if (url.includes("/gold.json")) return respond([{ price: 4000, timestamp: new Date().toISOString().slice(0, 19) }]);
     if (url.includes("/prices/")) { if (s.failPrices) throw new TypeError("connection reset"); return respond(s.prices); }
+    if (url.includes("/history/")) return respond(s.history);
     return respond([]);
   };
   return s;
@@ -194,6 +195,45 @@ test("a play that buys and sells in one market shows that market's chart once", 
   const charts = app.$$('.drawer [id^="d-leg"]');
   assert.equal(charts.length, 1);
   assert.match(charts[0].closest(".card").textContent, /Where you buy and sell/);
+  app.close();
+});
+
+/* ---------- the sale check: orders out of line with what sells ---------- */
+test("a play priced from sales says so in the list and in the play, with the price behind it", async () => {
+  const app = await boot();
+  const o = app.AB.state.R.opps.find((x) => x.checks.length && x.kind !== "dip");
+  assert.ok(o, "the snapshot has a play with a last day out of line with sales");
+  assert.match(app.AB.kit.oppRow(o, { min: 0, max: 1 }), /(a price|\d prices) out of line with sales/);
+  app.AB.kit.openOpp(o);
+  const d = app.$(".drawer");
+  assert.match(d.querySelector(".sale-check").textContent, /^Checked against what sold\. In the saved snapshot, the last day's average sale for .* one odd day isn't a price to count on\. Planned at /);
+  const leg = app.$$(".drawer .leg").find((x) => /\(from sales\)/.test(x.textContent));
+  assert.match(leg.querySelector(".l-off").textContent, /^Last day's average sale: .*, (below|above) the range it sells in$/);
+  await app.go("#/trust");
+  assert.match(app.$("#page").textContent, /Orders that don't match sales.*This needs live prices/);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("with live prices, Markets marks an order out of line with sales and Trust counts them by market", async () => {
+  const s = server();
+  s.online = true;
+  /* two weeks of planks selling near 1,000 in Lymhurst, and an order book of 10 to buy and 3,000 to sell */
+  const day0 = Date.parse(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
+  s.history = [{ location: "Lymhurst", item_id: "T5_PLANKS", quality: 1, data: Array.from({ length: 14 }, (_, k) => ({ item_count: 40, avg_price: Math.round(1000 * (1 + 0.03 * Math.sin(k))), timestamp: new Date(day0 - (14 - k) * 864e5).toISOString().slice(0, 19) })) }];
+  s.prices = [{ item_id: "T5_PLANKS", city: "Lymhurst", quality: 1, sell_price_min: 3000, sell_price_min_date: isoNow(), buy_price_max: 10, buy_price_max_date: isoNow() }];
+  const app = await boot({ net: s.net });
+  assert.equal(app.AB.state.M.live, true);
+  const sold = app.AB.state.M.sold("T5_PLANKS", "Lymhurst");
+  assert.ok(sold.lo > 10 && sold.hi < 3000);
+  await app.go("#/markets/T5_PLANKS");
+  await until(() => app.$('#m-grid tr[data-city="Lymhurst"]'));
+  assert.match(app.$('#m-grid tr[data-city="Lymhurst"]').textContent, /above what sells/);
+  await app.go("#/trust");
+  assert.ok(app.$("#t-bait svg"), "the chart is drawn");
+  const row = [...app.$$("#t-bait table tr")].find((tr) => /Lymhurst/.test(tr.textContent));
+  assert.deepEqual([...row.querySelectorAll("td")].map((td) => td.textContent), ["Lymhurst", "100.0%", "1", "100.0%", "1"]);
+  assert.deepEqual(app.errors, []);
   app.close();
 });
 

@@ -9,6 +9,9 @@ AB.market = (() => {
   const cat = AB.cat, api = AB.api, conf = AB.conf;
   const ev = AB.util.emitter();
   let M = null, pending = null, builds = 0;
+  /* Days with sales, of the last 14, that an item needs in a market before its orders there are checked against
+     them (see `sold` in build): with fewer, one odd day could pass for the price. */
+  const SOLD_DAYS = 3;
 
   /* ---------- prices the player's own Data Client captured (Windows app) ----------
      The Windows app sends what its Albion Data Client captures within a second of the player opening a market in game
@@ -201,11 +204,42 @@ AB.market = (() => {
       const a = ageH(side === "sell" ? r.sellDate : r.buyDate);
       return { price, ageH: a, fresh: fresh(a), src: r.src, city, id, side };
     }
-    /* Cheapest place to buy among cities (fresher listings preferred when prices are close). */
+    /* ---------- the sale check ----------
+       The price server reports the best buy order and the cheapest sell order, whoever placed them and whether or not
+       anyone trades at them. Some are set to catch a careless player: a buy order far under the price, waiting for
+       someone who sells in a hurry, or a sell order far over it, waiting for someone who buys in one. Others were
+       filled or cancelled after a player last saw them. So every order a play rests on is checked against what the
+       item actually sold for in that market (its daily average sales): the median of the last 7 days, and the
+       calibrated range that held 80% of days' prices in the out-of-sample test, for today. */
+    /* What sold: { S: the 7-day median, lo and hi: the 80% range for today }, or null with fewer than SOLD_DAYS days
+       of sales in the last 14, too few to check an order against. */
+    function sold(id, city) {
+      const st = stat(id, city);
+      if (!st.pred || (st.n || 0) < SOLD_DAYS) return null;
+      const r = conf.range(st, h0);
+      return { S: st.pred, lo: r.lo, hi: r.hi };
+    }
+    /* An order checked against what sold. `use` says which way the price works for you: "pay" for a price you pay
+       (a sell order you buy from, or your own buy order), "get" for a price you get (a buy order you sell into, or your
+       own sell order); `step` moves it off the order first (your buy order 1 silver over the best one, your sell
+       order 1 under the cheapest). A price past the range on the side that flatters the play, paying less than the
+       item sold for or getting more, can't be counted on, so it moves to that edge of the range. The order's own
+       price stays as `raw`; `off` says where it was (-1 under the range, 1 over it, 0 counted as it is). Edges are
+       whole silver, rounded the way that costs you (up for a price you pay, down for one you get). */
+    function checked(l, use, step = 0) {
+      if (!l) return null;
+      const s = sold(l.id, l.city), p = l.price + step;
+      const out = { ...l, price: p, raw: l.price, sale: s, off: 0 };
+      if (s && use === "pay" && p < s.lo) Object.assign(out, { price: Math.ceil(s.lo), off: -1 });
+      if (s && use === "get" && p > s.hi) Object.assign(out, { price: Math.floor(s.hi), off: 1 });
+      return out;
+    }
+    /* Cheapest place to buy among cities (fresher listings preferred when prices are close), by checked price: a sell
+       order far under what the item sells for is most likely gone. */
     function cheapest(id, cities = cat.CITIES, maxAgeH = live ? 72 : 1e9) {
       let best = null;
       for (const c of cities) {
-        const l = listing(id, c, "sell");
+        const l = checked(listing(id, c, "sell"), "pay");
         if (!l || (l.ageH != null && l.ageH > maxAgeH)) continue;
         const eff = l.price * (1 + 0.15 * (1 - l.fresh));
         if (!best || eff < best.eff) best = { ...l, eff };
@@ -225,7 +259,7 @@ AB.market = (() => {
     const medianAgeH = ages.length ? ages[Math.floor(ages.length / 2)] : null;
     const model = {
       mode: api.mode, why: api.why, live, seq: ++builds, now, checkedAt, capSeq, asOf, h0, U, P, hist, counts, medianAgeH,
-      snapshot: info, stat, listing, cheapest, typical, series, fresh, ageH, rows,
+      snapshot: info, stat, listing, sold, checked, cheapest, typical, series, fresh, ageH, rows,
     };
     statMemos.set(model, memo);
     return model;
@@ -244,8 +278,25 @@ AB.market = (() => {
     });
   }
 
+  /* The sale check over the whole order book (for the Trust page): by market, how many best buy orders sit under the
+     range the item sold in there and how many cheapest sell orders over it, among the items with enough sales to
+     tell. */
+  function saleCheckByCity(m = AB.state ? AB.state.M : M) {
+    if (!m) return [];
+    return cat.MARKETS.map((c) => {
+      const n = { city: c, buy: 0, low: 0, sell: 0, high: 0 };
+      for (const id of Object.keys(m.P)) {
+        const r = m.P[id][c], s = r && m.sold(id, c);
+        if (!s) continue;
+        if (r.buy) { n.buy++; if (r.buy < s.lo) n.low++; }
+        if (r.sell) { n.sell++; if (r.sell > s.hi) n.high++; }
+      }
+      return n;
+    });
+  }
+
   return {
-    load, update, extend, capture, hasCaptures, withCaptures, universe, freshnessByCity,
+    load, update, extend, capture, hasCaptures, withCaptures, universe, freshnessByCity, saleCheckByCity, SOLD_DAYS,
     get data() { return M; },
     on: (e, fn) => ev.on(e, fn),
     /* a new server or data source: its next load starts over (the Windows app hands the captures over again then) */

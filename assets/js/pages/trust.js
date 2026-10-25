@@ -21,7 +21,7 @@ AB.pages.trust = {
       fresh: "How old the prices are. Live listings lose half their weight every 18 hours; snapshot days every 3 days.",
       liquidity: `How much sells a day where you sell (14-day median). Five a day scores ${conf.F.liquidity(5).toFixed(2)}, twenty ${conf.F.liquidity(20).toFixed(2)}.`,
       history: "How many of the last 14 days had sales. Fewer than 7 also means the range can't be calibrated and falls back to a wide one.",
-      agree: `Whether the listing matches what actually sold over the last week. A listing 15% above it scores ${conf.F.agree(1.15, 1).toFixed(2)}, 15% below ${conf.F.agree(0.85, 1).toFixed(2)}.`,
+      agree: `Whether the listing matches what actually sold over the last week. A listing 15% above it scores ${conf.F.agree(1.15, 1).toFixed(2)}, 15% below ${conf.F.agree(0.85, 1).toFixed(2)}. An order outside the range the item sells in also costs the play its own price: the plan prices it from sales (see "Orders that don't match sales"). Order flips score how far either order sits outside that range.`,
       odds: "The share of 400 simulated outcomes that made money, drawing every price from its calibrated range.",
       evidence: `What the backtest says about this kind of play: the chance such gaps lasted a day, the forge win rate, or the rebound rate. Plays with no backtest get ${AB.scan.NO_TEST} (order flips ${AB.scan.NO_TEST_FLIP}, because whether your orders fill is a guess).`,
     };
@@ -31,6 +31,9 @@ AB.pages.trust = {
       const n = m.rows.filter((r) => r.src === "client").length;
       return n ? ` ${int(n)} of the prices came from your own Data Client.` : "";
     };
+
+    /* the sale check over the whole book, by market (live order books only: the snapshot has no orders) */
+    const sc = M?.live ? AB.market.saleCheckByCity(M).filter((c) => c.buy || c.sell) : [];
 
     root.innerHTML = `
       ${kit.head(H)}
@@ -43,8 +46,11 @@ AB.pages.trust = {
         ${ui.card({ span: 6, title: "How the confidence score works", sub: "A weighted geometric mean of six checks, each from 0 to 1. One weak check pulls the whole score down, which is the point: a play is only as trustworthy as its weakest link.", body: `<div class="weights">${Object.entries(W).map(([k, w]) => `<div class="factor"><span class="f-name">${esc(FN[k])}</span>${ui.meter(w / 0.2, "neutral", `Weight ${Math.round(w * 100)}%`)}<span class="f-val">${Math.round(w * 100)}%</span><span class="factor-note">${esc(defs[k])}</span></div>`).join("")}</div><hr>${ui.tierLegend()}` })}
         ${R ? ui.chartCard({ id: "t-dist", span: 6, title: "Today's plays by confidence", sub: `${int(R.opps.length)} plays, grouped by score.`, height: 240 }) : ""}
         ${ui.chartCard({ id: "t-fresh", span: 6, title: "How fresh the prices are", sub: M ? (M.live ? `Median age of the listings the app loaded, by market. Prices checked ${esc(AB.clock.local(M.checkedAt))}${AB.store.get("autoReload") ? ", and they reload by themselves while the app is open" : ""}.${mine(M)}` : `Median age of the prices in use, by market. The saved snapshot ends ${esc(dateFull(M.asOf))}, ${esc(ageText(M.now - M.asOf))} ago, and quiet items last sold before that.`) : "Loading…", height: 240 })}
+        ${sc.length ? ui.chartCard({ id: "t-bait", span: 12, title: "Orders that don't match sales", sub: "By market: the share of best buy orders below the range the item sells in, and of cheapest sell orders above it, for items with at least three days of sales in the last two weeks. Orders like these mostly wait for someone trading in a hurry. No play counts on one at its own price: each is priced from what the item sold for instead.", height: 300 })
+          : ui.card({ span: 12, title: "Orders that don't match sales", body: ui.empty(M?.live ? "No market has enough sales yet to check its orders against." : "This needs live prices: the saved snapshot has what sold each day, not the orders on the book. With live prices, every order a play rests on is checked against what the item sold for, and this chart shows how many orders sit outside it.") })}
         ${ui.card({ span: 12, title: "What the app can't know", body: `<ul class="know">
           <li>How many items sit behind a listing. The price server reports the cheapest sell order and the best buy order, not their size, so batch sizes come from how much sells a day.</li>
+          <li>The orders behind the best one. When the best buy order or the cheapest sell order is out of line with sales, the app knows it isn't a price you can trade at, but not which order is. It plans at the edge of what the item sells for and says so.</li>
           <li>Who else is chasing the same gap. The planner assumes you keep only part of each edge; the backtest odds already include gaps closing.</li>
           <li>Red-zone danger. The odds cover prices, not ganks. A red-zone tag means the road can cost you the load.</li>
           <li>Quality. Prices are for normal quality; better quality sells higher at the Black Market.</li>
@@ -113,6 +119,21 @@ AB.pages.trust = {
         series: [{ name: "Median age", color: "s1", values: fr.map((f) => f.p50) }],
         fmt: (v) => (v <= 0 ? "0" : ageText(v * 36e5)), notes: fr.map((f) => `${int(f.n)} prices. ${pct(f.share6h)} under 6 hours old.`),
       }, { table: { cols: ["Market", { label: "Median age", r: true }, { label: "Under 6 h", r: true }, { label: "Prices", r: true }], rows: fr.map((f) => [f.city, ageText(f.p50 * 36e5), pct(f.share6h), int(f.n)]) } });
+    }
+    if (sc.length) {
+      const share = (a, b) => (b ? a / b : 0);
+      ui.plot("t-bait", "bars", {
+        categories: sc.map((c) => c.city), horizontal: true, height: 300,
+        series: [
+          { name: "Buy orders below what sells", color: "s1", values: sc.map((c) => share(c.low, c.buy)) },
+          { name: "Sell orders above what sells", color: "s2", values: sc.map((c) => share(c.high, c.sell)) },
+        ],
+        fmt: (v) => pct(v), tipFmt: (v) => pct(v, 1),
+        notes: sc.map((c) => `${int(c.low)} of ${int(c.buy)} buy orders below what sells${c.sell ? `; ${int(c.high)} of ${int(c.sell)} sell orders above it` : " (the Black Market has buy orders only)"}.`),
+      }, {
+        legend: [{ name: "Buy orders below what sells", color: "s1" }, { name: "Sell orders above what sells", color: "s2" }],
+        table: { cols: ["Market", { label: "Buy orders below", r: true }, { label: "Of", r: true }, { label: "Sell orders above", r: true }, { label: "Of", r: true }], rows: sc.map((c) => [c.city, pct(share(c.low, c.buy), 1), int(c.buy), c.sell ? pct(share(c.high, c.sell), 1) : "—", int(c.sell)]) },
+      });
     }
     /* the status pill links here (?s=data): scroll to the freshness chart once per visit, not on every redraw */
     if (q.s === "data" && R && AB.pages.trust.scrolled !== visit) { AB.pages.trust.scrolled = visit; setTimeout(() => document.getElementById("t-fresh")?.scrollIntoView({ behavior: "smooth", block: "center" }), 60); }

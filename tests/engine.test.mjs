@@ -57,6 +57,28 @@ test("every play is internally consistent", () => {
   for (let i = 1; i < R.opps.length; i++) assert.ok(R.opps[i - 1].rank >= R.opps[i].rank, "sorted by rank");
 });
 
+test("in the snapshot, a last day out of line with what sells is planned from the sale range, and says it was one odd day", () => {
+  let moved = 0;
+  for (const o of R.opps) {
+    const off = o.legs.filter((lg) => lg.l?.off);
+    assert.equal(o.checks.length, off.length, o.key);
+    if (o.kind === "dip") { assert.equal(off.length, 0, "a panic buy buys under the price on purpose"); continue; }
+    for (const lg of o.legs) if (lg.l) assert.ok("sale" in lg.l, `${o.key}: ${lg.label} was checked`);
+    for (const lg of off) {
+      const s = M.sold(lg.id, lg.city);
+      assert.equal(lg.l.off, lg.role === "sell" ? 1 : -1, `${o.key}: moved only the way that flattered the play`);
+      assert.equal(lg.l.price, lg.l.off < 0 ? Math.ceil(s.lo) : Math.floor(s.hi), o.key);
+      assert.equal(lg.l.raw, M.listing(lg.id, lg.city, lg.l.side).price, o.key);
+      assert.deepEqual([lg.mode, lg.point], ["model", lg.l.price], `${o.key}: priced from sales in the plan and the simulation`);
+    }
+    moved += off.length;
+  }
+  assert.ok(moved > 20, `${moved} prices moved`);
+  for (const o of R.opps.filter((x) => x.checks.length)) {
+    for (const c of o.checks) assert.match(c, /^In the saved snapshot, the last day's average sale for .+ is (below|above) the range it (sells in|has been bought at there) \(.+ to .+; about .+ on a typical day\): one odd day isn't a price to count on\. Planned at .+\.$/);
+  }
+});
+
 test("batch sizes respect every limit, including 35% of capital per play", () => {
   const capital = store.get("capital");
   for (const o of R.opps) {

@@ -39,7 +39,7 @@ AB.kit = (() => {
   function oppRow(o, sc) {
     return `<div class="o-row" role="button" tabindex="0" data-opp="${esc(o.key)}" aria-label="${esc(o.title)}">
       <span class="o-n">${o.n}</span>
-      <div class="o-main c-main">${ic(o.item)}<div style="min-width:0"><div class="o-title">${esc(o.title)}</div><div class="o-tags">${kindTag(o.kind)}${zoneTag(o.zone)}<span class="small muted">${int(o.qty)} units · limited by ${LIMIT[o.limit] || o.limit}</span></div></div></div>
+      <div class="o-main c-main">${ic(o.item)}<div style="min-width:0"><div class="o-title">${esc(o.title)}</div><div class="o-tags">${kindTag(o.kind)}${zoneTag(o.zone)}<span class="small muted">${int(o.qty)} units · limited by ${LIMIT[o.limit] || o.limit}${o.checks?.length ? ` · ${o.checks.length === 1 ? "a price" : `${o.checks.length} prices`} out of line with sales` : ""}</span></div></div></div>
       <div class="o-profit c-profit"><b>${esc(silver(o.total.p50, { sign: true }))}</b><span class="rb-wrap">${ui.rangeBar(o.total.p10, o.total.p50, o.total.p90, { min: sc.min, max: sc.max, w: 104 })}<span>${esc(silver(o.total.p10))} to ${esc(silver(o.total.p90))}</span></span></div>
       <div class="r num c-hour">${esc(silver(o.perHour))}<div class="small muted">an hour</div></div>
       <div class="r num c-odds" title="Chance it makes money">${pct(o.mc.pWin)}</div>
@@ -134,18 +134,23 @@ AB.kit = (() => {
       ui.kpi({ label: "Chance it pays", value: pct(o.mc.pWin), range: o.odds ? `Gap lasts a day: ${pct(o.odds.p)}` : "from the simulation" }),
       ui.kpi({ label: "Capital", value: esc(silver(o.capital)), range: `limited by ${esc(LIMIT[o.limit] || o.limit)}` }),
     ].join("");
+    /* each price: what the plan uses, the order on the book behind it when the plan doesn't use that order as it is
+       (your own orders in a flip, and orders the sale check found out of line with sales), and its calibrated range */
     const legRows = o.legs.map((lg) => {
-      const st = lg.st;
+      const st = lg.st, l = lg.l;
       const r80 = st?.pred ? conf.range(st, lg.h || M.h0) : null;
-      const now = lg.fixed != null ? `${silver(lg.fixed)} (your order)` : lg.l ? `${silver(lg.l.price)} · ${M.live ? aged(lg.l.ageH == null ? null : lg.l.ageH * 36e5) : "last snapshot day"}` : lg.custom ? `${silver(lg.point)} expected` : "no listing";
-      return `<div class="leg"><div class="l-what"><b>${esc(lg.label || "")}</b>${lg.id ? ` · ${esc(cat.label(lg.id))}` : ""}${lg.city ? ` · ${esc(lg.city)}` : ""}${lg.n ? ` · ×${int(lg.n)}` : ""}</div><div class="l-val">${esc(now)}<small>${r80 ? `80% range when you act: ${esc(silver(r80.lo))} – ${esc(silver(r80.hi))}` : lg.custom ? "drawn from the backtested rebound" : "no sales history to calibrate"}</small></div></div>`;
+      const age = l ? (M.live ? aged(l.ageH == null ? null : l.ageH * 36e5) : "last snapshot day") : "";
+      const now = lg.own ? `${silver(lg.fixed ?? l.price)} (your order)` : lg.fixed != null ? `${silver(lg.fixed)} (your order)` : l ? (l.off ? `${silver(l.price)} (from sales)` : `${silver(l.price)} · ${age}`) : lg.custom ? `${silver(lg.point)} expected` : "no listing";
+      const what = l?.src === "snapshot" ? "Last day's average sale" : l?.side === "buy" ? (lg.city === cat.BM ? "Buy order" : "Best buy order") : "Cheapest sell order";
+      const book = l && (lg.own || l.off) ? `<small${l.off ? ' class="l-off"' : ""}>${what}: ${esc(silver(l.raw))}${l.src === "snapshot" ? "" : ` · ${esc(age)}`}${l.off ? `, ${l.off < 0 ? "below" : "above"} the range it sells in` : ""}</small>` : "";
+      return `<div class="leg"><div class="l-what"><b>${esc(lg.label || "")}</b>${lg.id ? ` · ${esc(cat.label(lg.id))}` : ""}${lg.city ? ` · ${esc(lg.city)}` : ""}${lg.n ? ` · ×${int(lg.n)}` : ""}</div><div class="l-val">${esc(now)}${book}<small>${r80 ? `80% range when you act: ${esc(silver(r80.lo))} – ${esc(silver(r80.hi))}` : lg.custom ? "drawn from the backtested rebound" : "no sales history to calibrate"}</small></div></div>`;
     }).join("");
     const html = `
       <div class="d-kpis">${kp}</div>
       ${ui.card({ title: "How sure is this?", sub: "Six checks, blended into one score. The profit range above is calibrated separately.", body: `<div class="verdict">${gauge(o.score)}<div class="verdict-text">${verdict(o)}</div></div>${ui.factors(o.factorList)}`, foot: `<a href="#/trust">How the score and the ranges are built</a>` })}
       ${ui.chartCard({ id: "d-hist", title: "What could happen", sub: `2,000 simulated runs of this batch. Bars left of zero lose silver.`, height: 200 })}
       ${ui.card({ title: "Step by step", body: `<ol class="steps">${o.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` })}
-      ${ui.card({ title: "What each price rests on", body: `<div class="legs">${legRows}</div>` })}
+      ${ui.card({ title: "What each price rests on", body: `<div class="legs">${legRows}</div>${o.checks?.length ? `<div class="callout sale-check">${icon("alert")}<div><b>Checked against what sold.</b> ${o.checks.map(esc).join(" ")}</div></div>` : ""}` })}
       ${chartLegs.map((lg, i) => ui.chartCard({ id: `d-leg${i}`, title: `${cat.label(lg.id)} in ${lg.city}`, sub: `${lg.role !== "sell" ? "Where you buy" : both ? "Where you buy and sell" : "Where you sell"}: four weeks of daily sales and the calibrated range for the next week.`, height: 220 })).join("")}
       ${evidenceCard(o)}
       <div class="row"><button class="btn primary" type="button" data-log>${icon("plus")}Log this trade</button><a class="btn" href="#/markets/${encodeURIComponent(o.item)}">${icon("chart")}Open ${esc(cat.shortName(o.item))} in Markets</a></div>
@@ -157,7 +162,8 @@ AB.kit = (() => {
       onMount: (body) => {
         plotHist("d-hist", xs);
         chartLegs.forEach((lg, i) => {
-          const ps = priceSpec(M, lg.id, lg.city, { listing: lg.l && lg.mode !== "model" ? lg.l : null, h: lg.h || M.h0 });
+          /* the order on the book, at its own price, even when the plan priced it from sales (it shows outside the range) */
+          const ps = priceSpec(M, lg.id, lg.city, { listing: lg.l ? { ...lg.l, price: lg.l.raw ?? lg.l.price } : null, h: lg.h || M.h0 });
           ui.plot(`d-leg${i}`, "line", ps.spec, { legend: ps.legend, table: ps.table });
         });
         plotEvidence(o);

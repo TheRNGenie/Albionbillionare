@@ -160,6 +160,9 @@ test("the score's checks fall the right way", () => {
   assert.equal(F.agree(100, 100), 1);
   assert.ok(F.agree(130, 100) < F.agree(110, 100));
   assert.ok(Math.abs(F.agree(110, 100) - F.agree(100, 110)) < 1e-12, "above and below count the same");
+  /* an order against the range the item sells in: full marks inside it, then the same fall-off as a listing */
+  assert.ok(F.inRange(90, 90, 110) === 1 && F.inRange(110, 90, 110) === 1 && F.inRange(100, 90, 110) === 1);
+  assert.ok(Math.abs(F.inRange(99, 110, 130) - F.agree(99, 110)) < 1e-12 && Math.abs(F.inRange(143, 110, 130) - F.agree(143, 130)) < 1e-12);
 });
 
 test("simulate: ordered quantiles, a fair coin wins half the time, same seed same answer", () => {
