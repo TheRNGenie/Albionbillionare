@@ -1,9 +1,11 @@
 {
-  "name": "albion-billionaire",
-  "version": "1.0.0",
+  "name": "albion-billionaire-v2",
+  "version": "2.0.0",
   "private": true,
-  "description": "Albion Billionaire: a year-long plan to 1 billion silver, as a web app, an Android app and a Windows app.",
+  "description": "Albion Billionaire v2: every money-making play in Albion Online, scored for profit and for how far to trust it. A web app, an Android app and a Windows app.",
   "scripts": {
+    "test": "node --test \"tests/*.test.mjs\"",
+    "lint": "npx --yes eslint@10.1.0 .",
     "build:web": "node tools/build-web.mjs",
     "android:sync": "npm run build:web && npx cap sync android",
     "desktop": "npm run build:web && electron .",
@@ -13,20 +15,21 @@
     "@capacitor/android": "^8.0.0",
     "@capacitor/core": "^8.0.0",
     "@capacitor/filesystem": "^8.0.0",
-    "@capacitor/local-notifications": "^8.0.0",
+    "@capacitor/local-notifications": "^8.3.1",
     "@capacitor/share": "^8.0.0"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
     "@capacitor/cli": "^8.0.0",
     "electron": "^44.8.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "jsdom": "29.1.1"
   },
   "main": "desktop/main.js",
   "author": "TheRNGenie",
   "build": {
-    "appId": "com.therngenie.albionbillionaire",
-    "productName": "Albion Billionaire",
+    "appId": "com.therngenie.albionbillionaire.v2",
+    "productName": "Albion Billionaire v2",
     "files": [
       "desktop/**",
       "www/**",
@@ -45,10 +48,10 @@
       "icon": "desktop/icon.png"
     },
     "portable": {
-      "artifactName": "Albion-Billionaire-portable.exe"
+      "artifactName": "Albion-Billionaire-v2-portable.exe"
     },
     "nsis": {
-      "artifactName": "Albion-Billionaire-Setup.exe",
+      "artifactName": "Albion-Billionaire-v2-Setup.exe",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true
