@@ -109,6 +109,23 @@ test("alerts and timers keep only what they can use, and Reset settings keeps bo
   assert.equal(copy.settings.timers.focus, 30000);
 });
 
+test("Crafting keeps a real line, a tier from 4 to 8, a budget and fee in range, and an item only by its board id", (t) => {
+  t.after(restore);
+  const loop = { noCap: false, mount: "ox8", mammoth: false, expand: false };
+  assert.deepEqual(store.get("crafting"), { line: "CRAFT_SWORDS", item: "", top: 8, budget: 5e6, focus: true, fee: 0, ...loop }, "Sword Crafter's best mix, 5M of materials a day");
+  assert.equal(store.set("crafting", { line: "CRAFT_BAG", item: "CRAFT_BAG_INSIGHT", top: 6, budget: 2.5e6, focus: false, fee: 120 }), true);
+  assert.deepEqual(store.get("crafting"), { line: "CRAFT_BAG", item: "CRAFT_BAG_INSIGHT", top: 6, budget: 2.5e6, focus: false, fee: 120, ...loop });
+  /* out of range or the wrong kind: clamped, or back to the default */
+  assert.equal(store.set("crafting", { line: "CRAFT_BAG", item: '"><img src=x>', top: "5", budget: -1, focus: "no", fee: 5000 }), true);
+  assert.deepEqual(store.get("crafting"), { line: "CRAFT_BAG", item: "", top: 8, budget: 0, focus: true, fee: 1000, ...loop });
+  assert.equal(store.set("crafting", { line: "CRAFT_BAG", top: 3, budget: 1e15, fee: "cheap", noCap: true, mount: "bear8", mammoth: true, expand: "true" }), true);
+  assert.deepEqual(store.get("crafting"), { line: "CRAFT_BAG", item: "", top: 8, budget: 1e12, focus: true, fee: 0, noCap: true, mount: "bear8", mammoth: true, expand: false });
+  for (const line of ["craft_bag", "CRAFT_<b>", "", 7, null]) assert.equal(store.set("crafting", { line }), false, String(line));
+  assert.equal(store.set("crafting", "CRAFT_BAG"), false);
+  store.reset();
+  assert.equal(store.get("crafting").line, "CRAFT_SWORDS", "the settings went back");
+});
+
 test("Cost to Max keeps a real board node, days and fee in range, and levels from 0 to 100; Reset keeps the levels", (t) => {
   t.after(restore);
   /* crafting opens unless refining was chosen; the refining target falls back to Ore Smelter */

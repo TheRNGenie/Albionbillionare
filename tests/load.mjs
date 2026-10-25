@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-const ENGINE = ["core/util.js", "core/stats.js", "core/store.js", "core/clock.js", "core/catalog.js", "core/api.js", "core/confidence.js", "core/notify.js", "engine/market.js", "engine/scanners.js", "engine/spec.js", "engine/refine.js", "engine/loop.js", "engine/sim.js", "engine/alerts.js"];
+const ENGINE = ["core/util.js", "core/stats.js", "core/store.js", "core/clock.js", "core/catalog.js", "core/api.js", "core/confidence.js", "core/notify.js", "engine/market.js", "engine/scanners.js", "engine/spec.js", "engine/refine.js", "engine/loop.js", "engine/crafting.js", "engine/sim.js", "engine/alerts.js"];
 
 let loaded = null;
 export function loadAB({ net = null } = {}) {

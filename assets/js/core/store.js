@@ -23,12 +23,15 @@ AB.store = (() => {
     risk: "balanced",
     alerts: [], // price alerts (see engine/alerts.js)
     timers: { planted: null, laborers: null, focus: null, focusAt: null, remind: { harvest: true, laborers: true, focus: true, reset: false } },
-    /* Cost to Max: the target node, days to take, focus and journals on or off, the station's fee per 100 nutrition,
-       the learning points to spend and the safe daily sell limit switched off (see engine/spec.js); the daily loop's
-       pack mount, the Transport Mammoth and Expand this loop (see engine/loop.js) */
     /* Cost to Max: the last crafting node and refining target planned (a line, all five tiers, or one tier's node), which
-       of the two is open, and the route's and the daily loop's settings */
+       of the two is open, the days to take, focus and journals on or off, the station's fee per 100 nutrition, the
+       learning points to spend and the safe daily sell limit switched off (see engine/spec.js); the daily loop's pack
+       mount, the Transport Mammoth and Expand this loop (see engine/loop.js) */
     costMax: { mode: "craft", node: "CRAFT_SWORDS_CLAYMORE", refine: "CRAFT_REFINE_ORE", days: 90, focus: true, journals: true, fee: 0, lp: 0, noCap: false, mount: "ox8", mammoth: false, expand: false },
+    /* Crafting: the line and item last planned (no item: the line's best mix), the highest tier the player crafts, the
+       materials budget a day, focus on or off, the station fee and the safe daily sell limit switched off (see
+       engine/crafting.js); the daily loop's pack mount, Transport Mammoth and Expand this loop */
+    crafting: { line: "CRAFT_SWORDS", item: "", top: 8, budget: 5e6, focus: true, fee: 0, noCap: false, mount: "ox8", mammoth: false, expand: false },
     specLevels: {}, // the player's Destiny Board crafting and refining levels, {nodeId: 0-100}
   };
   /* Kept by "Reset settings": they're the player's own lists, not preferences. */
@@ -93,6 +96,10 @@ AB.store = (() => {
       mode: MODE(v.mode) ?? "craft", node: v.node, refine: NODE.test(v.refine) ? v.refine : DEFAULTS.costMax.refine, days: Math.round(clampTo(1, 3650)(v.days) ?? 90), focus: v.focus !== false, journals: v.journals !== false,
       fee: clampTo(0, 1000)(v.fee) ?? 0, lp: Math.round(clampTo(0, 1e6)(v.lp) ?? 0),
       noCap: v.noCap === true, mount: MOUNT(v.mount) ?? "ox8", mammoth: v.mammoth === true, expand: v.expand === true,
+    } : undefined),
+    crafting: (v) => (obj(v) && NODE.test(v.line) ? {
+      line: v.line, item: NODE.test(v.item) ? v.item : "", top: oneOf(4, 5, 6, 7, 8)(v.top) ?? 8, budget: clampTo(0, 1e12)(v.budget) ?? 5e6,
+      focus: v.focus !== false, fee: clampTo(0, 1000)(v.fee) ?? 0, noCap: v.noCap === true, mount: MOUNT(v.mount) ?? "ox8", mammoth: v.mammoth === true, expand: v.expand === true,
     } : undefined),
     specLevels: (v) => (obj(v) ? Object.fromEntries(Object.entries(v).filter(([k, x]) => NODE.test(k) && level(x) !== undefined).slice(0, 400).map(([k, x]) => [k, Math.floor(level(x))])) : undefined),
   };

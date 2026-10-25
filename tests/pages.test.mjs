@@ -1036,3 +1036,168 @@ test("a refining stage's day is a loop from the bonus city, with a stage for eac
   assert.deepEqual(app.errors, []);
   app.close();
 });
+
+/* ---------- Crafting ---------- */
+/* the page is done drawing once its last chart (every item in the line) is up, or it shows why it can't be */
+const crReady = (app) => until(() => app.$("#cr-items .chart svg") || app.$("#page .card .empty") || app.$("[data-cr-retry]"));
+/* the day's crafts: each row's item and tier */
+const dayRows = (app) => app.$$("#cr-day tbody tr:not(.cr-total) .it-name").map((n) => n.textContent.trim());
+const pick = (app, sel, value) => { const el = app.$(sel); el.value = value; el.dispatchEvent(new app.w.Event("change", { bubbles: true })); };
+/* the plan the page should show: the engine's, with the page's settings */
+function expected(AB, items) {
+  const { store, spec: S, crafting: C } = AB, cr = store.get("crafting");
+  const premium = store.get("premium");
+  const base = { line: cr.line, top: cr.top, budget: cr.budget, focusPerDay: premium && cr.focus ? store.get("focus") : 0, levels: store.get("specLevels"), premium, fee: cr.fee, share: cr.noCap ? 1 : S.SHARE, royal: !!store.get("safeOnly") };
+  const B = AB.craftKit.marketFor(cr.line, AB.state.M, () => {});
+  const ranked = C.rank(B, base);
+  return { ranked, best: C.money(ranked), plan: items && C.plan(B, { ...base, items, draws: 0 }) };
+}
+
+test("Crafting plans a line's best mix, and Show me the money plans the single item that earns the most", async () => {
+  const app = await boot({ hash: "#/crafting" });
+  await crReady(app);
+  const { $, $$, AB } = app;
+  assert.ok($$("#nav a").some((a) => a.textContent.includes("Crafting")));
+  assert.equal($("#cr-line").value, "CRAFT_SWORDS");
+  assert.equal($("#cr-item").value, "", "the best mix opens first");
+  assert.equal($$(".kpi").length, 4);
+  for (const id of ["cr-items", "cr-heat", "cr-weeks"]) assert.ok($(`#${id} .chart svg`), `${id} drew`);
+  const { ranked, best } = expected(AB);
+  const mix = AB.crafting.mixOf(ranked);
+  /* the list: each item with its day, best first, and the ones the snapshot can't price apart */
+  assert.deepEqual($$('#cr-item optgroup[label="One item"] option').map((o) => o.value), ranked.filter((r) => r.options).map((r) => r.id));
+  assert.match($(`#cr-item option[value="${best.id}"]`).textContent, new RegExp(`^${best.name} \\(about [\\d.]+[kM] a day\\)$`));
+  assert.ok($$('#cr-item optgroup[label="Not priced here"] option').some((o) => /Kingmaker/.test(o.textContent)));
+  assert.match($(".cr-money-note").textContent, new RegExp(`right now ${best.name}, about`));
+  /* the day is the mix's: the page's profit is the engine's */
+  const want = expected(AB, mix).plan;
+  assert.equal($(".kpi .k-value").textContent, AB.util.silver(want.profit));
+  assert.equal(dayRows(app).length, want.dayItems.length);
+  assert.equal($$("#cr-items .chart-table tbody tr").length, 1 + ranked.filter((r) => r.options).length, "the mix and every priced item");
+  /* Show me the money: the item that earns the most, its plan on screen, and what it earns */
+  app.click($("[data-money]"));
+  await until(() => app.w.location.hash === `#/crafting/${best.id}`);
+  await sleep(25);
+  await crReady(app);
+  await until(() => $("#toast")?.textContent);
+  assert.equal($("#cr-item").value, best.id);
+  assert.equal(AB.store.get("crafting").item, best.id, "remembered");
+  assert.match($("#toast").textContent, new RegExp(`Show me the money: ${best.name}, about ${AB.util.silver(best.profit).replace(".", "\\.")} a day, the most of any Sword Crafter item`));
+  assert.equal($("#cr-day h2").textContent, `The pick: ${best.name}`);
+  assert.ok(dayRows(app).every((n) => n.startsWith(AB.cat.shortName(expected(AB, [best.id]).plan.dayItems[0].id))), "only that item's tiers");
+  assert.equal($(".kpi .k-value").textContent, AB.util.silver(best.profit));
+  /* pressed again on the pick: no new plan, the same answer */
+  $("#toast").textContent = "";
+  const n = await app.renders("crafting", async () => { app.click($("[data-money]")); });
+  assert.equal(n, 0);
+  assert.match($("#toast").textContent, new RegExp(best.name));
+  /* back to the mix */
+  await app.go($("#cr-day .card-foot a").getAttribute("href"));
+  await crReady(app);
+  assert.equal($("#cr-item").value, "");
+  assert.equal(AB.store.get("crafting").item, "");
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("Crafting's lists, settings and loop: another line, one item, a budget that re-plans and a mount that only redraws the loop", async () => {
+  const app = await boot({ hash: "#/crafting" });
+  await crReady(app);
+  const { $, $$, AB } = app;
+  /* another line opens on its best mix; an item opens its own plan */
+  const other = AB.crafting.lines().find((l) => l.name === "Bag Tailor").id;
+  pick(app, "#cr-line", other);
+  await until(() => app.w.location.hash === `#/crafting/${other}`);
+  await sleep(25);
+  await crReady(app);
+  assert.deepEqual([$("#cr-line").value, $("#cr-item").value, AB.store.get("crafting").line], [other, "", other]);
+  await app.go("#/crafting/CRAFT_SWORDS");
+  await crReady(app);
+  pick(app, "#cr-item", "CRAFT_SWORDS_DUAL");
+  await until(() => app.w.location.hash === "#/crafting/CRAFT_SWORDS_DUAL");
+  await sleep(25);
+  await crReady(app);
+  assert.equal($("#cr-day h2").textContent, "The pick: Dual Swords");
+  /* the budget re-plans once; a bad one is put back */
+  let n = await app.renders("crafting", async () => { app.change($('input[data-k="budget"]'), 1e6); await crReady(app); });
+  assert.equal(n, 1);
+  assert.equal(AB.store.get("crafting").budget, 1e6);
+  assert.equal($(".kpi .k-value").textContent, AB.util.silver(expected(AB, ["CRAFT_SWORDS_DUAL"]).plan.profit));
+  for (const bad of [-5, ""]) {
+    app.change($('input[data-k="budget"]'), bad);
+    assert.equal($('input[data-k="budget"]').value, "1000000", `${JSON.stringify(bad)} isn't a budget`);
+  }
+  /* the highest tier */
+  app.click($('[data-seg="cr-top"] button[data-v="5"]'));
+  await sleep(25);
+  await crReady(app);
+  assert.equal(AB.store.get("crafting").top, 5);
+  assert.ok(dayRows(app).length && $$("#cr-day tbody tr:not(.cr-total) .tier").every((t) => +t.textContent[0] <= 5), "nothing above T5");
+  /* the mount, the Mammoth and Expand redraw only the loop */
+  n = await app.renders("crafting", async () => { pick(app, "#cm-mount", "bear8"); });
+  assert.equal(n, 0);
+  assert.equal(AB.store.get("crafting").mount, "bear8");
+  assert.match(loopText(app), /Saddled Direbear|over your mount/);
+  n = await app.renders("crafting", async () => { app.click($('#cm-loop input[data-k="mammoth"]')); });
+  assert.equal(n, 0);
+  assert.ok($("#cm-mount").disabled);
+  assert.match(loopText(app), /Filled for the Mammoth/);
+  /* the sell limit off says so; Royal cities only sells in them */
+  app.click($('#cr-form input[data-k="noCap"]'));
+  await sleep(25);
+  await crReady(app);
+  assert.match($$("#page .banner.warn").map((b) => b.textContent).join(" "), /The safe daily sell limit is off/);
+  app.click($('#cr-form input[data-k="royal"]'));
+  await sleep(25);
+  await crReady(app);
+  assert.equal(AB.store.get("safeOnly"), true);
+  const royal = AB.cat.ROYAL;
+  for (const cell of $$("#cr-day tbody tr:not(.cr-total) td.cm-sell")) for (const city of cell.textContent.split(" · ").map((s) => s.replace(/ \d+$/, ""))) assert.ok(royal.includes(city), city);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("Crafting says plainly when nothing pays or nothing can be priced, and an address it doesn't know can't break it", async () => {
+  const app = await boot({ hash: "#/crafting/CRAFT_SWORDS_AVALON" });
+  await crReady(app);
+  const { $, AB } = app;
+  assert.match($("#page .card .empty").textContent, /No Kingmaker tier can be priced from the saved snapshot/);
+  /* no budget: nothing pays, and Show me the money says so */
+  AB.store.set("crafting", { ...AB.store.get("crafting"), budget: 0 });
+  await app.go("#/crafting/CRAFT_SWORDS");
+  await crReady(app);
+  assert.match($("#page .card .empty").textContent, /No Sword Crafter item pays right now/);
+  assert.match($(".cr-money-note").textContent, /no money to show/);
+  const n = await app.renders("crafting", async () => { app.click($("[data-money]")); });
+  assert.equal(n, 0);
+  assert.match($("#toast").textContent, /No Sword Crafter item pays/);
+  /* an address it doesn't know opens the last line and item */
+  for (const h of ["#/crafting/CRAFT_NOT_A_NODE", "#/crafting/CRAFT_TOOL_TRACKING", `#/crafting/${encodeURIComponent('"><img id="x2" src=x>')}`]) {
+    await app.go(h);
+    await crReady(app);
+    assert.equal($("#cr-line").value, "CRAFT_SWORDS", h);
+  }
+  assert.equal($("#x2"), null);
+  /* a doctored backup can't put markup in */
+  const refused = AB.store.importAll(JSON.stringify({ app: "albion-billionaire-v2", settings: { crafting: { line: 'CRAFT_SWORDS"><img id="x3" src=x>', budget: 5e6 } } }));
+  assert.equal(refused, 1);
+  await app.go("#/crafting");
+  await crReady(app);
+  assert.equal($("#x3"), null);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});
+
+test("Crafting and Cost to Max share a line's prices: one load serves both pages", async () => {
+  const app = await boot();
+  const { AB } = app;
+  const extend = AB.market.extend;
+  let calls = 0;
+  AB.market.extend = (ids) => { calls++; return extend(ids); };
+  await app.go("#/crafting");
+  await crReady(app);
+  for (const h of ["#/costmax/CRAFT_SWORDS_CLAYMORE", "#/crafting/CRAFT_SWORDS_DUAL", "#/costmax/CRAFT_SWORDS"]) { await app.go(h); await (h.includes("costmax") ? cmReady(app) : crReady(app)); }
+  assert.equal(calls, 1);
+  assert.deepEqual(app.errors, []);
+  app.close();
+});

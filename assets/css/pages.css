@@ -292,3 +292,24 @@ details.cm-more .small { margin: 8px 0 0; line-height: 1.5; }
   .cm-steps td.r { white-space: nowrap; }
   .cm-steps td, .cm-steps th { padding-left: 6px; padding-right: 6px; }
 }
+
+/* ---------- crafting (shares the Cost to Max form, route table and daily loop styles above) ---------- */
+.cr-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto; gap: 14px; align-items: end; }
+.cr-row .select, .cr-row .input { width: 100%; }
+.cr-row2 { grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+.cr-money { white-space: nowrap; }
+.cr-money-note { margin: -6px 0 0; line-height: 1.5; }
+.cr-money-note b { color: var(--text-1); }
+.cr-opts { grid-template-columns: minmax(0, 1fr) auto; }
+.cr-opts .cm-checks { grid-template-columns: repeat(3, max-content); }
+.cm-steps tr.cr-total td { border-top: 1px solid var(--line-2); background: var(--surface-2); }
+.cr-after, .cr-sheet-intro { margin: 10px 0 0; line-height: 1.5; }
+.cr-sheet-intro { margin: 0 0 12px; }
+@media (max-width: 1180px) {
+  .cr-opts .cm-checks { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 680px) {
+  .cr-row, .cr-row2, .cr-opts { grid-template-columns: minmax(0, 1fr); }
+  .cr-money { width: 100%; justify-content: center; }
+  .cr-money-note { margin: 0; }
+}

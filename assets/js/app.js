@@ -14,6 +14,7 @@ AB.app = (() => {
     { id: "markets", label: "Markets", icon: "chart", mobile: true },
     { id: "planner", label: "Planner", icon: "target" },
     { id: "costmax", label: "Cost to Max", icon: "summit" },
+    { id: "crafting", label: "Crafting", icon: "anvil" },
     { id: "trust", label: "Trust", icon: "shield" },
     { id: "ledger", label: "Ledger", icon: "book" },
     { id: "alerts", label: "Alerts", icon: "bell" },

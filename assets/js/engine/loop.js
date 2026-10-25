@@ -362,5 +362,5 @@ AB.loop = (() => {
     return { k, tier: p.steps[k].tier, days: d.days, per: d.per, loop: L, base: E?.base || L, added: E?.added || [], full: E?.full ?? false, expanded: !!E, other, daysNow: daysAt(L.fame), daysBase: daysAt((E?.base || L).fame) };
   }
 
-  return { MOUNTS, MAMMOTH, FILL, REFINE_MIN, RING: cat.RING, OFF_RING, placeOf, dayOf, build, expand, stage, refining };
+  return { MOUNTS, MAMMOTH, FILL, REFINE_MIN, POOL, POOL_MAMMOTH, RING: cat.RING, OFF_RING, placeOf, dayOf, build, expand, stage, refining };
 })();
